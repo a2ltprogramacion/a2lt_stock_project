@@ -1,0 +1,258 @@
+{% extends "inventory/base.html" %}
+
+{% block title %}Administración de Artículos - A2LT Stock{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-slate-900 dark:text-white">Administración de Fichas de Artículos</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Crea, edita o elimina artículos de catálogo, recetas de combos y variables personalizadas.</p>
+        </div>
+        <button onclick="openProductForm('')"
+            class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-circle-plus"></i> Nuevo Artículo / Combo
+        </button>
+    </div>
+
+    <!-- ARTICULOS CRUD GRID -->
+    <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+        <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
+            <h3 class="font-bold text-slate-880 dark:text-slate-200 text-xs uppercase tracking-wider">
+                Listado General de Catálogo</h3>
+            <span class="text-xs text-slate-500 dark:text-slate-400">Registros totales: <strong
+                    class="text-slate-850 dark:text-slate-200 font-mono"
+                    id="art-count-lbl">{{ articulos.count }}</strong></span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead>
+                    <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                        <th class="py-3 px-2 font-semibold">SKU</th>
+                        <th class="py-3 px-2 font-semibold">Nombre del Artículo</th>
+                        <th class="py-3 px-2 font-semibold">Categoría</th>
+                        <th class="py-3 px-2 text-right font-semibold">Costo ($)</th>
+                        <th class="py-3 px-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                            Precio Divisa ($)</th>
+                        <th class="py-3 px-2 text-center font-semibold">Tipo</th>
+                        <th class="py-3 px-2 text-center font-semibold">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-slate-800 dark:text-slate-300">
+                    {% for a in articulos %}
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-850/30 transition-colors" id="row-{{ a.sku }}">
+                        <td class="py-3 px-2 font-bold">{{ a.sku }}</td>
+                        <td class="py-3 px-2 text-slate-900 dark:text-slate-100 font-semibold">{{ a.nombre }}</td>
+                        <td class="py-3 px-2 text-slate-500">{{ a.categoria }}</td>
+                        <td class="py-3 px-2 text-right">${{ a.costo|stringformat:".2f" }}</td>
+                        <td class="py-3 px-2 text-right font-bold text-emerald-600 dark:text-emerald-400">${{ a.precio_divisa|stringformat:".2f" }}</td>
+                        <td class="py-3 px-2 text-center">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold {% if a.tipo == 'COMBO' %}bg-indigo-100 dark:bg-indigo-950/40 text-indigo-750 dark:text-indigo-400{% else %}bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300{% endif %}">
+                                {{ a.tipo }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-2 text-center">
+                            <button onclick="openProductForm('{{ a.sku }}')" class="text-indigo-600 dark:text-indigo-400 hover:underline font-bold">Editar</button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="py-6 text-center text-slate-500">No hay artículos registrados en el catálogo.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: CREAR / EDITAR ARTÍCULO -->
+<div id="modal-product" class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-2xl w-full rounded-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
+        <div class="p-6 space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2" id="product-modal-title">
+                    <i class="fa-solid fa-circle-plus text-indigo-500"></i> Crear Artículo
+                </h3>
+                <button onclick="closeProductModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xl leading-none">&times;</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">SKU *</label>
+                    <input id="form-p-sku" type="text" placeholder="Ej. F012"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre *</label>
+                    <input id="form-p-nombre" type="text" placeholder="Ej. Ventilador Recargable 8"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-medium focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Categoría</label>
+                    <select id="form-p-categoria"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200">
+                        <option value="HOGAR">Hogar</option>
+                        <option value="HERRAMIENTAS">Herramientas</option>
+                        <option value="SOLARES">Solares</option>
+                        <option value="OTROS">Otros</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Tipo</label>
+                    <select id="form-p-tipo" onchange="toggleFormComboRecipe()"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200">
+                        <option value="FISICO">Físico</option>
+                        <option value="COMBO">Combo Virtual</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Costo (USD)</label>
+                    <input id="form-p-costo" type="number" step="0.0001" value="0.00"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Precio Divisa (USD)</label>
+                    <input id="form-p-precio" type="number" step="0.0001" value="0.00"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold focus:outline-none focus:border-indigo-500">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Descripción Breve</label>
+                    <input id="form-p-desc" type="text" placeholder="Ej. Descripción general del producto."
+                        class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                </div>
+
+                <!-- TEXT BLOCKS FOR MARKETING -->
+                <div class="md:col-span-2 border-t border-slate-200 dark:border-slate-750 pt-3 mt-1 space-y-3">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block tracking-wider">Estructuras de Redes Sociales (Marketing / Copias)</span>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Ficha Técnica Tradicional</label>
+                            <textarea id="form-p-ficha" rows="3"
+                                placeholder="• Marca: &#10;• Amperaje Max: "
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Mensaje de Cross-Selling</label>
+                            <textarea id="form-p-cross" rows="3"
+                                placeholder="🔧 Producto (SKU) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)&#10;✔️ Característica clave."
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Respuesta Rápida Completa (WhatsApp / Redes)</label>
+                        <textarea id="form-p-quick" rows="4"
+                            placeholder="Hola 👋&#10;Disponible Producto (SKU)&#10;Precio: $[PRECIO_USD] Divisas / $[PRECIO_BCV] BCV"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
+                        <p class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 leading-normal"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Usa las variables <strong>$[PRECIO_USD]</strong> y <strong>$[PRECIO_BCV]</strong> para que se reemplacen dinámicamente con las tasas cambiarias vigentes.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL BUTTONS -->
+        <div class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
+            <button onclick="closeProductModal()"
+                class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                Cerrar
+            </button>
+            <button onclick="saveProduct()"
+                class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
+                Guardar Registro
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── Modal Producto ──
+let allArticulos = {{ articulos_json|safe }};
+
+function openProductForm(sku) {
+    document.getElementById('modal-product').classList.remove('hidden');
+    if (sku) {
+        document.getElementById('product-modal-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-500"></i> Editar Artículo: ${sku}`;
+        const a = allArticulos.find(p => p.sku === sku);
+        if (a) {
+            document.getElementById('form-p-sku').value = a.sku;
+            document.getElementById('form-p-sku').disabled = true;
+            document.getElementById('form-p-nombre').value = a.nombre;
+            document.getElementById('form-p-categoria').value = a.categoria;
+            document.getElementById('form-p-tipo').value = a.tipo;
+            document.getElementById('form-p-costo').value = a.costo;
+            document.getElementById('form-p-precio').value = a.precio_divisa;
+            document.getElementById('form-p-desc').value = a.descripcion || '';
+            document.getElementById('form-p-ficha').value = a.ficha_tecnica || '';
+            document.getElementById('form-p-cross').value = a.social_cross || '';
+            document.getElementById('form-p-quick').value = a.social_quick || '';
+        }
+    } else {
+        document.getElementById('product-modal-title').innerHTML = `<i class="fa-solid fa-circle-plus text-indigo-500"></i> Crear Artículo`;
+        clearProductForm();
+    }
+}
+
+function closeProductModal() {
+    document.getElementById('modal-product').classList.add('hidden');
+}
+
+function clearProductForm() {
+    document.getElementById('form-p-sku').value = '';
+    document.getElementById('form-p-sku').disabled = false;
+    document.getElementById('form-p-nombre').value = '';
+    document.getElementById('form-p-categoria').value = 'HOGAR';
+    document.getElementById('form-p-tipo').value = 'FISICO';
+    document.getElementById('form-p-costo').value = '0.00';
+    document.getElementById('form-p-precio').value = '0.00';
+    document.getElementById('form-p-desc').value = '';
+    document.getElementById('form-p-ficha').value = '';
+    document.getElementById('form-p-cross').value = '';
+    document.getElementById('form-p-quick').value = '';
+}
+
+function toggleFormComboRecipe() {}
+
+function saveProduct() {
+    const sku = document.getElementById('form-p-sku').value.trim();
+    const nombre = document.getElementById('form-p-nombre').value.trim();
+
+    if (!sku || !nombre) {
+        alert('SKU y Nombre son obligatorios.');
+        return;
+    }
+
+    const data = {
+        sku: sku,
+        nombre: nombre,
+        categoria: document.getElementById('form-p-categoria').value,
+        tipo: document.getElementById('form-p-tipo').value,
+        costo: document.getElementById('form-p-costo').value,
+        precio_divisa: document.getElementById('form-p-precio').value,
+        descripcion: document.getElementById('form-p-desc').value,
+        ficha_tecnica: document.getElementById('form-p-ficha').value,
+        social_cross: document.getElementById('form-p-cross').value,
+        social_quick: document.getElementById('form-p-quick').value,
+    };
+
+    fetch('/articulos/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (resp.ok) {
+            closeProductModal();
+            location.reload();
+        } else {
+            alert('Error: ' + (resp.error || 'Desconocido'));
+        }
+    })
+    .catch(err => {
+        alert('Error de red: ' + err);
+    });
+}
+</script>
+{% endblock %}

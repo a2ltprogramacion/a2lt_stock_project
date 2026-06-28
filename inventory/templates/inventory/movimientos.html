@@ -1,0 +1,200 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section id="tab-movimientos" class="tab-content space-y-6"><!-- ROW 1: ASIENTO MANUAL REORGANIZADO -->
+                <div
+                    class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                    <h3
+                        class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-file-pen text-indigo-500"></i> Registro de Asiento Manual Kárdex
+                    </h3>
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 text-xs">
+
+                        <div class="md:col-span-4">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Producto
+                                / Artículo</label>
+                            <select id="kardex-product"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                <!-- Populated dynamically from JS -->
+                            </select>
+                        </div>
+                        <div class="md:col-span-3">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
+                                Destino/Origen</label>
+                            <select id="kardex-warehouse"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                {% for almacen in almacenes %}
+                                <option value="{{ almacen.id }}">{{ almacen.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="md:col-span-3">
+                            <!-- Naranja para Entradas (+), Rojo/Rosa para Salidas (-) -->
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Tipo
+                                Operación</label>
+                            <select id="kardex-type"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-bold">
+                                <option class="text-emerald-600 font-bold" value="ENTRADA">Entrada (+)</option>
+                                <option class="text-rose-600 font-bold" value="SALIDA">Salida (-)</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
+                            <input id="kardex-qty" type="number" min="1" value="5"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                        </div>
+
+                        <!-- MOTIVO EN LÍNEA INFERIOR (MULTILÍNEA DETALLADA) -->
+                        <div class="md:col-span-10 mt-1">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Motivo
+                                o Concepto Detallado (Obligatorio para Auditoría)</label>
+                            <textarea id="kardex-concept" rows="2"
+                                placeholder="Escriba de forma detallada y explícita el concepto del ajuste físico, compra o merma..."
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-medium"></textarea>
+                        </div>
+
+                        <div class="md:col-span-2 flex items-end">
+                            <button onclick="registerManualMovement()"
+                                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-md">
+                                <i class="fa-solid fa-floppy-disk"></i> Registrar Asiento
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HISTÓRICO CON FILTROS COMBINADOS -->
+                <div
+                    class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                    <div
+                        class="flex flex-wrap justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800 gap-4">
+                        <h3
+                            class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-clock-rotate-left text-indigo-500"></i> Histórico de Transacciones
+                            Auditables
+                        </h3>
+                        <span class="text-xs text-slate-500 dark:text-slate-400">Total movimientos: <strong
+                                id="kardex-count"
+                                class="text-slate-850 dark:text-slate-200 font-mono font-bold">{{ movimientos.count }}</strong></span>
+                    </div>
+
+                    <!-- BUSCADOR COMBINADO (KÁRDEX) -->
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-5 gap-3 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 text-xs">
+                        <div class="md:col-span-1">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Filtrar
+                                por SKU o Término</label>
+                            <input type="text" id="filter-kardex-term" onkeyup="filterKardex()"
+                                placeholder="Ej. F012..."
+                                value="{{ filtros.sku }}"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none">
+                        </div>
+                        <div class="md:col-span-1">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén</label>
+                            <select id="filter-kardex-warehouse" onchange="filterKardex()"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none font-semibold">
+                                <option value="all">Todos los Almacenes</option>
+                                {% for almacen in almacenes %}
+                                <option value="{{ almacen.id }}" {% if filtros.almacen_id == almacen.id|stringformat:"s" %}selected{% endif %}>{{ almacen.nombre }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="md:col-span-1.5">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Desde
+                                Fecha (Día A)</label>
+                            <input type="date" id="filter-kardex-date-from" onchange="filterKardex()"
+                                value="{{ filtros.fecha_desde }}"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none font-semibold">
+                        </div>
+                        <div class="md:col-span-1.5">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Hasta
+                                Fecha (Día B)</label>
+                            <input type="date" id="filter-kardex-date-to" onchange="filterKardex()"
+                                value="{{ filtros.fecha_hasta }}"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none font-semibold">
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="clearKardexFilters()"
+                                class="w-full bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs py-2 rounded-lg border border-slate-300 dark:border-slate-700 transition">
+                                <i class="fa-solid fa-filter-circle-xmark mr-1"></i> Limpiar Filtros
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead>
+                                <tr
+                                    class="text-slate-500 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                    <th class="py-3 px-2 font-semibold">Fecha/Hora</th>
+                                    <th class="py-3 px-2 font-semibold">Artículo (SKU)</th>
+                                    <th class="py-3 px-2 font-semibold">Almacén</th>
+                                    <th class="py-3 px-2 text-center font-semibold">Tipo</th>
+                                    <th class="py-3 px-2 text-right font-semibold">Cantidad</th>
+                                    <th class="py-3 px-2 font-semibold">Documento</th>
+                                    <th class="py-3 px-2 font-semibold">Concepto / Referencia</th>
+                                </tr>
+                            </thead>
+                            <tbody id="kardex-table-body"
+                                class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-slate-800 dark:text-slate-300">
+                                {% for mov in movimientos %}
+                                <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/30 transition">
+                                    <td class="py-3 px-2 text-slate-500 text-[10px]">{{ mov.fecha_hora|date:"Y-m-d H:i:s" }}</td>
+                                    <td class="py-3 px-2 font-bold">{{ mov.articulo.sku }}</td>
+                                    <td class="py-3 px-2 font-sans text-xs">{{ mov.almacen.nombre }}</td>
+                                    <td class="py-3 px-2 text-center">
+                                        <span class="inline-block px-2 py-0.5 rounded text-[10px] font-sans font-bold {% if mov.tipo == 'ENTRADA' %}bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20{% else %}bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20{% endif %}">
+                                            {{ mov.tipo }}
+                                        </span>
+                                    </td>
+                                    <td class="py-3 px-2 text-right font-bold {% if mov.tipo == 'ENTRADA' %}text-emerald-600 dark:text-emerald-400{% else %}text-rose-600 dark:text-rose-400{% endif %}">
+                                        {% if mov.tipo == 'ENTRADA' %}+{% else %}-{% endif %}{{ mov.cantidad }}
+                                    </td>
+                                    <td class="py-3 px-2 text-xs font-sans">
+                                        {% if mov.nota_entrega %}
+                                            <span class="inline-block px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 font-semibold">NE-{{ mov.nota_entrega.numero }}</span>
+                                        {% elif mov.documento_compra %}
+                                            <span class="inline-block px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">DC-{{ mov.documento_compra.pk }}{% if mov.documento_compra.numero_factura %} / {{ mov.documento_compra.numero_factura }}{% endif %}</span>
+                                        {% else %}
+                                            <span class="text-slate-400">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="py-3 px-2 text-xs font-sans text-slate-600 dark:text-slate-400">{{ mov.concepto }}</td>
+                                </tr>
+                                {% empty %}
+                                <tr><td colspan="7" class="py-8 text-center text-slate-500">No hay movimientos en el kárdex.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+<script>
+    function filterKardex() {
+        const term = document.getElementById('filter-kardex-term').value.trim();
+        const warehouse = document.getElementById('filter-kardex-warehouse').value;
+        const dateFrom = document.getElementById('filter-kardex-date-from').value;
+        const dateTo = document.getElementById('filter-kardex-date-to').value;
+
+        const params = new URLSearchParams();
+        if (term) params.set('sku', term);
+        if (warehouse && warehouse !== 'all') params.set('almacen_id', warehouse);
+        if (dateFrom) params.set('fecha_desde', dateFrom);
+        if (dateTo) params.set('fecha_hasta', dateTo);
+
+        const qs = params.toString();
+        window.location.href = `/movimientos/${qs ? '?' + qs : ''}`;
+    }
+
+    function clearKardexFilters() {
+        window.location.href = '/movimientos/';
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,3037 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A2LT Stock - Sistema de Control y Social Selling</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome para Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#1e293b',
+                            950: '#0b0f19',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* Custom scrollbar para simular UI nativa */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .dark ::-webkit-scrollbar-track {
+            background: #0b0f19;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6366f1;
+        }
+    </style>
+</head>
+
+<body
+    class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col overflow-x-hidden">
+
+    <!-- TOP BAR / HEADER -->
+    <header
+        class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 sticky top-0 z-40 shadow-sm transition-colors duration-300">
+        <div class="flex items-center gap-3">
+            <div
+                class="bg-indigo-600 text-white p-2.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/10">
+                <i class="fa-solid fa-boxes-stacked text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-base leading-none flex items-center gap-2">
+                    A2LT Stock <span
+                        class="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-bold">V1.0
+                        PRO</span>
+                </h1>
+                <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Control Cambiario, Inventarios & Social
+                    Selling</p>
+            </div>
+        </div>
+
+        <!-- INDICADORES EN TIEMPO REAL -->
+        <div
+            class="flex flex-wrap items-center gap-4 bg-slate-100 dark:bg-slate-950 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-850 text-xs transition-colors duration-300">
+            <!-- Tasa Oficial BCV: Verde para representar dinero real legal -->
+            <div class="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="font-semibold text-slate-500 dark:text-slate-400">Tasa Oficial (BCV):</span>
+                <span id="header-bcv-display"
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">60.00
+                    Bs</span>
+            </div>
+            <div class="w-[1px] h-4 bg-slate-300 dark:bg-slate-800 hidden md:block"></div>
+            <!-- Factor Cobertura: Azul para estabilidad de cobertura de costos -->
+            <div class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                <i class="fa-solid fa-shield-halved text-[10px]"></i>
+                <span class="font-semibold text-slate-500 dark:text-slate-400">F. Cobertura:</span>
+                <span id="header-factor-display"
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">1.40x</span>
+            </div>
+            <div class="w-[1px] h-4 bg-slate-300 dark:bg-slate-800 hidden md:block"></div>
+            <!-- Tasa Ajustada: Naranja para advertir que es la tasa con factor de protección aplicado -->
+            <div class="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+                <i class="fa-solid fa-calculator text-[10px]"></i>
+                <span class="font-semibold text-slate-500 dark:text-slate-400">Tasa Ajustada:</span>
+                <span id="header-adjusted-display"
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">84.00
+                    Bs</span>
+            </div>
+        </div>
+
+        <!-- CONTROLES ADICIONALES: SELECTOR DE TEMA -->
+        <div class="flex items-center gap-3">
+            <button onclick="toggleTheme()"
+                class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                title="Cambiar Tema">
+                <i id="theme-toggle-icon" class="fa-solid fa-moon"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTAINER -->
+    <div class="flex flex-1 overflow-hidden h-[calc(100vh-57px)]">
+
+        <!-- SIDEBAR NAVIGATION -->
+        <aside
+            class="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4 flex flex-col gap-1 shrink-0 overflow-y-auto transition-colors duration-300">
+            <span
+                class="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 px-3 mb-2 block tracking-wider">Módulos
+                de Operación</span>
+
+            <button onclick="switchTab('dashboard')" id="btn-tab-dashboard"
+                class="nav-btn active flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold">
+                <i class="fa-solid fa-chart-line text-base w-5 text-center text-indigo-500"></i> Dashboard General
+            </button>
+            <button onclick="switchTab('catalogo')" id="btn-tab-catalogo"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i class="fa-solid fa-tags text-base w-5 text-center text-slate-400 dark:text-slate-500"></i> Catálogo y
+                Redes
+            </button>
+            <button onclick="switchTab('ventas')" id="btn-tab-ventas"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i
+                    class="fa-solid fa-file-invoice-dollar text-base w-5 text-center text-slate-400 dark:text-slate-500"></i>
+                Notas de Entrega (Venta)
+            </button>
+            <button onclick="switchTab('articulos')" id="btn-tab-articulos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i class="fa-solid fa-folder-plus text-base w-5 text-center text-slate-400 dark:text-slate-500"></i>
+                Fichas / Artículos
+            </button>
+            <button onclick="switchTab('carga')" id="btn-tab-carga"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i class="fa-solid fa-file-excel text-base w-5 text-center text-slate-400 dark:text-slate-500"></i>
+                Carga Masiva (Excel)
+            </button>
+            <button onclick="switchTab('movimientos')" id="btn-tab-movimientos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i class="fa-solid fa-right-left text-base w-5 text-center text-slate-400 dark:text-slate-500"></i>
+                Kárdex Integrado
+            </button>
+            <button onclick="switchTab('contactos')" id="btn-tab-contactos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i class="fa-solid fa-users text-base w-5 text-center text-slate-400 dark:text-slate-500"></i> Clientes
+                y Proveedores
+            </button>
+            <button onclick="switchTab('config')" id="btn-tab-config"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200">
+                <i class="fa-solid fa-sliders text-base w-5 text-center text-slate-400 dark:text-slate-500"></i>
+                Configuración Global
+            </button>
+
+            <!-- PROFILE SUMMARY -->
+            <div
+                class="mt-auto pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <div
+                    class="w-8 h-8 rounded-full bg-indigo-650 flex items-center justify-center font-bold text-white border border-indigo-500">
+                    OP
+                </div>
+                <div>
+                    <p class="font-bold text-slate-800 dark:text-slate-200 text-[11px]">Operador Principal</p>
+                    <p class="text-[9px]">Almacén Base: <span
+                            class="text-indigo-600 dark:text-indigo-400 font-semibold">San Diego</span></p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- CONTENT VIEWPORT -->
+        <main class="flex-1 p-6 overflow-y-auto bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+
+            <!-- ================= TAB: DASHBOARD ================= -->
+            <section id="tab-dashboard" class="tab-content space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Resumen de Operación</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Control rápido de valoración, alertas y
+                            métricas del negocio.</p>
+                    </div>
+                    <span
+                        class="text-xs bg-white dark:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 shadow-sm">
+                        Última sincronización: <strong class="text-slate-850 dark:text-slate-200 font-mono"
+                            id="sync-time-lbl">Hoy</strong>
+                    </span>
+                </div>
+
+                <!-- METRIC CARDS -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <!-- Verde Esmeralda para Ingresos / Costos monetarios en USD -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-4 shadow-sm transition-colors duration-300">
+                        <div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-3 rounded-lg"><i
+                                class="fa-solid fa-wallet text-xl"></i></div>
+                        <div>
+                            <span
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Valor
+                                Inventario USD</span>
+                            <h3 class="text-lg font-extrabold text-slate-900 dark:text-slate-100 font-mono"
+                                id="dash-val-usd">$0.00</h3>
+                            <span class="text-[9px] text-emerald-600 dark:text-emerald-400">Costo de adquisición
+                                base</span>
+                        </div>
+                    </div>
+                    <!-- Azul para representar equivalencia cambiaria en Bolívares -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-4 shadow-sm transition-colors duration-300">
+                        <div class="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 p-3 rounded-lg"><i
+                                class="fa-solid fa-money-bill-transfer text-xl"></i></div>
+                        <div>
+                            <span
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Valor
+                                Inventario VES</span>
+                            <h3 class="text-lg font-extrabold text-indigo-600 dark:text-indigo-400 font-mono"
+                                id="dash-val-ves">0.00 Bs</h3>
+                            <span class="text-[9px] text-slate-500 dark:text-slate-400">Tasa BCV del día</span>
+                        </div>
+                    </div>
+                    <!-- Naranja para Advertir niveles de Reposición Críticos -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-4 shadow-sm transition-colors duration-300">
+                        <div class="bg-orange-500/10 text-orange-600 dark:text-orange-400 p-3 rounded-lg"><i
+                                class="fa-solid fa-circle-exclamation text-xl"></i></div>
+                        <div>
+                            <span
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Stock
+                                Crítico (Bajo Mínimo)</span>
+                            <h3 class="text-lg font-extrabold text-orange-500 font-mono" id="dash-critical-count">0</h3>
+                            <span class="text-[9px] text-orange-600 dark:text-orange-400">Artículos requieren
+                                reposición</span>
+                        </div>
+                    </div>
+                    <!-- Púrpura para Notas de Entrega Emitidas -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-4 shadow-sm transition-colors duration-300">
+                        <div class="bg-purple-500/10 text-purple-600 dark:text-purple-400 p-3 rounded-lg"><i
+                                class="fa-solid fa-file-invoice text-xl"></i></div>
+                        <div>
+                            <span
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Notas
+                                de Entrega Emitidas</span>
+                            <h3 class="text-lg font-extrabold text-purple-600 dark:text-purple-400 font-mono"
+                                id="dash-sales-count">0</h3>
+                            <span class="text-[9px] text-purple-600 dark:text-purple-400">Operaciones en la
+                                sesión</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ALERTS & QUICK MOVEMENTS ROW -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- CRITICAL INVENTORY VIEW - Orange border to reflect attention required -->
+                    <div
+                        class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <h3 class="font-bold text-slate-800 dark:text-slate-200 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-bell text-orange-500 animate-bounce"></i> Alertas de Reposición
+                            Activas
+                        </h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">SKU</th>
+                                        <th class="pb-2">Nombre del Artículo</th>
+                                        <th class="pb-2 text-center">Mínimo</th>
+                                        <th class="pb-2 text-right">Stock Actual</th>
+                                        <th class="pb-2 text-right text-orange-500">Déficit</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dashboard-alerts-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                                    <!-- Dynamic rows from JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- COMBOS RESUMEN -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <h3 class="font-bold text-slate-800 dark:text-slate-200 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-cubes text-indigo-500"></i> Disponibilidad de Combos Virtuales
+                        </h3>
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 leading-normal">Calculado en tiempo
+                            real según la disponibilidad dinámica de componentes físicos individuales.</p>
+                        <div id="dashboard-combos-container" class="space-y-3">
+                            <!-- Dynamic content of virtual combos -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB: CATALOGO & VENTAS ================= -->
+            <section id="tab-catalogo" class="tab-content hidden space-y-6">
+
+                <!-- TOP UTILITIES -->
+                <div
+                    class="flex flex-wrap justify-between items-center gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-300">
+                    <div class="flex items-center gap-3 flex-1 min-w-[300px]">
+                        <div class="relative w-full">
+                            <i
+                                class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                            <input onkeyup="filterProducts()" id="search-input" type="text"
+                                placeholder="Buscar por SKU, Nombre o Código Proveedor..."
+                                class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition font-medium">
+                        </div>
+                        <select onchange="filterProducts()" id="category-filter"
+                            class="bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition font-semibold">
+                            <option value="all">Todas las Categorías</option>
+                            <option value="Hogar">Hogar & Climatización</option>
+                            <option value="Herramientas">Maquinaria & Soldadura</option>
+                            <option value="Solares">Sistemas Solares</option>
+                        </select>
+                    </div>
+
+                    <button onclick="toggleCrossSellingPanel()"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-indigo-600/25">
+                        <i class="fa-solid fa-bullhorn"></i>
+                        <span>Copiar Oferta Consolidada</span>
+                        <span id="selected-count"
+                            class="bg-indigo-850 text-indigo-100 text-xs px-2.5 py-0.5 rounded-full font-bold font-mono">0</span>
+                    </button>
+                </div>
+
+                <!-- DYNAMIC GRID LAYOUT -->
+                <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+                    <!-- PRODUCT LIST (2 cols) -->
+                    <div class="xl:col-span-2 space-y-4">
+                        <h2 class="text-xs font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+                            Artículos en Catálogo</h2>
+                        <div id="products-grid" class="space-y-4">
+                            <!-- JS will render items dynamically here -->
+                        </div>
+                    </div>
+
+                    <!-- PANEL DE GENERACION DE OFERTA CONSOLIDADA (1 col) -->
+                    <div id="cross-selling-panel"
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 h-fit space-y-4 sticky top-20 shadow-sm">
+                        <div
+                            class="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs flex items-center gap-2 uppercase tracking-wide">
+                                <i class="fa-solid fa-clipboard-list text-indigo-500"></i>
+                                Oferta Consolidada
+                            </h3>
+                            <span
+                                class="text-[10px] bg-slate-100 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-850 px-2.5 py-0.5 rounded-full font-mono font-bold"
+                                id="cross-selling-items-desc">0 seleccionados</span>
+                        </div>
+
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                            Los productos que marques con el checkbox se acumularán en el siguiente bloque estructurado
+                            listo para enviar por WhatsApp o redes sociales.
+                        </p>
+
+                        <div class="relative">
+                            <textarea id="cross-selling-output" readonly rows="12"
+                                class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-800 dark:text-slate-300 focus:outline-none resize-none h-80"></textarea>
+                            <div class="absolute bottom-3 right-3">
+                                <button onclick="copyToClipboard('cross-selling-output', 'btn-copy-bulk')"
+                                    id="btn-copy-bulk"
+                                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-lg text-xs transition flex items-center gap-1.5 shadow-md shadow-indigo-600/20 font-bold">
+                                    <i class="fa-solid fa-copy"></i> Copiar Oferta
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 p-3 rounded-xl text-[10px] text-indigo-700 dark:text-indigo-300 leading-relaxed">
+                            <i class="fa-solid fa-circle-info mr-1"></i> Se están aplicando de forma transparente las
+                            variables dinámicas de precio ajustado y la tasa BCV del día.
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- ================= TAB: VENTAS (NOTAS DE ENTREGA) ================= -->
+            <section id="tab-ventas" class="tab-content hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Emisión de Notas de Entrega</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de salida rápidos y
+                            calcula conversión exacta para el cliente.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- DETALLE DE FACTURACION Y SELECCION DE PRODUCTO -->
+                    <div
+                        class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-cart-plus text-indigo-500"></i> Agregar Artículos a la Nota
+                            </h3>
+                            <span class="text-[10px] text-slate-400">Paso 1: Agrega items y cantidades</span>
+                        </div>
+
+                        <!-- AGREGAR ITEM FORM (Buscador Altamente Eficiente) -->
+                        <div
+                            class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">
+
+                            <!-- Searchable input dropdown container -->
+                            <div class="md:col-span-6 relative" id="searchable-sale-item-container">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Buscar
+                                    y Seleccionar Artículo</label>
+                                <div class="relative">
+                                    <input id="sale-item-search" oninput="filterSaleItemDropdown()"
+                                        onfocus="showSaleItemDropdown()" type="text"
+                                        placeholder="Escribe SKU o nombre del producto..."
+                                        class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
+                                    <button onclick="clearSaleSearch()"
+                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
+                                        <i class="fa-solid fa-circle-xmark"></i>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="sale-item-selected-sku" value="">
+
+                                <!-- Dropdown flotante optimizado en RAM -->
+                                <div id="sale-item-dropdown"
+                                    class="hidden absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
+                                    <!-- Dynamic elements loaded via JS -->
+                                </div>
+                            </div>
+
+                            <div class="md:col-span-2">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
+                                    Origen</label>
+                                <select id="sale-warehouse-select"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                    <option value="San Diego">San Diego</option>
+                                    <option value="Valencia">Valencia</option>
+                                </select>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
+                                <input id="sale-item-qty" type="number" min="1" value="1"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                            </div>
+                            <div class="md:col-span-2">
+                                <button onclick="addItemToNote()"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow">
+                                    <i class="fa-solid fa-plus"></i> Añadir
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ITEMS TABLE IN NOTE -->
+                        <div class="overflow-x-auto pt-2">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">SKU</th>
+                                        <th class="pb-2">Artículo / Componentes</th>
+                                        <th class="pb-2 font-semibold">Almacén</th>
+                                        <th class="pb-2 text-center">Cantidad</th>
+                                        <th class="pb-2 text-right">Precio ($)</th>
+                                        <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total ($)
+                                        </th>
+                                        <th class="pb-2 text-center">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="note-items-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
+                                    <tr id="empty-note-row">
+                                        <td colspan="7"
+                                            class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                                            <i
+                                                class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                            Aún no has agregado artículos a esta nota de entrega.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- DATOS DEL CLIENTE, FACTURA Y TOTALES -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm h-fit">
+                        <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-receipt text-indigo-500"></i> Resumen de Pago y Cliente
+                            </h3>
+                        </div>
+
+                        <!-- CLIENT SELECTOR -->
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="flex-1">
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cliente</label>
+                                    <select id="note-client-select"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                        <!-- Populated from contacts JS -->
+                                    </select>
+                                </div>
+                                <button onclick="quickSetGenericClient()"
+                                    class="mt-5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-750 text-[10px] font-bold px-2.5 py-2 rounded-xl transition whitespace-nowrap"
+                                    title="Establecer Cliente Genérico">
+                                    <i class="fa-solid fa-user-tag mr-1"></i> Genérico
+                                </button>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
+                                        Factura Física</label>
+                                    <input id="note-invoice-ref" type="text" placeholder="Ej. F-00213"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
+                                        Nota Interna</label>
+                                    <input id="note-correlative-lbl" type="text" readonly
+                                        class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-850 rounded-xl p-2 text-xs text-slate-500 dark:text-slate-400 font-mono text-center font-bold">
+                                </div>
+                            </div>
+
+                            <!-- DIVISOR -->
+                            <div class="border-t border-slate-100 dark:border-slate-800 my-4"></div>
+
+                            <!-- PRICING BREAKDOWN -->
+                            <div
+                                class="space-y-2 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 font-mono">
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Subtotal Divisas ($):</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-bold"
+                                        id="note-subtotal-usd">$0.00</span>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Descuento Aplicado:</span>
+                                    <!-- Rojo para salidas o deducciones -->
+                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
+                                        id="note-discount-usd">-$0.00</span>
+                                </div>
+                                <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div class="flex justify-between items-center text-sm">
+                                    <!-- Verde para ingresos directos -->
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas
+                                        ($):</span>
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base"
+                                        id="note-total-usd">$0.00</span>
+                                </div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div
+                                    class="flex justify-between items-center text-xs text-indigo-600 dark:text-indigo-400">
+                                    <span>Divisa BCV (Ajustada):</span>
+                                    <span class="font-bold" id="note-total-bcv-usd">$0.00</span>
+                                </div>
+                                <div
+                                    class="flex justify-between items-center text-base text-slate-900 dark:text-slate-100">
+                                    <span class="font-bold">Total en Bolívares (Bs):</span>
+                                    <span class="font-bold text-lg text-indigo-600 dark:text-indigo-400"
+                                        id="note-total-ves">0.00 Bs</span>
+                                </div>
+                            </div>
+
+                            <button onclick="processSale()"
+                                class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
+                                <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Venta
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB: GESTIÓN DE ARTÍCULOS ================= -->
+            <section id="tab-articulos" class="tab-content hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Administración de Fichas de
+                            Artículos</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Crea, edita o elimina artículos de
+                            catálogo, recetas de combos y variables personalizadas.</p>
+                    </div>
+                    <button onclick="openProductForm()"
+                        class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow">
+                        <i class="fa-solid fa-circle-plus"></i> Nuevo Artículo / Combo
+                    </button>
+                </div>
+
+                <!-- ARTICULOS CRUD GRID -->
+                <div
+                    class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
+                        <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider">
+                            Listado General de Catálogo</h3>
+                        <span class="text-xs text-slate-500 dark:text-slate-400">Registros totales: <strong
+                                class="text-slate-850 dark:text-slate-200 font-mono"
+                                id="art-count-lbl">0</strong></span>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead>
+                                <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                    <th class="py-3 px-2 font-semibold">SKU</th>
+                                    <th class="py-3 px-2 font-semibold">Código Prov.</th>
+                                    <th class="py-3 px-2 font-semibold">Nombre del Artículo</th>
+                                    <th class="py-3 px-2 font-semibold">Categoría</th>
+                                    <th class="py-3 px-2 text-right font-semibold">Costo ($)</th>
+                                    <th
+                                        class="py-3 px-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">
+                                        Precio Divisa ($)</th>
+                                    <th class="py-3 px-2 text-center font-semibold">Tipo</th>
+                                    <th class="py-3 px-2 text-center font-semibold">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="crud-articulos-tbody"
+                                class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-slate-800 dark:text-slate-300">
+                                <!-- Populated dynamically from products list -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB: CARGA MASIVA ================= -->
+            <section id="tab-carga" class="tab-content hidden space-y-6">
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div
+                        class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-3 rounded-xl">
+                                <i class="fa-solid fa-file-arrow-up text-2xl"></i>
+                            </div>
+                            <div>
+                                <h2 class="font-bold text-lg text-slate-900 dark:text-white">Carga Masiva Tolerante a
+                                    Fallos</h2>
+                                <p class="text-xs text-slate-500 dark:text-slate-400">Sube tu listado de Excel para
+                                    actualizar precios, costos, descripciones o niveles de stock de forma rápida.</p>
+                            </div>
+                        </div>
+
+                        <!-- DROPZONE SIMULATION -->
+                        <div class="border-2 border-dashed border-slate-300 hover:border-indigo-500 dark:border-slate-700 dark:hover:border-indigo-500/50 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer bg-slate-50 dark:bg-slate-900/50 transition duration-200"
+                            onclick="triggerSimulatedUpload()">
+                            <i
+                                class="fa-solid fa-cloud-arrow-up text-4xl text-slate-400 dark:text-slate-500 animate-pulse"></i>
+                            <div class="text-center">
+                                <p class="text-sm font-semibold text-slate-700 dark:text-slate-300">Haz clic aquí para
+                                    simular la carga masiva</p>
+                                <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">Formatos soportados: .xlsx,
+                                    .xls, .csv</p>
+                            </div>
+                            <span
+                                class="text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1 rounded-full font-mono shadow-sm">plantilla_inventario_a2lt.xlsx</span>
+                        </div>
+
+                        <div
+                            class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span>Almacén de destino por defecto: <strong
+                                    class="text-slate-850 dark:text-slate-200 font-semibold">San Diego
+                                    (Principal)</strong></span>
+                            <a href="#" class="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"><i
+                                    class="fa-solid fa-download mr-1"></i> Descargar Plantilla Excel de Modelo</a>
+                        </div>
+                    </div>
+
+                    <!-- SIMULATED PROCESSING STATE -->
+                    <div id="upload-processing"
+                        class="hidden bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                                <i class="fa-solid fa-circle-notch animate-spin text-indigo-500"></i>
+                                <span class="font-semibold text-sm">Validando transacciones e integrando
+                                    kárdex...</span>
+                            </div>
+                            <span class="text-xs font-mono text-indigo-600 dark:text-indigo-400 font-bold"
+                                id="processing-percent">0%</span>
+                        </div>
+                        <div
+                            class="w-full bg-slate-100 dark:bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-200 dark:border-slate-850">
+                            <div id="processing-bar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+
+                    <!-- REPORT PANEL -->
+                    <div id="upload-result-panel"
+                        class="hidden bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div class="flex justify-between items-center">
+                            <h3
+                                class="font-bold text-md text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                                <i class="fa-solid fa-circle-check"></i> Carga Masiva Procesada Correctamente
+                            </h3>
+                            <div class="flex gap-2">
+                                <button onclick="copyToClipboard('log-text', 'btn-copy-log')" id="btn-copy-log"
+                                    class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 transition flex items-center gap-1">
+                                    <i class="fa-solid fa-copy"></i> Copiar Auditoría
+                                </button>
+                                <button onclick="downloadLog()"
+                                    class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 transition flex items-center gap-1">
+                                    <i class="fa-solid fa-download"></i> Descargar Log (.txt)
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
+                                <div class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">4</div>
+                                <div
+                                    class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">
+                                    Registros Exitosos</div>
+                            </div>
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
+                                <div class="text-2xl font-bold text-orange-500" id="collision-resolve-counter-lbl">2
+                                </div>
+                                <div
+                                    class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">
+                                    Conflictos Resueltos</div>
+                            </div>
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 text-rose-500">
+                                <div class="text-2xl font-bold">2</div>
+                                <div
+                                    class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">
+                                    Registros Omitidos</div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label
+                                class="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">Auditoría
+                                de Incidencias e Integración Kárdex:</label>
+                            <textarea id="log-text" readonly
+                                class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 text-rose-600 dark:text-rose-400 p-3 rounded-xl text-xs font-mono h-24 focus:outline-none"
+                                style="resize:none;">[ERROR] Fila 14: SKU "H134" duplicado en origen.
+[AVISO] Fila 32 [SKU F012]: Modificación de costo detectada. Nuevo costo cargado: $31.00 USD.
+[ERROR] Fila 54: El Almacén 'Valencia-Norte' no existe en la base de datos local.</textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB: MOVIMIENTOS (KÁRDEX) ================= -->
+            <section id="tab-movimientos" class="tab-content hidden space-y-6">
+                <!-- ROW 1: ASIENTO MANUAL REORGANIZADO -->
+                <div
+                    class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                    <h3
+                        class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-file-pen text-indigo-500"></i> Registro de Asiento Manual Kárdex
+                    </h3>
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 text-xs">
+
+                        <div class="md:col-span-4">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Producto
+                                / Artículo</label>
+                            <select id="kardex-product"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                <!-- Populated dynamically from JS -->
+                            </select>
+                        </div>
+                        <div class="md:col-span-3">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
+                                Destino/Origen</label>
+                            <select id="kardex-warehouse"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                <option value="San Diego">San Diego (Default)</option>
+                                <option value="Valencia">Valencia (Norte)</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-3">
+                            <!-- Naranja para Entradas (+), Rojo/Rosa para Salidas (-) -->
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Tipo
+                                Operación</label>
+                            <select id="kardex-type"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-bold">
+                                <option class="text-emerald-600 font-bold" value="ENTRADA">Entrada (+)</option>
+                                <option class="text-rose-600 font-bold" value="SALIDA">Salida (-)</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
+                            <input id="kardex-qty" type="number" min="1" value="5"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                        </div>
+
+                        <!-- MOTIVO EN LÍNEA INFERIOR (MULTILÍNEA DETALLADA) -->
+                        <div class="md:col-span-10 mt-1">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Motivo
+                                o Concepto Detallado (Obligatorio para Auditoría)</label>
+                            <textarea id="kardex-concept" rows="2"
+                                placeholder="Escriba de forma detallada y explícita el concepto del ajuste físico, compra o merma..."
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-medium"></textarea>
+                        </div>
+
+                        <div class="md:col-span-2 flex items-end">
+                            <button onclick="registerManualMovement()"
+                                class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-md">
+                                <i class="fa-solid fa-floppy-disk"></i> Registrar Asiento
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- HISTÓRICO CON FILTROS COMBINADOS -->
+                <div
+                    class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                    <div
+                        class="flex flex-wrap justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800 gap-4">
+                        <h3
+                            class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-clock-rotate-left text-indigo-500"></i> Histórico de Transacciones
+                            Auditables
+                        </h3>
+                        <span class="text-xs text-slate-500 dark:text-slate-400">Total movimientos: <strong
+                                id="kardex-count"
+                                class="text-slate-850 dark:text-slate-200 font-mono font-bold">3</strong></span>
+                    </div>
+
+                    <!-- BUSCADOR COMBINADO (KÁRDEX) -->
+                    <div
+                        class="grid grid-cols-1 md:grid-cols-5 gap-3 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 text-xs">
+                        <div class="md:col-span-1">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Filtrar
+                                por SKU o Término</label>
+                            <input type="text" id="filter-kardex-term" onkeyup="filterKardex()"
+                                placeholder="Ej. F012..."
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none">
+                        </div>
+                        <div class="md:col-span-1">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén</label>
+                            <select id="filter-kardex-warehouse" onchange="filterKardex()"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none font-semibold">
+                                <option value="all">Todos los Almacenes</option>
+                                <option value="San Diego">San Diego</option>
+                                <option value="Valencia">Valencia</option>
+                            </select>
+                        </div>
+                        <div class="md:col-span-1.5">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Desde
+                                Fecha (Día A)</label>
+                            <input type="date" id="filter-kardex-date-from" onchange="filterKardex()"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none font-semibold">
+                        </div>
+                        <div class="md:col-span-1.5">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Hasta
+                                Fecha (Día B)</label>
+                            <input type="date" id="filter-kardex-date-to" onchange="filterKardex()"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none font-semibold">
+                        </div>
+                        <div class="flex items-end">
+                            <button onclick="clearKardexFilters()"
+                                class="w-full bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs py-2 rounded-lg border border-slate-300 dark:border-slate-700 transition">
+                                <i class="fa-solid fa-filter-circle-xmark mr-1"></i> Limpiar Filtros
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead>
+                                <tr
+                                    class="text-slate-500 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                    <th class="py-3 px-2 font-semibold">Fecha/Hora</th>
+                                    <th class="py-3 px-2 font-semibold">Artículo (SKU)</th>
+                                    <th class="py-3 px-2 font-semibold">Almacén</th>
+                                    <th class="py-3 px-2 text-center font-semibold">Tipo</th>
+                                    <th class="py-3 px-2 text-right font-semibold">Cantidad</th>
+                                    <th class="py-3 px-2 font-semibold">Concepto / Referencia</th>
+                                </tr>
+                            </thead>
+                            <tbody id="kardex-table-body"
+                                class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-slate-800 dark:text-slate-300">
+                                <!-- Dynamic content will go here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB: CONTACTOS (CLIENTES Y PROVEEDORES) ================= -->
+            <section id="tab-contactos" class="tab-content hidden space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Directorio de Negocios</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Administra tus bases de datos de clientes
+                            y registros históricos de proveedores.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="openContactModal('CLIENTE')"
+                            class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow">
+                            <i class="fa-solid fa-user-plus"></i> Registrar Cliente
+                        </button>
+                        <button onclick="openContactModal('PROVEEDOR')"
+                            class="bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-750 font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-truck-field"></i> Registrar Proveedor
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- CLIENTES LIST -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-users text-indigo-500"></i> Clientes para Marketing
+                            </h3>
+                            <span class="text-xs text-slate-500 dark:text-slate-400" id="client-count-lbl">Total:
+                                1</span>
+                        </div>
+                        <div class="overflow-x-auto h-96 overflow-y-auto">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">Cédula / RIF</th>
+                                        <th class="pb-2">Nombre Cliente</th>
+                                        <th class="pb-2">Teléfono</th>
+                                        <th class="pb-2">Red Social</th>
+                                        <th class="pb-2 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="contacts-clients-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- PROVEEDORES LIST -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-truck-field text-indigo-500"></i> Control de Proveedores
+                            </h3>
+                            <span class="text-xs text-slate-500 dark:text-slate-400" id="supplier-count-lbl">Total:
+                                1</span>
+                        </div>
+                        <div class="overflow-x-auto h-96 overflow-y-auto">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">RIF / ID</th>
+                                        <th class="pb-2">Razón Social</th>
+                                        <th class="pb-2">Teléfono</th>
+                                        <th class="pb-2">Estatus</th>
+                                        <th class="pb-2 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="contacts-suppliers-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= TAB: CONFIGURACIÓN ================= -->
+            <section id="tab-config" class="tab-content hidden space-y-6">
+                <div class="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <!-- AJUSTES CAMBIARIOS -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <h3
+                            class="font-bold text-slate-850 dark:text-slate-200 flex items-center gap-2 text-xs uppercase tracking-wider">
+                            <i class="fa-solid fa-dollar-sign text-indigo-500"></i> Parámetros Monetarios (Venezuela)
+                        </h3>
+
+                        <div class="space-y-4">
+                            <div>
+                                <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Tasa Oficial BCV
+                                    (Bs. por Dólar)</label>
+                                <div class="relative">
+                                    <input onchange="updateRates()" id="input-bcv" type="number" step="0.01"
+                                        value="60.00"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl pl-4 pr-12 py-2.5 text-sm font-mono focus:outline-none focus:border-indigo-500 transition text-slate-900 dark:text-slate-200">
+                                    <span
+                                        class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">VES</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Factor de Cobertura
+                                    Cambiaria ($_ajustado / $_divisa)</label>
+                                <div class="relative">
+                                    <input onchange="updateRates()" id="input-factor" type="number" step="0.01"
+                                        value="1.40"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl pl-4 pr-12 py-2.5 text-sm font-mono focus:outline-none focus:border-indigo-500 transition text-slate-900 dark:text-slate-200">
+                                    <span
+                                        class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">X</span>
+                                </div>
+                                <p class="text-[9px] text-slate-400 dark:text-slate-500 mt-1 leading-normal">Calculado
+                                    de forma dinámica: (Tasa Mercado / Tasa Oficial BCV). Ej: 84.00 / 60.00 = 1.40</p>
+                            </div>
+
+                            <!-- GOOGLE SHEETS / BINANCE INTEGRATION -->
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 space-y-3">
+                                <span
+                                    class="text-xs font-bold block text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">Motor
+                                    de Integración API Configurable</span>
+
+                                <div>
+                                    <label
+                                        class="text-[9px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">API
+                                        URL (Google App Script / Endpoint Externo)</label>
+                                    <input type="text" value="https://script.google.com/macros/s/AKfycb...exec"
+                                        class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-500 dark:text-slate-400 focus:outline-none">
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label
+                                            class="text-[9px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Método
+                                            HTTP</label>
+                                        <input type="text" readonly value="POST"
+                                            class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg px-3 py-1.5 text-xs text-center font-bold font-mono text-slate-400 dark:text-slate-500">
+                                    </div>
+                                    <div>
+                                        <label
+                                            class="text-[9px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">JSON
+                                            Selector Path</label>
+                                        <input type="text" value="data.prices.USDT"
+                                            class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-500 dark:text-slate-400">
+                                    </div>
+                                </div>
+
+                                <button onclick="simulateSync()"
+                                    class="w-full bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-650/15 dark:hover:bg-indigo-600/30 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-500/25 text-xs py-2 rounded-lg transition font-bold flex items-center justify-center gap-2 shadow-sm">
+                                    <i class="fa-solid fa-rotate"></i> Sincronizar Tasas Ahora
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- REGLAS DE PRECIOS Y AUDITORÍA DE TASAS -->
+                    <div class="space-y-6">
+                        <!-- RENTABILIDAD CARD -->
+                        <div
+                            class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                            <h3
+                                class="font-bold text-slate-850 dark:text-slate-200 flex items-center gap-2 text-xs uppercase tracking-wider">
+                                <i class="fa-solid fa-calculator text-indigo-500"></i> Lógica de Rentabilidad Global
+                            </h3>
+
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Método de
+                                        Utilidad Predeterminado</label>
+                                    <select
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-800 dark:text-slate-300 focus:outline-none font-semibold">
+                                        <option value="directo">Método Directo (Markup - Costo x Factor)</option>
+                                        <option value="real">Método Real (Margin - Margen Real sobre Venta)</option>
+                                    </select>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Margen
+                                            Global (%)</label>
+                                        <input type="number" value="30"
+                                            class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-200">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-slate-500 dark:text-slate-400 block mb-1">Descuento
+                                            Global (%)</label>
+                                        <input type="number" value="5"
+                                            class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-200">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- HISTÓRICO DE AUDITORÍA DE TASAS -->
+                        <div
+                            class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
+                            <h3
+                                class="font-bold text-slate-850 dark:text-slate-200 flex items-center gap-2 text-xs uppercase tracking-wider">
+                                <i class="fa-solid fa-history text-orange-500"></i> Histórico Auditoría Cambiaria
+                            </h3>
+                            <div
+                                class="overflow-y-auto max-h-48 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-slate-950 p-2">
+                                <table class="w-full text-left text-[10px] font-mono">
+                                    <thead>
+                                        <tr
+                                            class="text-slate-500 border-b border-slate-200 dark:border-slate-800 uppercase">
+                                            <th class="pb-1">Fecha/Hora</th>
+                                            <th class="pb-1 text-right">BCV (Bs)</th>
+                                            <th class="pb-1 text-center">F. Cob.</th>
+                                            <th class="pb-1 text-right text-indigo-600 dark:text-indigo-400">Ajust. (Bs)
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="rates-audit-tbody"
+                                        class="divide-y divide-slate-100 dark:divide-slate-800/50 text-slate-800 dark:text-slate-300">
+                                        <!-- Dynamic entries of rates modifications -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ================= MODAL: COLISIONES DE CARGA MASIVA ================= -->
+    <div id="modal-collision"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-lg w-full rounded-2xl shadow-2xl overflow-hidden">
+            <div class="p-6 space-y-4">
+                <div class="flex items-center gap-3 text-orange-500">
+                    <i class="fa-solid fa-triangle-exclamation text-3xl animate-pulse"></i>
+                    <div>
+                        <h3 class="font-bold text-lg text-slate-900 dark:text-slate-100">Colisión de SKU Detectada</h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Se encontraron artículos que ya existen en
+                            el Almacén Destino.</p>
+                    </div>
+                </div>
+
+                <div
+                    class="bg-slate-50 dark:bg-slate-900 p-4 rounded-xl space-y-2 border border-slate-200 dark:border-slate-800 text-sm">
+                    <p class="text-xs text-slate-600 dark:text-slate-300 font-semibold mb-1">Artículos en Conflicto
+                        Encontrados:</p>
+                    <div class="flex justify-between font-mono text-xs text-slate-800 dark:text-slate-200">
+                        <span>• SKU H134 (Soldadora 160A)</span>
+                        <span class="text-slate-500 dark:text-slate-400">Existente: 10 und / Excel: 15 und</span>
+                    </div>
+                    <div class="flex justify-between font-mono text-xs text-slate-800 dark:text-slate-200">
+                        <span>• SKU H135 (Soldadora 200A)</span>
+                        <span class="text-slate-500 dark:text-slate-400">Existente: 4 und / Excel: 10 und</span>
+                    </div>
+                </div>
+
+                <div class="text-xs text-slate-500 dark:text-slate-400 space-y-2 leading-relaxed">
+                    <p>Por favor, indica al sistema cómo proceder con estos registros. Tu elección afectará la traza del
+                        Kárdex de la siguiente manera:</p>
+                    <ul class="list-disc list-inside space-y-1 text-slate-600 dark:text-slate-400">
+                        <li><strong>Sumar:</strong> El nuevo stock se añadirá al existente registrándose como una
+                            Entrada.</li>
+                        <li><strong>Sustituir:</strong> Se simula salida del stock anterior y entrada del nuevo valor
+                            (auditoría quirúrgica).</li>
+                        <li><strong>Cancelar:</strong> Aborta el procesamiento completo del lote sin afectar la base de
+                            datos.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- MODAL BUTTONS -->
+            <div
+                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex flex-wrap justify-end gap-3">
+                <button onclick="resolveCollision('cancelar')"
+                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                    Cancelar
+                </button>
+                <button onclick="resolveCollision('sustituir')"
+                    class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-orange-500/10">
+                    Sustituir Stock
+                </button>
+                <button onclick="resolveCollision('sumar')"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
+                    Sumar Stock
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MODAL: CREACIÓN / EDICIÓN DE ARTÍCULO ================= -->
+    <div id="modal-product"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-2xl w-full rounded-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2"
+                        id="product-modal-title">
+                        <i class="fa-solid fa-boxes-packing text-indigo-500"></i> Nuevo Artículo / Combo
+                    </h3>
+                    <button onclick="closeProductModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div>
+                        <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">SKU
+                            (Código Único)</label>
+                        <input id="form-p-sku" type="text" placeholder="Ej. H136"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                    </div>
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Código
+                            Proveedor</label>
+                        <input id="form-p-cod-prov" type="text" placeholder="Ej. PROV-WEL250"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
+                            Completo Comercial</label>
+                        <input id="form-p-nombre" type="text" placeholder="Ej. Soldadora Profesional Inverter MMA 250Ah"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                    </div>
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Categoría</label>
+                        <select id="form-p-categoria"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                            <option value="Hogar">Hogar & Climatización</option>
+                            <option value="Herramientas">Maquinaria & Soldadura</option>
+                            <option value="Solares">Sistemas Solares</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Tipo
+                            de Artículo</label>
+                        <select id="form-p-tipo" onchange="toggleFormComboRecipe()"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                            <option value="FISICO">Físico (Con inventariado propio)</option>
+                            <option value="COMBO">Combo Virtual (Determinado por componentes)</option>
+                        </select>
+                    </div>
+
+                    <!-- CONDITIONAL: RECIPE FOR COMBOS -->
+                    <div id="form-recipe-section"
+                        class="hidden md:col-span-2 bg-indigo-50 dark:bg-indigo-950/20 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/40 space-y-2">
+                        <span class="text-[10px] uppercase font-bold text-indigo-700 dark:text-indigo-300 block">Receta
+                            del Combo Virtual (Componentes)</span>
+                        <p class="text-[9px] text-slate-500 dark:text-slate-400 leading-normal">Selecciona qué artículos
+                            componen este combo y en qué cantidad.</p>
+                        <div class="grid grid-cols-12 gap-2 items-center">
+                            <div class="col-span-8">
+                                <select id="form-recipe-component"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-1.5 text-xs text-slate-900 dark:text-slate-200 font-semibold">
+                                    <!-- Populated from physical items in JS -->
+                                </select>
+                            </div>
+                            <div class="col-span-2">
+                                <input id="form-recipe-qty" type="number" value="1" min="1"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-1 text-xs font-mono text-center text-slate-900 dark:text-slate-200 font-bold">
+                            </div>
+                            <div class="col-span-2">
+                                <button onclick="addComponentToRecipe()"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-1.5 rounded-lg">Añadir</button>
+                            </div>
+                        </div>
+                        <div
+                            class="max-h-24 overflow-y-auto border border-indigo-100 dark:border-indigo-900/40 rounded-lg bg-white dark:bg-slate-900/50 p-2 text-[10px] font-mono text-slate-800 dark:text-slate-300">
+                            <table class="w-full text-left">
+                                <thead>
+                                    <tr class="text-slate-400 border-b border-indigo-100 dark:border-indigo-950">
+                                        <th>SKU Componente</th>
+                                        <th class="text-center">Cant. Req</th>
+                                        <th class="text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="form-recipe-tbody">
+                                    <!-- Dynamic elements from recipe state -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- PARÁMETROS BÁSICOS -->
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Costo
+                            Adquisición ($)</label>
+                        <input id="form-p-costo" type="number" step="0.01" value="0.00"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold">
+                    </div>
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Precio
+                            Venta Divisa ($)</label>
+                        <input id="form-p-precio" type="number" step="0.01" value="0.00"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold">
+                    </div>
+
+                    <!-- AJUSTES INDIVIDUALES -->
+                    <div
+                        class="md:col-span-2 p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div class="md:col-span-3">
+                            <span
+                                class="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 block tracking-wider"><i
+                                    class="fa-solid fa-calculator mr-1"></i> Ajustes Individuales de Margen, Descuento y
+                                Cobertura</span>
+                        </div>
+                        <div>
+                            <label
+                                class="text-[9px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Ganancia
+                                / Margen (%)</label>
+                            <input id="form-p-margen" type="number" step="0.1" value="30.0"
+                                class="w-full bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-750 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[9px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Descuento
+                                (%)</label>
+                            <input id="form-p-descuento" type="number" step="0.1" value="5.0"
+                                class="w-full bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-750 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[9px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Factor
+                                Cobertura (Ind.)</label>
+                            <input id="form-p-cobertura" type="number" step="0.01" placeholder="Usar Global"
+                                class="w-full bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-750 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Almacén
+                            Ubicación Base</label>
+                        <select id="form-p-almacen"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                            <option value="San Diego">San Diego (Principal)</option>
+                            <option value="Valencia">Valencia (Norte)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Stock
+                            de Inicio (Físicos)</label>
+                        <input id="form-p-stock" type="number" value="10" min="0"
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Descripción
+                            Breve</label>
+                        <input id="form-p-desc" type="text"
+                            placeholder="Ej. Soldadora profesional 250Ah doble voltaje para trabajos pesados en estructuras."
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                    </div>
+
+                    <!-- TEXT BLOCKS FOR MARKETING -->
+                    <div class="md:col-span-2 border-t border-slate-200 dark:border-slate-750 pt-3 mt-1 space-y-3">
+                        <span
+                            class="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block tracking-wider">Estructuras
+                            de Redes Sociales (Marketing / Copias)</span>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Ficha
+                                    Técnica Tradicional</label>
+                                <textarea id="form-p-ficha" rows="3"
+                                    placeholder="• Marca: WelderPower&#10;• Amperaje Max: 250A"
+                                    class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
+                            </div>
+                            <div>
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Mensaje
+                                    de Cross-Selling</label>
+                                <textarea id="form-p-cross" rows="3"
+                                    placeholder="🔧 Soldadora 250Ah (H136) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)&#10;✔️ Rendimiento industrial pesado."
+                                    class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Respuesta
+                                Rápida Completa (WhatsApp / Redes)</label>
+                            <textarea id="form-p-quick" rows="4"
+                                placeholder="Hola 👋&#10;Disponible Soldadora Inverter 250Ah (H136)&#10;Precio: $[PRECIO_USD] Divisas / $[PRECIO_BCV] BCV"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
+                            <p class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 leading-normal"><i
+                                    class="fa-solid fa-triangle-exclamation mr-1"></i> Usa las variables
+                                <strong>$[PRECIO_USD]</strong> y <strong>$[PRECIO_BCV]</strong> para que se reemplacen
+                                dinámicamente con las tasas cambiarias vigentes.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL BUTTONS -->
+            <div
+                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
+                <button onclick="closeProductModal()"
+                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                    Cerrar
+                </button>
+                <button onclick="saveProduct()"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
+                    Guardar Registro
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MODAL: REGISTRO DE CONTACTOS (AMPLIADO) ================= -->
+    <div id="modal-contact"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-lg w-full rounded-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2"
+                        id="contact-modal-title">
+                        <i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Contacto
+                    </h3>
+                    <button onclick="closeContactModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                    <input type="hidden" id="form-c-type">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1"
+                                id="contact-id-lbl">Cédula / RIF</label>
+                            <input id="form-c-id" type="text" placeholder="Ej. V-26412411 o J-41241"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
+                                Completo / Razón Social</label>
+                            <input id="form-c-name" type="text" placeholder="Ej. Corporación Metal-X C.A."
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Teléfono
+                                o Canal Comercial</label>
+                            <input id="form-c-phone" type="text" placeholder="Ej. 0412.186.92.11"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Correo
+                                Electrónico</label>
+                            <input id="form-c-email" type="email" placeholder="Ej. info@empresa.com"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Redes
+                                Sociales (IG/Tiktok)</label>
+                            <input id="form-c-social" type="text" placeholder="Ej. @metal_x"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Dirección
+                                Física Completa</label>
+                            <input id="form-c-address" type="text" placeholder="Ej. Zona Industrial San Diego, Cl. 4"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Observaciones
+                            / Comentarios Internos</label>
+                        <textarea id="form-c-notes" rows="3"
+                            placeholder="Indique de forma libre observaciones para marketing, histórico o condiciones..."
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none h-24 font-medium"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL BUTTONS -->
+            <div
+                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
+                <button onclick="closeContactModal()"
+                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                    Cancelar
+                </button>
+                <button onclick="saveContact()"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
+                    Guardar Contacto
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MODAL: DETALLES DEL CONTACTO ================= -->
+    <div id="modal-contact-details"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-md w-full rounded-2xl shadow-2xl overflow-hidden">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                        <i class="fa-solid fa-id-card"></i> Ficha Informativa del Contacto
+                    </h3>
+                    <button onclick="closeContactDetailsModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <div class="space-y-3 text-xs leading-relaxed">
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Nombre /
+                            Razón Social</span>
+                        <span id="detail-c-name" class="font-bold text-slate-800 dark:text-slate-200 text-sm">--</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Identificación
+                                (RIF/C.I)</span>
+                            <span id="detail-c-id"
+                                class="font-mono text-slate-700 dark:text-slate-300 font-bold">--</span>
+                        </div>
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Tipo</span>
+                            <span id="detail-c-type" class="text-slate-700 dark:text-slate-300 font-semibold">--</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Teléfono</span>
+                            <span id="detail-c-phone" class="text-slate-700 dark:text-slate-300">--</span>
+                        </div>
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Red
+                                Social</span>
+                            <span id="detail-c-social" class="font-mono text-indigo-600 dark:text-indigo-400">--</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span
+                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Dirección</span>
+                        <span id="detail-c-address" class="text-slate-700 dark:text-slate-300">--</span>
+                    </div>
+
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span
+                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Observaciones
+                            y Comentarios</span>
+                        <p id="detail-c-notes" class="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">--</p>
+                    </div>
+                </div>
+            </div>
+            <div
+                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end">
+                <button onclick="closeContactDetailsModal()"
+                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                    Cerrar Ficha
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= TOAST NOTIFICATION ================= -->
+    <div id="toast"
+        class="opacity-0 pointer-events-none fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 transition-all duration-300 z-50 text-xs font-semibold">
+        <i class="fa-solid fa-circle-check"></i>
+        <span id="toast-message">Mensaje de alerta copiado con éxito</span>
+    </div>
+
+    <!-- ================= JAVASCRIPT LOGIC ================= -->
+    <script>
+        // DATA MODEL IN MEMORY FOR THE DEMO
+        let globalBCV = 60.00;
+        let globalFactor = 1.40;
+        let lastCorrelative = 1002;
+
+        let products = [
+            {
+                sku: "F012",
+                cod_prov: "PROV-FAN08",
+                nombre: "Ventilador Recargable 8\" Multifuncional",
+                categoria: "Hogar",
+                tipo: "FISICO",
+                receta: [],
+                costo: 30.00,
+                precio_divisa: 50.00,
+                stock: 12,
+                stock_minimo: 15,
+                almacen: "San Diego",
+                descripcion: "Batería 10.000mAh. Autonomía hasta 20h. Perfecto para el hogar.",
+                social_quick: "Hola 👋\n\n✅ Sí, disponible, ideal para llevar frescura a cualquier lugar sin depender de enchufes.\n\n💨 Recargable 8\" (F012) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n\n📍 C.C. San Diego / Local M9-5.\n🛵 Delivery GRATIS 👉 Consulta tu zona",
+                social_cross: "💨 Recargable 8\" (F012) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n✔️ Batería 10.000mAh. Autonomía hasta 20h. Perfecto para hogar u oficina.",
+                ficha: "• Marca: F-Cooler\n• Diámetro: 8 Pulgadas\n• Capacidad de Batería: 10,000 mAh",
+                margen_ind: 30.0,
+                descuento_ind: 5.0,
+                cobertura_ind: null
+            },
+            {
+                sku: "H134",
+                cod_prov: "PROV-WEL160",
+                nombre: "Soldadora Inverter MMA 160Ah",
+                categoria: "Herramientas",
+                tipo: "FISICO",
+                receta: [],
+                costo: 80.00,
+                precio_divisa: 120.00,
+                stock: 10,
+                stock_minimo: 8,
+                almacen: "San Diego",
+                descripcion: "Soldadora Inverter 160Ah de arco suave y alta penetración.",
+                social_quick: "Hola 👋\n\n✅ Disponible Soldadora Inverter MMA 160Ah (H134).\n\n🔧 Soldadora Inverter MMA 160Ah ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n\n📍 C.C. San Diego / Gran Bazar.",
+                social_cross: "🔧 Soldadora Inverter MMA 160Ah (H134) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n✔️ 160Ah + doble voltaje. Para soldadura de electrodo en acero.",
+                ficha: "• Marca: WelderPower\n• Amperaje Max: 160A\n• Voltaje: 110V/220V",
+                margen_ind: 30.0,
+                descuento_ind: 5.0,
+                cobertura_ind: null
+            },
+            {
+                sku: "H135",
+                cod_prov: "PROV-WEL200",
+                nombre: "Soldadora Inverter MMA 200Ah",
+                categoria: "Herramientas",
+                tipo: "FISICO",
+                receta: [],
+                costo: 100.00,
+                precio_divisa: 160.00,
+                stock: 4,
+                stock_minimo: 5,
+                almacen: "Valencia",
+                descripcion: "Soldadora profesional 200Ah doble voltaje para trabajos pesados.",
+                social_quick: "Hola 👋\n\n✅ Disponible la potente Soldadora Inverter MMA 200Ah (H135).\n\n🔧 Soldadora Inverter MMA 200Ah ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n\n📍 Valencia (Norte).",
+                social_cross: "🔧 Soldadora Inverter MMA 200Ah (H135) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n✔️ 200Ah + mayor potencia. Para trabajos pesados en estructuras.",
+                ficha: "• Marca: WelderPower Pro\n• Amperaje Max: 200A\n• Voltaje: Doble Voltaje",
+                margen_ind: 30.0,
+                descuento_ind: 5.0,
+                cobertura_ind: null
+            },
+            {
+                sku: "S050",
+                cod_prov: "PROV-SOLAR01",
+                nombre: "Panel Solar 150W Monocristalino",
+                categoria: "Solares",
+                tipo: "FISICO",
+                receta: [],
+                costo: 45.00,
+                precio_divisa: 70.00,
+                stock: 12,
+                stock_minimo: 10,
+                almacen: "San Diego",
+                descripcion: "Panel solar de alta eficiencia para sistemas residenciales o comerciales.",
+                social_quick: "Hola 👋\n\n✅ Disponible Panel Solar 150W Monocristalino (S050).\n\n☀️ Panel Solar 150W ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n\n📍 Entrega en San Diego.",
+                social_cross: "☀️ Panel Solar 150W Monocristalino (S050) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n✔️ Panel de alto rendimiento. Para sistemas de 12V y 24V.",
+                ficha: "• Marca: SolarForce\n• Potencia: 150W\n• Tipo: Monocristalino",
+                margen_ind: 30.0,
+                descuento_ind: 5.0,
+                cobertura_ind: null
+            },
+            {
+                sku: "C-BOMBAPNL",
+                cod_prov: "PROV-COMBO01",
+                nombre: "Combo Solar: Bomba Solar + Panel Solar 150W",
+                categoria: "Solares",
+                tipo: "COMBO",
+                receta: [
+                    { sku: "F012", qty: 1 },
+                    { sku: "S050", qty: 2 }
+                ],
+                costo: 120.00,
+                precio_divisa: 180.00,
+                stock: 0,
+                stock_minimo: 0,
+                almacen: "San Diego",
+                descripcion: "Combo integrado listo para instalar. Ahorro y eficiencia garantizada.",
+                social_quick: "Hola 👋\n\n✅ Combo Solar Completo listo para operar de inmediato.\n\n⚡ Combo Bomba + Panel ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)",
+                social_cross: "⚡ Combo Solar Bomba + Panel ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)\n✔️ Incluye ventilador multifuncional y 2 paneles de 150W.",
+                ficha: "• 1x Unidad Ventilador 8\"\n• 2x Paneles Solares 150W",
+                margen_ind: 30.0,
+                descuento_ind: 5.0,
+                cobertura_ind: null
+            }
+        ];
+
+        let kardexHistory = [
+            { datetime: "2026-06-25 09:15", sku: "F012", almacen: "San Diego", tipo: "ENTRADA", qty: 20, concepto: "Carga Masiva Inicial" },
+            { datetime: "2026-06-25 10:30", sku: "F012", almacen: "San Diego", tipo: "SALIDA", qty: 8, concepto: "Nota de Entrega #1001" },
+            { datetime: "2026-06-25 10:45", sku: "H134", almacen: "San Diego", tipo: "ENTRADA", qty: 10, concepto: "Compra Proveedor Factura #F-4412" }
+        ];
+
+        let ratesAuditLog = [
+            { datetime: "2026-06-25 08:00", bcv: 59.50, factor: 1.41, adjusted: 83.89, user: "Operador Principal" },
+            { datetime: "2026-06-25 09:00", bcv: 60.00, factor: 1.40, adjusted: 84.00, user: "Sincronizador API" }
+        ];
+
+        let contacts = [
+            { id: "V-99999999", name: "Cliente Genérico Social Selling", type: "CLIENTE", phone: "0412.000.00.00", email: "generico@a2ltstock.com", social: "@generico", address: "San Diego, Carabobo", notes: "Asociado directo para flujos rápidos de ventas." },
+            { id: "V-12345678", name: "Jesús Almarza (Instagram: @jalmarza)", type: "CLIENTE", phone: "0412.555.12.34", email: "jesus@gmail.com", social: "@jalmarza", address: "Urb. El Remanso, Cl. 2", notes: "Cliente recurrente de maquinarias e insumos solares." },
+            { id: "J-40112445", name: "Inversiones Mayorista Oriente C.A.", type: "PROVEEDOR", phone: "0241.824.11.22", email: "ventas@oriente.com", social: "@mayorista_oriente", address: "Zona Industrial Valencia, Sur", notes: "Suministro constante de soldadoras y paneles monocristalinos." }
+        ];
+
+        let activeRecipe = [];
+        let draftNoteItems = [];
+        let selectedProductsForCrossSelling = [];
+
+        window.onload = function () {
+            // Apply theme on load
+            const savedTheme = localStorage.getItem('theme') || 'dark';
+            if (savedTheme === 'dark') {
+                document.documentElement.classList.add('dark');
+                document.getElementById('theme-toggle-icon').className = 'fa-solid fa-sun text-yellow-400';
+            } else {
+                document.documentElement.classList.remove('dark');
+                document.getElementById('theme-toggle-icon').className = 'fa-solid fa-moon text-slate-700';
+            }
+
+            updateRates();
+            recalculateCombosStock();
+            renderDashboard();
+            renderProducts();
+            renderKardex();
+            renderCrudProducts();
+            renderContacts();
+            populateVentasSelects();
+            generateNoteCorrelative();
+        };
+
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.toggle('dark');
+            const themeIcon = document.getElementById('theme-toggle-icon');
+            if (isDark) {
+                localStorage.setItem('theme', 'dark');
+                themeIcon.className = 'fa-solid fa-sun text-yellow-400';
+                showToast("Modo Oscuro activado");
+            } else {
+                localStorage.setItem('theme', 'light');
+                themeIcon.className = 'fa-solid fa-moon text-slate-700';
+                showToast("Modo Claro activado");
+            }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('active', 'bg-indigo-600/10', 'dark:bg-indigo-600/15', 'text-indigo-600', 'dark:text-indigo-400', 'border-l-4', 'border-indigo-500');
+                btn.classList.add('text-slate-500', 'dark:text-slate-400');
+            });
+
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+            const activeBtn = document.getElementById(`btn-tab-${tabId}`);
+            activeBtn.classList.add('active', 'bg-indigo-600/10', 'dark:bg-indigo-600/15', 'text-indigo-600', 'dark:text-indigo-400', 'border-l-4', 'border-indigo-500');
+            activeBtn.classList.remove('text-slate-500', 'dark:text-slate-400');
+
+            if (tabId === 'dashboard') {
+                recalculateCombosStock();
+                renderDashboard();
+            }
+            if (tabId === 'catalogo') {
+                renderProducts();
+            }
+            if (tabId === 'ventas') {
+                populateVentasSelects();
+            }
+            if (tabId === 'articulos') {
+                renderCrudProducts();
+            }
+            if (tabId === 'contactos') {
+                renderContacts();
+            }
+        }
+
+        function recalculateCombosStock() {
+            products.forEach(p => {
+                if (p.tipo === "COMBO" && p.receta.length > 0) {
+                    let minStock = Infinity;
+                    p.receta.forEach(recipeItem => {
+                        const component = products.find(prod => prod.sku === recipeItem.sku);
+                        if (component) {
+                            const possibleCombos = Math.floor(component.stock / recipeItem.qty);
+                            if (possibleCombos < minStock) {
+                                minStock = possibleCombos;
+                            }
+                        } else {
+                            minStock = 0;
+                        }
+                    });
+                    p.stock = minStock === Infinity ? 0 : minStock;
+                }
+            });
+        }
+
+        function renderDashboard() {
+            let totalValUSD = 0;
+            let criticalCount = 0;
+
+            products.forEach(p => {
+                if (p.tipo === "FISICO") {
+                    totalValUSD += p.costo * p.stock;
+                    if (p.stock < p.stock_minimo) {
+                        criticalCount++;
+                    }
+                }
+            });
+
+            document.getElementById('dash-val-usd').innerText = `$${totalValUSD.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            document.getElementById('dash-val-ves').innerText = `${(totalValUSD * globalBCV).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+            document.getElementById('dash-critical-count').innerText = criticalCount;
+            document.getElementById('dash-sales-count').innerText = lastCorrelative - 1002;
+
+            const alertsTbody = document.getElementById('dashboard-alerts-tbody');
+            alertsTbody.innerHTML = '';
+            let writtenAlerts = 0;
+
+            products.forEach(p => {
+                if (p.tipo === "FISICO" && p.stock < p.stock_minimo) {
+                    writtenAlerts++;
+                    const deficit = p.stock_minimo - p.stock;
+                    const row = document.createElement('tr');
+                    row.className = "hover:bg-slate-50 dark:hover:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800/60";
+                    row.innerHTML = `
+                        <td class="py-2 text-rose-600 dark:text-rose-400 font-bold">${p.sku}</td>
+                        <td class="py-2 text-slate-700 dark:text-slate-300 font-medium">${p.nombre}</td>
+                        <td class="py-2 text-center text-slate-500 dark:text-slate-400">${p.stock_minimo}</td>
+                        <td class="py-2 text-right text-slate-700 dark:text-slate-300 font-bold">${p.stock}</td>
+                        <td class="py-2 text-right text-orange-500 font-bold">+${deficit} und</td>
+                    `;
+                    alertsTbody.appendChild(row);
+                }
+            });
+
+            if (writtenAlerts === 0) {
+                alertsTbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-emerald-600 dark:text-emerald-400 font-semibold"><i class="fa-solid fa-square-check mr-1"></i> Inventario óptimo. No hay alertas de reposición.</td></tr>`;
+            }
+
+            const combosContainer = document.getElementById('dashboard-combos-container');
+            combosContainer.innerHTML = '';
+            let writtenCombos = 0;
+
+            products.forEach(p => {
+                if (p.tipo === "COMBO") {
+                    writtenCombos++;
+                    const badgeClass = p.stock > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "bg-rose-500/10 text-rose-600 dark:text-rose-400";
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = "bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 p-3 rounded-xl flex items-center justify-between";
+                    itemDiv.innerHTML = `
+                        <div>
+                            <span class="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 font-mono uppercase bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/30 px-2 py-0.5 rounded">${p.sku}</span>
+                            <h4 class="font-bold text-xs text-slate-800 dark:text-slate-200 mt-1">${p.nombre}</h4>
+                        </div>
+                        <div class="text-right">
+                            <span class="px-2.5 py-1 rounded text-[10px] font-bold font-mono ${badgeClass}">Disponibles: ${p.stock}</span>
+                        </div>
+                    `;
+                    combosContainer.appendChild(itemDiv);
+                }
+            });
+        }
+
+        function updateRates() {
+            const bcvVal = parseFloat(document.getElementById('input-bcv').value);
+            const factorVal = parseFloat(document.getElementById('input-factor').value);
+
+            if (!isNaN(bcvVal) && !isNaN(factorVal)) {
+                const isDiff = (globalBCV !== bcvVal) || (globalFactor !== factorVal);
+                globalBCV = bcvVal;
+                globalFactor = factorVal;
+
+                const adjustedRate = globalBCV * globalFactor;
+
+                document.getElementById('header-bcv-display').innerText = `${globalBCV.toFixed(2)} Bs`;
+                document.getElementById('header-factor-display').innerText = `${globalFactor.toFixed(2)}x`;
+                document.getElementById('header-adjusted-display').innerText = `${adjustedRate.toFixed(2)} Bs`;
+
+                if (isDiff) {
+                    const now = new Date();
+                    const nowStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                    ratesAuditLog.unshift({
+                        datetime: nowStr,
+                        bcv: globalBCV,
+                        factor: globalFactor,
+                        adjusted: adjustedRate,
+                        user: "Operador Principal"
+                    });
+                    renderRatesAudit();
+                }
+
+                renderProducts();
+                updateCrossSellingOutput();
+                recalculateNoteTotal();
+            }
+        }
+
+        function renderRatesAudit() {
+            const tbody = document.getElementById('rates-audit-tbody');
+            tbody.innerHTML = '';
+            ratesAuditLog.forEach(log => {
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/50";
+                row.innerHTML = `
+                    <td class="py-1 text-slate-500">${log.datetime}</td>
+                    <td class="py-1 text-right text-slate-800 dark:text-slate-300 font-bold">${log.bcv.toFixed(2)}</td>
+                    <td class="py-1 text-center text-slate-500 dark:text-slate-400">${log.factor.toFixed(2)}x</td>
+                    <td class="py-1 text-right text-indigo-600 dark:text-indigo-400 font-bold">${log.adjusted.toFixed(2)}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function renderProducts() {
+            const container = document.getElementById('products-grid');
+            const search = document.getElementById('search-input').value.toLowerCase();
+            const category = document.getElementById('category-filter').value;
+
+            container.innerHTML = '';
+
+            const filtered = products.filter(p => {
+                const matchesSearch = p.sku.toLowerCase().includes(search) ||
+                    p.nombre.toLowerCase().includes(search) ||
+                    p.cod_prov.toLowerCase().includes(search);
+                const matchesCategory = category === 'all' || p.categoria === category;
+                return matchesSearch && matchesCategory;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="bg-white dark:bg-slate-900 p-8 rounded-xl border border-slate-200 dark:border-slate-800 text-center text-slate-500">
+                        <i class="fa-solid fa-circle-exclamation text-2xl mb-2 block text-slate-400 dark:text-slate-600"></i>
+                        No se encontraron productos que coincidan con la búsqueda.
+                    </div>
+                `;
+                return;
+            }
+
+            filtered.forEach(p => {
+                const currentFactor = p.cobertura_ind ? p.cobertura_ind : globalFactor;
+                const p_usd_ajustado = p.precio_divisa * currentFactor;
+                const p_bs_bcv = p_usd_ajustado * globalBCV;
+
+                const textQuick = p.social_quick
+                    .replaceAll('[PRECIO_USD]', p.precio_divisa.toFixed(2))
+                    .replaceAll('[PRECIO_BCV]', p_usd_ajustado.toFixed(2));
+
+                const textCross = p.social_cross
+                    .replaceAll('[PRECIO_USD]', p.precio_divisa.toFixed(2))
+                    .replaceAll('[PRECIO_BCV]', p_usd_ajustado.toFixed(2));
+
+                const isChecked = selectedProductsForCrossSelling.includes(p.sku) ? 'checked' : '';
+
+                const pCard = document.createElement('div');
+                pCard.className = "bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm relative transition hover:border-slate-300 dark:hover:border-slate-700";
+
+                pCard.innerHTML = `
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex items-center gap-3">
+                            <input type="checkbox" ${isChecked} onchange="toggleSelectProduct('${p.sku}')" class="w-5 h-5 rounded-lg accent-indigo-600 bg-slate-100 dark:bg-slate-950 border-slate-300 dark:border-slate-700 cursor-pointer">
+                            <div>
+                                <span class="bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 font-mono text-[9px] px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-850 font-bold uppercase">${p.sku}</span>
+                                <h3 class="font-bold text-slate-900 dark:text-slate-100 mt-1 text-sm">${p.nombre}</h3>
+                                <p class="text-[9px] text-slate-500">Cod. Prov: <span class="font-mono text-slate-600 dark:text-slate-400">${p.cod_prov}</span> | Ubicación: <span class="text-indigo-600 dark:text-indigo-400 font-bold">${p.almacen}</span></p>
+                            </div>
+                        </div>
+                        <div class="text-right flex flex-col items-end">
+                            <span class="px-2.5 py-0.5 rounded-full font-bold text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400">Stock: ${p.stock} und</span>
+                            <p class="text-[9px] text-slate-400 dark:text-slate-500 mt-1">Costo Adq: $${p.costo.toFixed(2)}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 text-center">
+                        <div>
+                            <span class="text-[9px] text-slate-500 block uppercase font-bold">Pago Divisa</span>
+                            <span class="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">$${p.precio_divisa.toFixed(2)}</span>
+                        </div>
+                        <div class="border-x border-slate-200 dark:border-slate-800">
+                            <span class="text-[9px] text-slate-500 block uppercase font-bold">Divisa BCV (Ajust.)</span>
+                            <span class="text-xs font-extrabold text-indigo-600 dark:text-indigo-400 font-mono">$${p_usd_ajustado.toFixed(2)}</span>
+                        </div>
+                        <div>
+                            <span class="text-[9px] text-slate-500 block uppercase font-bold">Total Bolívares</span>
+                            <span class="text-xs font-extrabold text-slate-800 dark:text-slate-200 font-mono">${p_bs_bcv.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <div class="bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-850 p-2.5 flex flex-col justify-between">
+                            <div class="flex justify-between items-center mb-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                                <span>Respuesta Redes</span>
+                                <button onclick="copyToClipboard('quick-${p.sku}', 'btn-c-quick-${p.sku}')" id="btn-c-quick-${p.sku}" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 text-xs transition" title="Copiar Respuesta">
+                                    <i class="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                            <textarea id="quick-${p.sku}" readonly class="w-full bg-transparent font-mono text-[10px] text-slate-600 dark:text-slate-400 h-16 resize-none focus:outline-none overflow-y-auto border-0 leading-relaxed">${textQuick}</textarea>
+                        </div>
+
+                        <div class="bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-850 p-2.5 flex flex-col justify-between">
+                            <div class="flex justify-between items-center mb-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                                <span>Remarketing / Cross</span>
+                                <button onclick="copyToClipboard('cross-${p.sku}', 'btn-c-cross-${p.sku}')" id="btn-c-cross-${p.sku}" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 text-xs transition" title="Copiar Cross-selling">
+                                    <i class="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                            <textarea id="cross-${p.sku}" readonly class="w-full bg-transparent font-mono text-[10px] text-slate-600 dark:text-slate-400 h-16 resize-none focus:outline-none overflow-y-auto border-0 leading-relaxed">${textCross}</textarea>
+                        </div>
+
+                        <div class="bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-850 p-2.5 flex flex-col justify-between">
+                            <div class="flex justify-between items-center mb-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+                                <span>Ficha Técnica</span>
+                                <button onclick="copyToClipboard('ficha-${p.sku}', 'btn-c-ficha-${p.sku}')" id="btn-c-ficha-${p.sku}" class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 text-xs transition" title="Copiar Ficha Técnica">
+                                    <i class="fa-solid fa-copy"></i>
+                                </button>
+                            </div>
+                            <textarea id="ficha-${p.sku}" readonly class="w-full bg-transparent font-mono text-[10px] text-slate-600 dark:text-slate-400 h-16 resize-none focus:outline-none overflow-y-auto border-0 leading-relaxed">${p.ficha}</textarea>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(pCard);
+            });
+        }
+
+        function filterProducts() {
+            renderProducts();
+        }
+
+        function toggleSelectProduct(sku) {
+            const index = selectedProductsForCrossSelling.indexOf(sku);
+            if (index > -1) {
+                selectedProductsForCrossSelling.splice(index, 1);
+            } else {
+                selectedProductsForCrossSelling.push(sku);
+            }
+
+            document.getElementById('selected-count').innerText = selectedProductsForCrossSelling.length;
+            document.getElementById('cross-selling-items-desc').innerText = `${selectedProductsForCrossSelling.length} seleccionados`;
+            updateCrossSellingOutput();
+        }
+
+        function updateCrossSellingOutput() {
+            const ta = document.getElementById('cross-selling-output');
+            if (selectedProductsForCrossSelling.length === 0) {
+                ta.value = "⚠️ No hay productos seleccionados.\nSelecciona los checkboxes de los artículos del catálogo a ofertar.";
+                return;
+            }
+
+            let text = "🔥 Aprovecha nuestra ¡¡¡OFERTA ESPECIAL!!! 🔥\n\n";
+
+            selectedProductsForCrossSelling.forEach(sku => {
+                const p = products.find(prod => prod.sku === sku);
+                if (p) {
+                    const currentFactor = p.cobertura_ind ? p.cobertura_ind : globalFactor;
+                    const p_usd_ajustado = p.precio_divisa * currentFactor;
+                    const textCrossItem = p.social_cross
+                        .replaceAll('[PRECIO_USD]', p.precio_divisa.toFixed(2))
+                        .replaceAll('[PRECIO_BCV]', p_usd_ajustado.toFixed(2));
+
+                    text += textCrossItem + "\n\n";
+                }
+            });
+
+            text += "✅ Rotación rápida 👉 ¡Reserva la tuya!\n";
+            text += "📲 Escríbenos o visítanos hoy. @a2ltstock\n\n";
+            text += "💱 Precios en Bs sujetos a cambio según tasa BCV\n\n";
+            text += "💡 ¿Necesitas accesorios? Consulta por nuestros electrodos, alambres para soldar y caretas de protección.";
+
+            ta.value = text;
+        }
+
+        function copyToClipboard(elementId, btnId) {
+            const el = document.getElementById(elementId);
+            const text = el.value || el.innerText;
+
+            const dummy = document.createElement("textarea");
+            document.body.appendChild(dummy);
+            dummy.value = text;
+            dummy.select();
+            document.execCommand('copy');
+            document.body.removeChild(dummy);
+
+            showToast("Copiado al portapapeles con éxito!");
+            if (btnId) animateButtonSuccess(btnId);
+        }
+
+        function animateButtonSuccess(btnId) {
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                const oldContent = btn.innerHTML;
+                btn.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-500"></i>`;
+                setTimeout(() => {
+                    btn.innerHTML = oldContent;
+                }, 1500);
+            }
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            document.getElementById('toast-message').innerText = msg;
+            t.className = "opacity-100 pointer-events-auto fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 transition-all duration-300 z-50 text-xs font-semibold";
+            setTimeout(() => {
+                t.className = "opacity-0 pointer-events-none fixed bottom-6 right-6 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 transition-all duration-300 z-50 text-xs font-semibold";
+            }, 2500);
+        }
+
+        function showSaleItemDropdown() {
+            const dropdown = document.getElementById('sale-item-dropdown');
+            dropdown.classList.remove('hidden');
+            filterSaleItemDropdown();
+        }
+
+        function filterSaleItemDropdown() {
+            const searchVal = document.getElementById('sale-item-search').value.toLowerCase();
+            const dropdown = document.getElementById('sale-item-dropdown');
+            dropdown.innerHTML = '';
+
+            const filtered = products.filter(p => {
+                return p.sku.toLowerCase().includes(searchVal) || p.nombre.toLowerCase().includes(searchVal);
+            });
+
+            if (filtered.length === 0) {
+                dropdown.innerHTML = `<div class="p-3 text-xs text-slate-500 text-center">No se encontraron artículos</div>`;
+                return;
+            }
+
+            filtered.forEach(p => {
+                const opt = document.createElement('div');
+                opt.className = "p-2.5 text-xs text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-750 cursor-pointer flex justify-between items-center transition";
+                opt.innerHTML = `
+                    <div>
+                        <span class="font-bold text-indigo-600 dark:text-indigo-400 mr-2 font-mono">${p.sku}</span>
+                        <span class="font-medium">${p.nombre}</span>
+                    </div>
+                    <span class="text-[10px] font-bold font-mono bg-slate-200 dark:bg-slate-950 px-2 py-0.5 rounded text-emerald-600 dark:text-emerald-400">Stock: ${p.stock}</span>
+                `;
+                opt.onclick = () => {
+                    document.getElementById('sale-item-search').value = `${p.nombre} (${p.sku})`;
+                    document.getElementById('sale-item-selected-sku').value = p.sku;
+                    dropdown.classList.add('hidden');
+                };
+                dropdown.appendChild(opt);
+            });
+        }
+
+        function clearSaleSearch() {
+            document.getElementById('sale-item-search').value = '';
+            document.getElementById('sale-item-selected-sku').value = '';
+            showSaleItemDropdown();
+        }
+
+        document.addEventListener('click', function (event) {
+            const container = document.getElementById('searchable-sale-item-container');
+            const dropdown = document.getElementById('sale-item-dropdown');
+            if (container && !container.contains(event.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        function triggerSimulatedUpload() {
+            const processingDiv = document.getElementById('upload-processing');
+            const resultDiv = document.getElementById('upload-result-panel');
+
+            processingDiv.classList.remove('hidden');
+            resultDiv.classList.add('hidden');
+
+            let bar = document.getElementById('processing-bar');
+            let percentDisplay = document.getElementById('processing-percent');
+            let width = 0;
+
+            let interval = setInterval(() => {
+                if (width >= 60) {
+                    clearInterval(interval);
+                    document.getElementById('modal-collision').classList.remove('hidden');
+                } else {
+                    width += 5;
+                    bar.style.width = width + '%';
+                    percentDisplay.innerText = width + '%';
+                }
+            }, 100);
+        }
+
+        function resolveCollision(action) {
+            document.getElementById('modal-collision').classList.add('hidden');
+
+            if (action === 'cancelar') {
+                showToast("Carga cancelada. Inventario sin modificaciones.");
+                document.getElementById('upload-processing').classList.add('hidden');
+                return;
+            }
+
+            let bar = document.getElementById('processing-bar');
+            let percentDisplay = document.getElementById('processing-percent');
+            let width = 60;
+
+            let interval = setInterval(() => {
+                if (width >= 100) {
+                    clearInterval(interval);
+                    document.getElementById('upload-processing').classList.add('hidden');
+                    const resultPanel = document.getElementById('upload-result-panel');
+                    resultPanel.classList.remove('hidden');
+
+                    const logText = document.getElementById('log-text');
+                    if (action === 'sumar') {
+                        products[1].stock += 15;
+                        products[2].stock += 10;
+                        logText.value = `[REGISTRO] Se ejecutó SUMA de stock por Carga Masiva.\n` +
+                            `[KÁRDEX - ENTRADA] SKU H134: +15 und. Motivo: Suma Carga Masiva\n` +
+                            `[KÁRDEX - ENTRADA] SKU H135: +10 und. Motivo: Suma Carga Masiva\n` +
+                            `[ERROR] Fila 14: SKU "H134" duplicado en origen.\n` +
+                            `[ERROR] Fila 54: El Almacén 'Valencia-Norte' no existe en la base de datos local.`;
+
+                        kardexHistory.unshift(
+                            { datetime: "2026-06-25 11:00", sku: "H134", almacen: "San Diego", tipo: "ENTRADA", qty: 15, concepto: "Entrada Carga Masiva (Suma)" },
+                            { datetime: "2026-06-25 11:00", sku: "H135", almacen: "Valencia", tipo: "ENTRADA", qty: 10, concepto: "Entrada Carga Masiva (Suma)" }
+                        );
+                        document.getElementById('collision-resolve-counter-lbl').innerText = "2 (Suma)";
+                    } else if (action === 'sustituir') {
+                        let oldH134 = products[1].stock;
+                        let oldH135 = products[2].stock;
+
+                        products[1].stock = 15;
+                        products[2].stock = 10;
+                        logText.value = `[REGISTRO] Se ejecutó SUSTITUCIÓN de stock.\n` +
+                            `[KÁRDEX - AJUSTE SALIDA] SKU H134: -${oldH134} und. Motivo: Ajuste Sustitución Carga Masiva\n` +
+                            `[KÁRDEX - ENTRADA] SKU H134: +15 und. Motivo: Entrada por Sustitución Carga Masiva\n` +
+                            `[KÁRDEX - AJUSTE SALIDA] SKU H135: -${oldH135} und. Motivo: Ajuste Sustitución Carga Masiva\n` +
+                            `[KÁRDEX - ENTRADA] SKU H135: +10 und. Motivo: Entrada por Sustitución Carga Masiva\n` +
+                            `[ERROR] Fila 54: El Almacén 'Valencia-Norte' no existe en la base de datos local.`;
+
+                        kardexHistory.unshift(
+                            { datetime: "2026-06-25 11:00", sku: "H134", almacen: "San Diego", tipo: "SALIDA", qty: oldH134, concepto: "Ajuste Salida Sustitución" },
+                            { datetime: "2026-06-25 11:00", sku: "H134", almacen: "San Diego", tipo: "ENTRADA", qty: 15, concepto: "Entrada Sustitución" },
+                            { datetime: "2026-06-25 11:00", sku: "H135", almacen: "Valencia", tipo: "SALIDA", qty: oldH135, concepto: "Ajuste Salida Sustitución" },
+                            { datetime: "2026-06-25 11:00", sku: "H135", almacen: "Valencia", tipo: "ENTRADA", qty: 10, concepto: "Entrada Sustitución" }
+                        );
+                        document.getElementById('collision-resolve-counter-lbl').innerText = "2 (Sustitución)";
+                    }
+
+                    recalculateCombosStock();
+                    renderProducts();
+                    renderKardex();
+                    showToast(`Carga procesada con resolución: ${action.toUpperCase()}`);
+                } else {
+                    width += 10;
+                    bar.style.width = width + '%';
+                    percentDisplay.innerText = width + '%';
+                }
+            }, 150);
+        }
+
+        function downloadLog() {
+            const text = document.getElementById('log-text').value;
+            const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `reporte_errores_a2lt_${Date.now()}.txt`;
+            link.click();
+        }
+
+        function renderKardex() {
+            const tbody = document.getElementById('kardex-table-body');
+            tbody.innerHTML = '';
+
+            const term = document.getElementById('filter-kardex-term').value.toLowerCase();
+            const wh = document.getElementById('filter-kardex-warehouse').value;
+            const fromDate = document.getElementById('filter-kardex-date-from').value;
+            const toDate = document.getElementById('filter-kardex-date-to').value;
+
+            const filteredHistory = kardexHistory.filter(k => {
+                const matchesTerm = k.sku.toLowerCase().includes(term) || k.concepto.toLowerCase().includes(term);
+                const matchesWarehouse = wh === 'all' || k.almacen === wh;
+
+                let matchesDate = true;
+                if (fromDate || toDate) {
+                    const rowDateStr = k.datetime.split(' ')[0];
+                    if (fromDate && rowDateStr < fromDate) matchesDate = false;
+                    if (toDate && rowDateStr > toDate) matchesDate = false;
+                }
+                return matchesTerm && matchesWarehouse && matchesDate;
+            });
+
+            document.getElementById('kardex-count').innerText = filteredHistory.length;
+
+            if (filteredHistory.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-slate-500 text-xs">No se encontraron movimientos que coincidan con los filtros aplicados.</td></tr>`;
+                return;
+            }
+
+            filteredHistory.forEach(k => {
+                const badgeClass = k.tipo === 'ENTRADA' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20';
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
+                row.innerHTML = `
+                    <td class="py-3 px-2 text-slate-500 dark:text-slate-400 whitespace-nowrap">${k.datetime}</td>
+                    <td class="py-3 px-2 text-slate-900 dark:text-slate-200 font-bold">${k.sku}</td>
+                    <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-medium">${k.almacen}</td>
+                    <td class="py-3 px-2 text-center"><span class="px-2 py-0.5 rounded text-[9px] font-bold ${badgeClass}">${k.tipo}</span></td>
+                    <td class="py-3 px-2 text-right font-bold ${k.tipo === 'ENTRADA' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}">${k.tipo === 'ENTRADA' ? '+' : '-'}${k.qty}</td>
+                    <td class="py-3 px-2 text-slate-600 dark:text-slate-400 max-w-xs truncate" title="${k.concepto}">${k.concepto}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function filterKardex() {
+            renderKardex();
+        }
+
+        function clearKardexFilters() {
+            document.getElementById('filter-kardex-term').value = '';
+            document.getElementById('filter-kardex-warehouse').value = 'all';
+            document.getElementById('filter-kardex-date-from').value = '';
+            document.getElementById('filter-kardex-date-to').value = '';
+            renderKardex();
+        }
+
+        function registerManualMovement() {
+            const sku = document.getElementById('kardex-product').value;
+            const wh = document.getElementById('kardex-warehouse').value;
+            const type = document.getElementById('kardex-type').value;
+            const qty = parseInt(document.getElementById('kardex-qty').value);
+            const concept = document.getElementById('kardex-concept').value.trim();
+
+            if (isNaN(qty) || qty <= 0) {
+                showToast("⚠️ Ingresa una cantidad válida.");
+                return;
+            }
+            if (!concept) {
+                showToast("⚠️ Debe especificar un motivo/concepto explícito.");
+                return;
+            }
+
+            const prod = products.find(p => p.sku === sku);
+            if (prod) {
+                if (prod.tipo === "COMBO" && type === "SALIDA") {
+                    let canReduce = true;
+                    prod.receta.forEach(recipeItem => {
+                        const component = products.find(pSub => pSub.sku === recipeItem.sku);
+                        if (!component || component.stock < (recipeItem.qty * qty)) {
+                            canReduce = false;
+                        }
+                    });
+
+                    if (!canReduce) {
+                        showToast("⚠️ Stock insuficiente de componentes de combo.");
+                        return;
+                    }
+
+                    prod.receta.forEach(recipeItem => {
+                        const component = products.find(pSub => pSub.sku === recipeItem.sku);
+                        component.stock -= (recipeItem.qty * qty);
+                    });
+                } else if (prod.tipo === "FISICO") {
+                    if (type === 'ENTRADA') {
+                        prod.stock += qty;
+                    } else {
+                        if (prod.stock < qty) {
+                            showToast("⚠️ Stock físico insuficiente.");
+                            return;
+                        }
+                        prod.stock -= qty;
+                    }
+                } else {
+                    showToast("⚠️ No se puede ingresar stock directo a un combo virtual.");
+                    return;
+                }
+
+                const now = new Date();
+                const nowStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                kardexHistory.unshift({
+                    datetime: nowStr,
+                    sku: sku,
+                    almacen: wh,
+                    tipo: type,
+                    qty: qty,
+                    concepto: concept
+                });
+
+                document.getElementById('kardex-concept').value = '';
+                recalculateCombosStock();
+                renderDashboard();
+                renderProducts();
+                renderKardex();
+                showToast("Asiento manual registrado!");
+            }
+        }
+
+        function simulateSync() {
+            showToast("Sincronizando con Binance & DolarAPI (BCV)...");
+            setTimeout(() => {
+                document.getElementById('input-bcv').value = "60.45";
+                document.getElementById('input-factor').value = "1.39";
+                updateRates();
+                document.getElementById('sync-time-lbl').innerText = "Hace un momento";
+                showToast("Sincronización exitosa!");
+            }, 1200);
+        }
+
+        function generateNoteCorrelative() {
+            document.getElementById('note-correlative-lbl').value = `NE-${lastCorrelative}`;
+        }
+
+        function populateVentasSelects() {
+            const selectC = document.getElementById('note-client-select');
+            selectC.innerHTML = '';
+            contacts.forEach(c => {
+                if (c.type === "CLIENTE") {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.innerText = `${c.name} (${c.id})`;
+                    selectC.appendChild(opt);
+                }
+            });
+
+            const kardexP = document.getElementById('kardex-product');
+            kardexP.innerHTML = '';
+            products.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.sku;
+                opt.innerText = `${p.nombre} (${p.sku})`;
+                kardexP.appendChild(opt);
+            });
+        }
+
+        function quickSetGenericClient() {
+            document.getElementById('note-client-select').value = "V-99999999";
+        }
+
+        function addItemToNote() {
+            const sku = document.getElementById('sale-item-selected-sku').value;
+            const wh = document.getElementById('sale-warehouse-select').value;
+            const qty = parseInt(document.getElementById('sale-item-qty').value);
+
+            if (!sku) {
+                showToast("⚠️ Debe seleccionar un artículo mediante el buscador.");
+                return;
+            }
+            if (isNaN(qty) || qty <= 0) {
+                showToast("⚠️ Ingresa una cantidad válida.");
+                return;
+            }
+
+            const prod = products.find(p => p.sku === sku);
+            if (prod) {
+                if (prod.stock < qty) {
+                    showToast("⚠️ Stock disponible insuficiente para la venta.");
+                    return;
+                }
+
+                const existingItem = draftNoteItems.find(item => item.sku === sku && item.almacen === wh);
+                if (existingItem) {
+                    if (prod.stock < (existingItem.qty + qty)) {
+                        showToast("⚠️ Superas el stock disponible total.");
+                        return;
+                    }
+                    existingItem.qty += qty;
+                } else {
+                    draftNoteItems.push({
+                        sku: sku,
+                        nombre: prod.nombre,
+                        almacen: wh,
+                        qty: qty,
+                        precio: prod.precio_divisa,
+                        tipo: prod.tipo,
+                        receta: prod.receta,
+                        cobertura_ind: prod.cobertura_ind
+                    });
+                }
+
+                document.getElementById('sale-item-search').value = '';
+                document.getElementById('sale-item-selected-sku').value = '';
+                renderNoteItems();
+                recalculateNoteTotal();
+                showToast("Artículo agregado a la nota!");
+            }
+        }
+
+        function removeNoteItem(index) {
+            draftNoteItems.splice(index, 1);
+            renderNoteItems();
+            recalculateNoteTotal();
+        }
+
+        function renderNoteItems() {
+            const tbody = document.getElementById('note-items-tbody');
+            tbody.innerHTML = '';
+
+            if (draftNoteItems.length === 0) {
+                tbody.innerHTML = `
+                    <tr id="empty-note-row">
+                        <td colspan="7" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                            <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                            Aún no has agregado artículos a esta nota de entrega.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            draftNoteItems.forEach((item, index) => {
+                const itemTotal = item.precio * item.qty;
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
+                row.innerHTML = `
+                    <td class="py-3 text-slate-500 dark:text-slate-400 font-bold">${item.sku}</td>
+                    <td class="py-3 text-slate-800 dark:text-slate-200 font-medium">
+                        ${item.nombre}
+                        ${item.tipo === 'COMBO' ? '<span class="text-[9px] bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30 px-1 py-0.5 rounded ml-1">Combo Virtual</span>' : ''}
+                    </td>
+                    <td class="py-3 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
+                    <td class="py-3 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
+                    <td class="py-3 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.precio.toFixed(2)}</td>
+                    <td class="py-3 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
+                    <td class="py-3 text-center">
+                        <button onclick="removeNoteItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function recalculateNoteTotal() {
+            let subtotal = 0;
+            let weightedFactorSum = 0;
+            let totalWeight = 0;
+
+            draftNoteItems.forEach(item => {
+                const itemTotal = item.precio * item.qty;
+                subtotal += itemTotal;
+
+                const factor = item.cobertura_ind ? item.cobertura_ind : globalFactor;
+                weightedFactorSum += factor * itemTotal;
+                totalWeight += itemTotal;
+            });
+
+            const exactFactor = totalWeight > 0 ? (weightedFactorSum / totalWeight) : globalFactor;
+
+            const discountPercent = 5;
+            const discount = subtotal * (discountPercent / 100);
+            const totalUSD = subtotal - discount;
+
+            const totalBCVUSD = totalUSD * exactFactor;
+            const totalVES = totalBCVUSD * globalBCV;
+
+            document.getElementById('note-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
+            document.getElementById('note-discount-usd').innerText = `-$${discount.toFixed(2)} (${discountPercent}%)`;
+            document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
+            document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
+            document.getElementById('note-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+        }
+
+        function processSale() {
+            if (draftNoteItems.length === 0) {
+                showToast("⚠️ No hay productos en la nota de entrega.");
+                return;
+            }
+
+            const clientId = document.getElementById('note-client-select').value;
+            const invoiceRef = document.getElementById('note-invoice-ref').value || "S/Ref";
+            const currentCorrelative = `NE-${lastCorrelative}`;
+
+            draftNoteItems.forEach(item => {
+                const prod = products.find(p => p.sku === item.sku);
+                if (prod) {
+                    if (prod.tipo === "COMBO") {
+                        prod.receta.forEach(rec => {
+                            const subcomp = products.find(pSub => pSub.sku === rec.sku);
+                            if (subcomp) subcomp.stock -= (rec.qty * item.qty);
+                        });
+                    } else {
+                        prod.stock -= item.qty;
+                    }
+
+                    const now = new Date();
+                    const nowStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                    kardexHistory.unshift({
+                        datetime: nowStr,
+                        sku: item.sku,
+                        almacen: item.almacen,
+                        tipo: "SALIDA",
+                        qty: item.qty,
+                        concepto: `Venta Nota ${currentCorrelative} (Fact: ${invoiceRef})`
+                    });
+                }
+            });
+
+            const client = contacts.find(c => c.id === clientId);
+            if (client) {
+                if (isNaN(client.notes_count)) client.notes_count = 1;
+                else client.notes_count++;
+            }
+
+            lastCorrelative++;
+            draftNoteItems = [];
+            document.getElementById('note-invoice-ref').value = '';
+
+            recalculateCombosStock();
+            renderNoteItems();
+            recalculateNoteTotal();
+            generateNoteCorrelative();
+            renderKardex();
+            renderContacts();
+            renderProducts();
+            showToast(`Venta procesada exitosamente en ${currentCorrelative}!`);
+            switchTab('dashboard');
+        }
+
+        function renderCrudProducts() {
+            const tbody = document.getElementById('crud-articulos-tbody');
+            tbody.innerHTML = '';
+            document.getElementById('art-count-lbl').innerText = products.length;
+
+            products.forEach(p => {
+                const isCombo = p.tipo === "COMBO";
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
+                row.innerHTML = `
+                    <td class="py-3 px-2 text-slate-500 dark:text-slate-400 font-bold">${p.sku}</td>
+                    <td class="py-3 px-2 text-slate-500">${p.cod_prov}</td>
+                    <td class="py-3 px-2 text-slate-800 dark:text-slate-200 font-medium">${p.nombre}</td>
+                    <td class="py-3 px-2 text-indigo-600 dark:text-indigo-400 font-semibold">${p.categoria}</td>
+                    <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold font-mono">$${p.costo.toFixed(2)}</td>
+                    <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-mono font-bold">$${p.precio_divisa.toFixed(2)}</td>
+                    <td class="py-3 px-2 text-center">
+                        <span class="px-2 py-0.5 rounded text-[9px] font-bold ${isCombo ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-900/50' : 'bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800'}">
+                            ${p.tipo}
+                        </span>
+                    </td>
+                    <td class="py-3 px-2 text-center flex justify-center gap-1">
+                        <button onclick="editProduct('${p.sku}')" class="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-600/20 dark:hover:bg-indigo-600/40 border border-indigo-100 dark:border-indigo-500/20 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded transition text-[10px]" title="Editar Ficha">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button onclick="deleteProduct('${p.sku}')" class="bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 border border-rose-100 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 px-2 py-1 rounded transition text-[10px]" title="Eliminar">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function openProductForm() {
+            document.getElementById('product-modal-title').innerHTML = `<i class="fa-solid fa-circle-plus text-indigo-500"></i> Crear Artículo de Inventario`;
+            clearProductForm();
+            document.getElementById('modal-product').classList.remove('hidden');
+        }
+
+        function closeProductModal() {
+            document.getElementById('modal-product').classList.add('hidden');
+        }
+
+        function clearProductForm() {
+            document.getElementById('form-p-sku').value = '';
+            document.getElementById('form-p-sku').disabled = false;
+            document.getElementById('form-p-cod-prov').value = '';
+            document.getElementById('form-p-nombre').value = '';
+            document.getElementById('form-p-categoria').value = 'Hogar';
+            document.getElementById('form-p-tipo').value = 'FISICO';
+            document.getElementById('form-p-costo').value = '0.00';
+            document.getElementById('form-p-precio').value = '0.00';
+
+            document.getElementById('form-p-margen').value = '30.0';
+            document.getElementById('form-p-descuento').value = '5.0';
+            document.getElementById('form-p-cobertura').value = '';
+
+            document.getElementById('form-p-almacen').value = 'San Diego';
+            document.getElementById('form-p-stock').value = '10';
+            document.getElementById('form-p-stock').disabled = false;
+            document.getElementById('form-p-desc').value = '';
+            document.getElementById('form-p-ficha').value = '';
+            document.getElementById('form-p-cross').value = '';
+            document.getElementById('form-p-quick').value = '';
+            activeRecipe = [];
+            toggleFormComboRecipe();
+        }
+
+        function toggleFormComboRecipe() {
+            const isCombo = document.getElementById('form-p-tipo').value === 'COMBO';
+            const recipeSect = document.getElementById('form-recipe-section');
+            const stockInput = document.getElementById('form-p-stock');
+
+            if (isCombo) {
+                recipeSect.classList.remove('hidden');
+                stockInput.value = '0';
+                stockInput.disabled = true;
+                populateRecipeComponentSelect();
+                renderRecipeTbody();
+            } else {
+                recipeSect.classList.add('hidden');
+                stockInput.disabled = false;
+            }
+        }
+
+        function populateRecipeComponentSelect() {
+            const select = document.getElementById('form-recipe-component');
+            select.innerHTML = '';
+            products.forEach(p => {
+                if (p.tipo === "FISICO") {
+                    const opt = document.createElement('option');
+                    opt.value = p.sku;
+                    opt.innerText = `${p.nombre} (${p.sku})`;
+                    select.appendChild(opt);
+                }
+            });
+        }
+
+        function addComponentToRecipe() {
+            const compSku = document.getElementById('form-recipe-component').value;
+            const qty = parseInt(document.getElementById('form-recipe-qty').value);
+
+            if (!compSku || isNaN(qty) || qty <= 0) return;
+
+            const existing = activeRecipe.find(r => r.sku === compSku);
+            if (existing) {
+                existing.qty += qty;
+            } else {
+                activeRecipe.push({ sku: compSku, qty: qty });
+            }
+
+            renderRecipeTbody();
+        }
+
+        function removeComponentFromRecipe(sku) {
+            activeRecipe = activeRecipe.filter(r => r.sku !== sku);
+            renderRecipeTbody();
+        }
+
+        function renderRecipeTbody() {
+            const tbody = document.getElementById('form-recipe-tbody');
+            tbody.innerHTML = '';
+            activeRecipe.forEach(r => {
+                const row = document.createElement('tr');
+                row.className = "border-b border-slate-100 dark:border-slate-800/80";
+                row.innerHTML = `
+                    <td class="py-1 text-slate-800 dark:text-slate-300 font-medium">${r.sku}</td>
+                    <td class="py-1 text-center font-bold text-indigo-600 dark:text-indigo-400">${r.qty}</td>
+                    <td class="py-1 text-right">
+                        <button onclick="removeComponentFromRecipe('${r.sku}')" class="text-rose-600 hover:text-rose-500"><i class="fa-solid fa-xmark"></i></button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function saveProduct() {
+            const sku = document.getElementById('form-p-sku').value.trim();
+            const codProv = document.getElementById('form-p-cod-prov').value.trim();
+            const nombre = document.getElementById('form-p-nombre').value.trim();
+            const cat = document.getElementById('form-p-categoria').value;
+            const tipo = document.getElementById('form-p-tipo').value;
+            const costo = parseFloat(document.getElementById('form-p-costo').value);
+            const precio = parseFloat(document.getElementById('form-p-precio').value);
+
+            const margen = parseFloat(document.getElementById('form-p-margen').value);
+            const descuento = parseFloat(document.getElementById('form-p-descuento').value);
+            const coberturaVal = document.getElementById('form-p-cobertura').value;
+            const cobertura = coberturaVal ? parseFloat(coberturaVal) : null;
+
+            const wh = document.getElementById('form-p-almacen').value;
+            const stock = parseInt(document.getElementById('form-p-stock').value) || 0;
+            const desc = document.getElementById('form-p-desc').value.trim();
+            const ficha = document.getElementById('form-p-ficha').value.trim();
+            const cross = document.getElementById('form-p-cross').value.trim();
+            const quick = document.getElementById('form-p-quick').value.trim();
+
+            if (!sku || !nombre) {
+                showToast("⚠️ SKU y Nombre son campos requeridos.");
+                return;
+            }
+
+            const existingIndex = products.findIndex(p => p.sku === sku);
+            const newProd = {
+                sku: sku,
+                cod_prov: codProv || `PROV-${sku}`,
+                nombre: nombre,
+                categoria: cat,
+                tipo: tipo,
+                receta: tipo === "COMBO" ? [...activeRecipe] : [],
+                costo: isNaN(costo) ? 0 : costo,
+                precio_divisa: isNaN(precio) ? 0 : precio,
+                stock: stock,
+                stock_minimo: 5,
+                almacen: wh,
+                descripcion: desc || "Sin descripción",
+                social_quick: quick || `Disponibilidad de ${nombre} $[PRECIO_USD]`,
+                social_cross: cross || `💨 ${nombre} $[PRECIO_USD]`,
+                ficha: ficha || "• Sin especificaciones",
+                margen_ind: isNaN(margen) ? 30.0 : margen,
+                descuento_ind: isNaN(descuento) ? 5.0 : descuento,
+                cobertura_ind: cobertura
+            };
+
+            if (existingIndex > -1) {
+                products[existingIndex] = newProd;
+                showToast("Artículo modificado correctamente.");
+            } else {
+                products.push(newProd);
+                showToast("Nuevo artículo agregado al catálogo.");
+            }
+
+            recalculateCombosStock();
+            closeProductModal();
+            renderCrudProducts();
+            renderProducts();
+            renderDashboard();
+        }
+
+        function editProduct(sku) {
+            const prod = products.find(p => p.sku === sku);
+            if (prod) {
+                openProductForm();
+                document.getElementById('product-modal-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-500"></i> Editar Artículo de Catálogo`;
+
+                document.getElementById('form-p-sku').value = prod.sku;
+                document.getElementById('form-p-sku').disabled = true;
+                document.getElementById('form-p-cod-prov').value = prod.cod_prov;
+                document.getElementById('form-p-nombre').value = prod.nombre;
+                document.getElementById('form-p-categoria').value = prod.categoria;
+                document.getElementById('form-p-tipo').value = prod.tipo;
+                document.getElementById('form-p-costo').value = prod.costo;
+                document.getElementById('form-p-precio').value = prod.precio_divisa;
+
+                document.getElementById('form-p-margen').value = prod.margen_ind !== undefined ? prod.margen_ind : '30.0';
+                document.getElementById('form-p-descuento').value = prod.descuento_ind !== undefined ? prod.descuento_ind : '5.0';
+                document.getElementById('form-p-cobertura').value = prod.cobertura_ind ? prod.cobertura_ind : '';
+
+                document.getElementById('form-p-almacen').value = prod.almacen;
+                document.getElementById('form-p-stock').value = prod.stock;
+                document.getElementById('form-p-desc').value = prod.descripcion;
+                document.getElementById('form-p-ficha').value = prod.ficha;
+                document.getElementById('form-p-cross').value = prod.social_cross;
+                document.getElementById('form-p-quick').value = prod.social_quick;
+
+                if (prod.tipo === "COMBO") {
+                    activeRecipe = [...prod.receta];
+                }
+                toggleFormComboRecipe();
+            }
+        }
+
+        function deleteProduct(sku) {
+            products = products.filter(p => p.sku !== sku);
+            recalculateCombosStock();
+            renderCrudProducts();
+            renderProducts();
+            renderDashboard();
+            showToast("Artículo eliminado de la sesión.");
+        }
+
+        function renderContacts() {
+            const clientTbody = document.getElementById('contacts-clients-tbody');
+            const supplierTbody = document.getElementById('contacts-suppliers-tbody');
+
+            clientTbody.innerHTML = '';
+            supplierTbody.innerHTML = '';
+
+            let countClients = 0;
+            let countSuppliers = 0;
+
+            contacts.forEach(c => {
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
+
+                if (c.type === "CLIENTE") {
+                    countClients++;
+                    row.innerHTML = `
+                        <td class="py-2.5 text-slate-500 dark:text-slate-400 font-bold">${c.id}</td>
+                        <td class="py-2.5 text-slate-800 dark:text-slate-200 font-semibold">${c.name}</td>
+                        <td class="py-2.5 text-indigo-600 dark:text-indigo-400 font-mono font-bold">${c.phone}</td>
+                        <td class="py-2.5 text-slate-500 dark:text-slate-400 font-mono">${c.social || 'No aplica'}</td>
+                        <td class="py-2.5 text-right">
+                            <button onclick="viewContactDetails('${c.id}')" class="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-600/10 dark:hover:bg-indigo-600/30 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded transition text-[10px] font-bold">
+                                Ver Ficha
+                            </button>
+                        </td>
+                    `;
+                    clientTbody.appendChild(row);
+                } else {
+                    countSuppliers++;
+                    row.innerHTML = `
+                        <td class="py-2.5 text-slate-500 dark:text-slate-400 font-bold">${c.id}</td>
+                        <td class="py-2.5 text-slate-800 dark:text-slate-200 font-semibold">${c.name}</td>
+                        <td class="py-2.5 text-slate-600 dark:text-slate-400 font-mono">${c.phone}</td>
+                        <td class="py-2.5"><span class="bg-emerald-100 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/25 px-2 py-0.5 rounded text-[10px] font-bold">Activo</span></td>
+                        <td class="py-2.5 text-right">
+                            <button onclick="viewContactDetails('${c.id}')" class="bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-600/10 dark:hover:bg-indigo-600/30 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded transition text-[10px] font-bold">
+                                Ver Ficha
+                            </button>
+                        </td>
+                    `;
+                    supplierTbody.appendChild(row);
+                }
+            });
+
+            document.getElementById('client-count-lbl').innerText = `Total: ${countClients}`;
+            document.getElementById('supplier-count-lbl').innerText = `Total: ${countSuppliers}`;
+        }
+
+        function openContactModal(type) {
+            document.getElementById('form-c-type').value = type;
+            document.getElementById('contact-modal-title').innerHTML = type === 'CLIENTE' ? `<i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Cliente` : `<i class="fa-solid fa-truck-field text-indigo-500"></i> Registrar Proveedor`;
+            document.getElementById('contact-id-lbl').innerText = type === 'CLIENTE' ? 'Cédula / RIF del Cliente' : 'RIF / ID Fiscal del Proveedor';
+
+            document.getElementById('form-c-id').value = '';
+            document.getElementById('form-c-name').value = '';
+            document.getElementById('form-c-phone').value = '';
+            document.getElementById('form-c-email').value = '';
+            document.getElementById('form-c-social').value = '';
+            document.getElementById('form-c-address').value = '';
+            document.getElementById('form-c-notes').value = '';
+
+            document.getElementById('modal-contact').classList.remove('hidden');
+        }
+
+        function closeContactModal() {
+            document.getElementById('modal-contact').classList.add('hidden');
+        }
+
+        function saveContact() {
+            const type = document.getElementById('form-c-type').value;
+            const id = document.getElementById('form-c-id').value.trim();
+            const name = document.getElementById('form-c-name').value.trim();
+            const phone = document.getElementById('form-c-phone').value.trim();
+            const email = document.getElementById('form-c-email').value.trim();
+            const social = document.getElementById('form-c-social').value.trim();
+            const address = document.getElementById('form-c-address').value.trim();
+            const notes = document.getElementById('form-c-notes').value.trim();
+
+            if (!id || !name) {
+                showToast("⚠️ Completa los campos obligatorios.");
+                return;
+            }
+
+            contacts.push({
+                id: id,
+                name: name,
+                type: type,
+                phone: phone || "Sin contacto",
+                email: email || "Sin correo",
+                social: social || "Sin red",
+                address: address || "Sin dirección",
+                notes: notes || "Sin observaciones",
+                notes_count: type === 'CLIENTE' ? 0 : "Activo"
+            });
+
+            closeContactModal();
+            renderContacts();
+            populateVentasSelects();
+            showToast("Contacto guardado de manera exitosa!");
+        }
+
+        function viewContactDetails(contactId) {
+            const contact = contacts.find(c => c.id === contactId);
+            if (contact) {
+                document.getElementById('detail-c-name').innerText = contact.name;
+                document.getElementById('detail-c-id').innerText = contact.id;
+                document.getElementById('detail-c-type').innerText = contact.type;
+                document.getElementById('detail-c-phone').innerText = contact.phone;
+                document.getElementById('detail-c-social').innerText = contact.social || '--';
+                document.getElementById('detail-c-address').innerText = contact.address || '--';
+                document.getElementById('detail-c-notes').innerText = contact.notes || 'Sin comentarios registrados.';
+
+                document.getElementById('modal-contact-details').classList.remove('hidden');
+            }
+        }
+
+        function closeContactDetailsModal() {
+            document.getElementById('modal-contact-details').classList.add('hidden');
+        }
+
+        function toggleCrossSellingPanel() {
+            const panel = document.getElementById('cross-selling-panel');
+            panel.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+
+</html>

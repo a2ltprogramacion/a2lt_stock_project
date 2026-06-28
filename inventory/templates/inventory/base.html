@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A2LT Stock - Sistema de Control y Social Selling</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome para Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <script>
+        // Init theme from localStorage
+        if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+        
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#1e293b',
+                            950: '#0b0f19',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* Custom scrollbar para simular UI nativa */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .dark ::-webkit-scrollbar-track {
+            background: #0b0f19;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6366f1;
+        }
+    </style>
+</head>
+
+<body
+    class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 min-h-screen flex flex-col overflow-x-hidden">
+
+    <!-- TOP BAR / HEADER -->
+    <header
+        class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 sticky top-0 z-40 shadow-sm transition-colors duration-300">
+        <div class="flex items-center gap-3">
+            <div
+                class="bg-indigo-600 text-white p-2.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/10">
+                <i class="fa-solid fa-boxes-stacked text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-base leading-none flex items-center gap-2">
+                    A2LT Stock <span
+                        class="text-[10px] bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full font-bold">V1.0
+                        PRO</span>
+                </h1>
+                <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">Control Cambiario, Inventarios & Social
+                    Selling</p>
+            </div>
+        </div>
+
+        <!-- INDICADORES EN TIEMPO REAL -->
+        <div
+            class="flex flex-wrap items-center gap-4 bg-slate-100 dark:bg-slate-950 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-850 text-xs transition-colors duration-300">
+            <!-- Tasa Oficial BCV: Verde para representar dinero real legal -->
+            <div class="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span class="font-semibold text-slate-500 dark:text-slate-400">Tasa Oficial (BCV):</span>
+                <span id="header-bcv-display"
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ config.tasa_bcv|stringformat:".2f"|default:"0.00" }} Bs</span>
+            </div>
+            <div class="w-[1px] h-4 bg-slate-300 dark:bg-slate-800 hidden md:block"></div>
+            <!-- Factor Cobertura: Azul para estabilidad de cobertura de costos -->
+            <div class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                <i class="fa-solid fa-shield-halved text-[10px]"></i>
+                <span class="font-semibold text-slate-500 dark:text-slate-400">F. Cobertura:</span>
+                <span id="header-factor-display"
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ config.factor_cobertura|stringformat:".2f"|default:"1.00" }}x</span>
+            </div>
+            <div class="w-[1px] h-4 bg-slate-300 dark:bg-slate-800 hidden md:block"></div>
+            <!-- Tasa Ajustada: Naranja para advertir que es la tasa con factor de protección aplicado -->
+            <div class="flex items-center gap-2 text-orange-600 dark:text-orange-400">
+                <i class="fa-solid fa-calculator text-[10px]"></i>
+                <span class="font-semibold text-slate-500 dark:text-slate-400">Tasa Ajustada:</span>
+                <span id="header-adjusted-display"
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ tasa_ajustada|stringformat:".2f"|default:config.tasa_mercado|stringformat:".2f" }} Bs</span>
+            </div>
+        </div>
+        <!-- CONTROLES ADICIONALES: SELECTOR DE TEMA -->
+        <div class="flex items-center gap-3">
+            <button onclick="toggleTheme()"
+                class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 transition"
+                title="Cambiar Tema">
+                <i id="theme-toggle-icon" class="fa-solid fa-moon"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTAINER -->
+    <div class="flex flex-1 overflow-hidden h-[calc(100vh-57px)]">
+
+        <!-- SIDEBAR NAVIGATION -->
+        <aside
+            class="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4 flex flex-col gap-1 shrink-0 overflow-y-auto transition-colors duration-300">
+            <span
+                class="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 px-3 mb-2 block tracking-wider">Módulos
+                de Operación</span>
+
+            <a href="{% url 'inventory:dashboard' %}" id="btn-tab-dashboard"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'dashboard' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-chart-line text-base w-5 text-center {% if request.resolver_match.url_name == 'dashboard' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Dashboard General
+            </a>
+            <a href="{% url 'inventory:catalogo' %}" id="btn-tab-catalogo"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'catalogo' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-tags text-base w-5 text-center {% if request.resolver_match.url_name == 'catalogo' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Catálogo y Redes
+            </a>
+            <a href="{% url 'inventory:ventas' %}" id="btn-tab-ventas"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'ventas' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-file-invoice-dollar text-base w-5 text-center {% if request.resolver_match.url_name == 'ventas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Notas de Entrega (Venta)
+            </a>
+            <a href="{% url 'inventory:compras' %}" id="btn-tab-compras"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'compras' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-truck-ramp-box text-base w-5 text-center {% if request.resolver_match.url_name == 'compras' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Carga de Compras / Proveedores
+            </a>
+            <a href="{% url 'inventory:reversos' %}" id="btn-tab-reversos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'reversos' %}active bg-red-600/10 dark:bg-red-600/15 text-red-600 dark:text-red-400 border-l-4 border-red-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'reversos' %}text-red-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Reversos y Anulaciones
+            </a>
+            <a href="{% url 'inventory:articulos' %}" id="btn-tab-articulos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'articulos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-folder-plus text-base w-5 text-center {% if request.resolver_match.url_name == 'articulos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Fichas / Artículos
+            </a>
+            <a href="{% url 'inventory:carga_masiva' %}" id="btn-tab-carga"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'carga_masiva' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-file-excel text-base w-5 text-center {% if request.resolver_match.url_name == 'carga_masiva' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Carga Masiva (Excel)
+            </a>
+            <a href="{% url 'inventory:movimientos' %}" id="btn-tab-movimientos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'movimientos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-right-left text-base w-5 text-center {% if request.resolver_match.url_name == 'movimientos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Kárdex Integrado
+            </a>
+            <a href="{% url 'inventory:contactos' %}" id="btn-tab-contactos"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'contactos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-users text-base w-5 text-center {% if request.resolver_match.url_name == 'contactos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Clientes y Proveedores
+            </a>
+            <a href="{% url 'inventory:configuracion' %}" id="btn-tab-config"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'configuracion' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-sliders text-base w-5 text-center {% if request.resolver_match.url_name == 'configuracion' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Configuración Global
+            </a>
+
+            <!-- PROFILE SUMMARY -->
+            <div
+                class="mt-auto pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <div
+                    class="w-8 h-8 rounded-full bg-indigo-650 flex items-center justify-center font-bold text-white border border-indigo-500">
+                    OP
+                </div>
+                <div class="flex-1 w-full overflow-hidden">
+                    <p class="font-bold text-slate-800 dark:text-slate-200 text-[11px] truncate">{{ request.user.username|title|default:"Operador" }}</p>
+                    {% if request.user.perfil and request.user.perfil.empresas_permitidas.count > 1 %}
+                        <form action="{% url 'inventory:cambiar_empresa' %}" method="POST" class="mt-1 w-full">
+                            {% csrf_token %}
+                            <select name="empresa_id" onchange="this.form.submit()" class="w-full bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded px-1 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 focus:outline-none">
+                                {% for e in request.user.perfil.empresas_permitidas.all %}
+                                    <option value="{{ e.id }}" {% if request.session.empresa_id == e.id %}selected{% endif %}>{{ e.nombre|truncatechars:15 }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                    {% else %}
+                        <p class="text-[9px] truncate">Empresa: <span class="text-indigo-600 dark:text-indigo-400 font-semibold">{{ request.user.perfil.empresa_activa.nombre|default:"No asignada"|truncatechars:15 }}</span></p>
+                    {% endif %}
+                </div>
+                <a href="{% url 'inventory:logout' %}" title="Cerrar Sesión" class="ml-auto text-rose-500 hover:text-rose-400 bg-rose-50 dark:bg-rose-500/10 p-2 rounded-lg transition-colors">
+                    <i class="fa-solid fa-power-off"></i>
+                </a>
+            </div>
+        </aside>
+
+        <!-- CONTENT VIEWPORT -->
+        <main class="flex-1 p-6 overflow-y-auto bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+            {% if messages %}
+                <div class="mb-6 space-y-2">
+                    {% for message in messages %}
+                        <div class="p-4 rounded-xl text-sm font-semibold {% if message.tags == 'error' %}bg-rose-950/40 text-rose-400 border border-rose-900{% else %}bg-slate-800 text-slate-100 border border-slate-700{% endif %}">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+
+    </div>
+
+    <!-- Theme and Global Utilities script -->
+    <script>
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.toggle('dark');
+            const themeIcon = document.getElementById('theme-toggle-icon');
+            if (isDark) {
+                localStorage.setItem('theme', 'dark');
+                if (themeIcon) themeIcon.className = 'fa-solid fa-sun text-yellow-400';
+            } else {
+                localStorage.setItem('theme', 'light');
+                if (themeIcon) themeIcon.className = 'fa-solid fa-moon text-slate-700';
+            }
+        }
+
+        // Set initial icon on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const themeIcon = document.getElementById('theme-toggle-icon');
+            if (themeIcon) {
+                if (document.documentElement.classList.contains('dark')) {
+                    themeIcon.className = 'fa-solid fa-sun text-yellow-400';
+                } else {
+                    themeIcon.className = 'fa-solid fa-moon text-slate-700';
+                }
+            }
+        });
+    </script>
+</body>
+</html>

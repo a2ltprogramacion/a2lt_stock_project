@@ -1,0 +1,392 @@
+{% extends 'inventory/base.html' %}
+
+{% block title %}Carga Masiva - A2LT Stock{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto space-y-6">
+    
+    <!-- Título y Descripción -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-zinc-100">Carga Masiva de Inventario</h1>
+            <p class="mt-2 text-gray-600 dark:text-zinc-400">
+                Sube un archivo Excel (.xlsx) para actualizar el stock. Los artículos nuevos se crearán automáticamente.
+                En caso de colisión de cantidades, el sistema te pedirá confirmación.
+            </p>
+        </div>
+        <a href="{% url 'inventory:descargar_plantilla' %}" class="shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-download"></i> Descargar Plantilla Excel
+        </a>
+    </div>
+
+    <!-- Formulario de Carga (Drag & Drop) -->
+    <div class="bg-white dark:bg-zinc-800 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-700 p-6">
+        <form id="form-carga" class="space-y-6" enctype="multipart/form-data">
+            {% csrf_token %}
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-2">Almacén Destino por Defecto</label>
+                <select name="almacen_id" required class="w-full bg-gray-50 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 text-gray-900 dark:text-zinc-100 rounded-lg focus:ring-corporate-500 focus:border-corporate-500 block p-2.5">
+                    <option value="" disabled selected>Seleccione un almacén...</option>
+                    {% for almacen in almacenes %}
+                        <option value="{{ almacen.pk }}">{{ almacen.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Drag and Drop Area -->
+            <div id="drop-zone" class="flex items-center justify-center w-full">
+                <label for="archivo_excel" class="flex flex-col items-center justify-center w-full h-48 border-2 border-gray-300 dark:border-zinc-600 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:hover:bg-zinc-800 dark:bg-zinc-900 hover:bg-gray-100 transition-colors">
+                    <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                        <i class="ph ph-file-xls text-4xl text-gray-400 dark:text-zinc-500 mb-3"></i>
+                        <p class="mb-2 text-sm text-gray-500 dark:text-zinc-400"><span class="font-semibold">Haz clic para buscar</span> o arrastra y suelta tu archivo aquí</p>
+                        <p class="text-xs text-gray-500 dark:text-zinc-500">Solo formato .xlsx soportado</p>
+                    </div>
+                    <input id="archivo_excel" name="archivo_excel" type="file" class="hidden" accept=".xlsx" required />
+                </label>
+            </div>
+            
+            <!-- Archivo Seleccionado Feedback -->
+            <div id="file-name-display" class="hidden text-sm text-corporate-600 dark:text-corporate-500 font-medium text-center"></div>
+
+            <!-- Loader y Botón -->
+            <div class="flex items-center justify-between">
+                <div id="loading-indicator" class="hidden flex items-center text-corporate-600 dark:text-corporate-500 font-medium">
+                    <i class="ph ph-spinner animate-spin text-xl mr-2"></i> Procesando archivo, por favor espera...
+                </div>
+                <button type="submit" id="btn-submit-carga" class="ml-auto text-white bg-corporate-600 hover:bg-corporate-700 focus:ring-4 focus:ring-corporate-300 font-medium rounded-lg text-sm px-6 py-2.5 dark:bg-corporate-600 dark:hover:bg-corporate-700 focus:outline-none dark:focus:ring-corporate-800 transition-colors">
+                    Procesar Inventario
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Resultados y Logs (Oculto por defecto) -->
+    <div id="panel-resultados" class="hidden bg-white dark:bg-zinc-800 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-700 p-6 space-y-4">
+        <h2 class="text-xl font-bold text-gray-900 dark:text-zinc-100 border-b border-gray-200 dark:border-zinc-700 pb-2">Resultado del Procesamiento</h2>
+        
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="p-4 rounded-lg bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700">
+                <p class="text-sm text-gray-500 dark:text-zinc-400">Procesadas</p>
+                <p id="res-procesadas" class="text-2xl font-bold text-gray-900 dark:text-zinc-100">0</p>
+            </div>
+            <div class="p-4 rounded-lg bg-green-50 dark:bg-zinc-900 border border-green-200 dark:border-zinc-700">
+                <p class="text-sm text-green-600 dark:text-emerald-500">Creados</p>
+                <p id="res-creados" class="text-2xl font-bold text-green-700 dark:text-emerald-400">0</p>
+            </div>
+            <div class="p-4 rounded-lg bg-blue-50 dark:bg-zinc-900 border border-blue-200 dark:border-zinc-700">
+                <p class="text-sm text-blue-600 dark:text-blue-500">Actualizados</p>
+                <p id="res-actualizados" class="text-2xl font-bold text-blue-700 dark:text-blue-400">0</p>
+            </div>
+            <div class="p-4 rounded-lg bg-red-50 dark:bg-zinc-900 border border-red-200 dark:border-zinc-700">
+                <p class="text-sm text-red-600 dark:text-red-500">Errores</p>
+                <p id="res-errores" class="text-2xl font-bold text-red-700 dark:text-red-400">0</p>
+            </div>
+        </div>
+
+        <!-- Acciones del Reporte -->
+        <div class="flex gap-3 pt-4">
+            <button id="btn-copy-log" class="flex items-center text-sm px-4 py-2 bg-gray-100 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors">
+                <i class="ph ph-copy mr-2"></i> Copiar Reporte
+            </button>
+            <button id="btn-download-log" class="flex items-center text-sm px-4 py-2 bg-gray-100 dark:bg-zinc-700 text-gray-700 dark:text-zinc-300 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-600 transition-colors">
+                <i class="ph ph-download-simple mr-2"></i> Descargar .txt
+            </button>
+        </div>
+        <textarea id="raw-report-text" class="hidden"></textarea>
+    </div>
+
+</div>
+
+<!-- MODAL DE COLISIONES (Interactivo) -->
+<div id="modal-colisiones" tabindex="-1" aria-hidden="true" class="hidden overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-screen bg-gray-900/50 dark:bg-black/70 backdrop-blur-sm flex">
+    <div class="relative p-4 w-full max-w-4xl max-h-full">
+        <!-- Modal content -->
+        <div class="relative bg-white dark:bg-zinc-800 rounded-xl shadow-2xl border border-gray-200 dark:border-zinc-700 flex flex-col max-h-[90vh]">
+            <!-- Header -->
+            <div class="flex items-center justify-between p-5 border-b border-gray-200 dark:border-zinc-700 rounded-t shrink-0">
+                <h3 class="text-xl font-bold text-gray-900 dark:text-zinc-100 flex items-center">
+                    <i class="ph-fill ph-warning-circle text-orange-500 mr-2 text-2xl"></i>
+                    Resolución de Colisiones (<span id="colisiones-count">0</span> pendientes)
+                </h3>
+            </div>
+            <!-- Body: Lista dinámica de colisiones -->
+            <div class="p-5 space-y-4 overflow-y-auto flex-1" id="colisiones-list">
+                <!-- Se inyectan items vía JS -->
+            </div>
+            <!-- Footer -->
+            <div class="flex items-center p-5 border-t border-gray-200 dark:border-zinc-700 rounded-b shrink-0 bg-gray-50 dark:bg-zinc-900">
+                <p class="text-sm text-gray-500 dark:text-zinc-400">Resuelve todas las colisiones para continuar operando en esta ventana.</p>
+                <button id="btn-close-modal" type="button" class="hidden ml-auto text-white bg-corporate-600 hover:bg-corporate-700 focus:ring-4 focus:outline-none focus:ring-corporate-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-corporate-600 dark:hover:bg-corporate-700 dark:focus:ring-corporate-800">Finalizar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Usamos un IIFE para aislar el scope
+(() => {
+    // Referencias DOM
+    const form = document.getElementById('form-carga');
+    const inputExcel = document.getElementById('archivo_excel');
+    const dropZone = document.getElementById('drop-zone');
+    const fileNameDisplay = document.getElementById('file-name-display');
+    const btnSubmit = document.getElementById('btn-submit-carga');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    
+    const panelResultados = document.getElementById('panel-resultados');
+    const resProcesadas = document.getElementById('res-procesadas');
+    const resCreados = document.getElementById('res-creados');
+    const resActualizados = document.getElementById('res-actualizados');
+    const resErrores = document.getElementById('res-errores');
+    
+    const btnCopyLog = document.getElementById('btn-copy-log');
+    const btnDownloadLog = document.getElementById('btn-download-log');
+    const rawReportText = document.getElementById('raw-report-text');
+
+    const modalColisiones = document.getElementById('modal-colisiones');
+    const colisionesList = document.getElementById('colisiones-list');
+    const colisionesCount = document.getElementById('colisiones-count');
+    const btnCloseModal = document.getElementById('btn-close-modal');
+
+    // Drag & Drop UX
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+    });
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => {
+            dropZone.firstElementChild.classList.add('border-corporate-500', 'bg-corporate-50', 'dark:bg-zinc-700');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => {
+            dropZone.firstElementChild.classList.remove('border-corporate-500', 'bg-corporate-50', 'dark:bg-zinc-700');
+        }, false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        let dt = e.dataTransfer;
+        let files = dt.files;
+        if(files.length > 0) {
+            inputExcel.files = files;
+            updateFileName();
+        }
+    });
+
+    inputExcel.addEventListener('change', updateFileName);
+
+    function updateFileName() {
+        if(inputExcel.files.length > 0) {
+            fileNameDisplay.textContent = `Archivo cargado: ${inputExcel.files[0].name}`;
+            fileNameDisplay.classList.remove('hidden');
+        } else {
+            fileNameDisplay.classList.add('hidden');
+        }
+    }
+
+    // Submit del Formulario vía Fetch
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const formData = new FormData(form);
+        
+        btnSubmit.disabled = true;
+        btnSubmit.classList.add('opacity-50', 'cursor-not-allowed');
+        loadingIndicator.classList.remove('hidden');
+        panelResultados.classList.add('hidden');
+        
+        try {
+            const response = await fetch("{% url 'inventory:carga_masiva' %}", {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken') // Function definida en base.html
+                }
+            });
+            
+            const data = await response.json();
+            
+            if(response.ok && data.ok) {
+                // Llenar reporte
+                resProcesadas.textContent = data.filas_procesadas;
+                resCreados.textContent = data.articulos_creados;
+                resActualizados.textContent = data.articulos_actualizados;
+                resErrores.textContent = data.filas_error;
+                rawReportText.value = data.reporte_txt;
+                
+                panelResultados.classList.remove('hidden');
+                form.reset();
+                fileNameDisplay.classList.add('hidden');
+                
+                // Mostrar modal si hay colisiones
+                if(data.hay_colisiones && data.colisiones.length > 0) {
+                    renderizarColisiones(data.colisiones);
+                    modalColisiones.classList.remove('hidden');
+                }
+            } else {
+                alert(`Error en procesamiento: ${data.error || 'Error desconocido'}`);
+            }
+        } catch (error) {
+            alert(`Fallo en la comunicación con el servidor: ${error.message}`);
+        } finally {
+            btnSubmit.disabled = false;
+            btnSubmit.classList.remove('opacity-50', 'cursor-not-allowed');
+            loadingIndicator.classList.add('hidden');
+        }
+    });
+
+    // Reporte Actions
+    btnCopyLog.addEventListener('click', () => {
+        navigator.clipboard.writeText(rawReportText.value)
+            .then(() => alert('Reporte copiado al portapapeles'))
+            .catch(() => alert('No se pudo copiar el reporte'));
+    });
+
+    btnDownloadLog.addEventListener('click', () => {
+        const blob = new Blob([rawReportText.value], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Reporte_Carga_Masiva_${new Date().getTime()}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    });
+
+    // Renderizado y Manejo del Modal de Colisiones
+    function renderizarColisiones(colisiones) {
+        colisionesList.innerHTML = '';
+        colisionesCount.textContent = colisiones.length;
+        btnCloseModal.classList.add('hidden');
+
+        colisiones.forEach(c => {
+            const item = document.createElement('div');
+            item.id = `colision-item-${c.sku}`;
+            item.className = "bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg p-4 transition-all duration-300";
+            
+            item.innerHTML = `
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200 text-xs font-bold px-2 py-0.5 rounded">${c.sku}</span>
+                            <h4 class="font-bold text-gray-900 dark:text-zinc-100">${c.nombre}</h4>
+                        </div>
+                        <p class="text-sm text-gray-600 dark:text-zinc-400">
+                            Stock Físico Actual: <strong class="text-gray-900 dark:text-zinc-100">${c.stock_actual}</strong> en ${c.almacen_nombre}
+                            <br>
+                            Cantidad en Excel: <strong class="text-corporate-600 dark:text-corporate-400">${c.cantidad_excel}</strong>
+                        </p>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                        <button type="button" data-action="SUMAR" data-sku="${c.sku}" data-lote="${c.lote_id}" data-almacen="${c.almacen_id}" data-qty="${c.cantidad_excel}" 
+                            class="colision-action bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                            Sumar
+                        </button>
+                        <button type="button" data-action="SUSTITUIR" data-sku="${c.sku}" data-lote="${c.lote_id}" data-almacen="${c.almacen_id}" data-qty="${c.cantidad_excel}"
+                            class="colision-action bg-corporate-600 hover:bg-corporate-700 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                            Sustituir
+                        </button>
+                        <button type="button" data-action="CANCELAR" data-sku="${c.sku}" data-lote="${c.lote_id}" data-almacen="${c.almacen_id}" data-qty="${c.cantidad_excel}"
+                            class="colision-action bg-gray-500 hover:bg-gray-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                            Cancelar
+                        </button>
+                    </div>
+                </div>
+                <div class="hidden text-sm mt-3 px-3 py-2 rounded" id="colision-msg-${c.sku}"></div>
+            `;
+            colisionesList.appendChild(item);
+        });
+
+        // Attach listeners
+        document.querySelectorAll('.colision-action').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const targetBtn = e.currentTarget;
+                const action = targetBtn.dataset.action;
+                const sku = targetBtn.dataset.sku;
+                
+                // BLOQUEO INMEDIATO PREVENTIVO (Anti Race Condition)
+                const container = document.getElementById(`colision-item-${sku}`);
+                const buttons = container.querySelectorAll('.colision-action');
+                buttons.forEach(b => {
+                    b.disabled = true;
+                    b.classList.add('opacity-50', 'cursor-not-allowed');
+                });
+                
+                // Añadir spinner al botón clickeado
+                const originalText = targetBtn.textContent;
+                targetBtn.innerHTML = '<i class="ph ph-spinner animate-spin"></i>';
+
+                try {
+                    const response = await fetch("{% url 'inventory:resolver_colision' %}", {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': getCookie('csrftoken')
+                        },
+                        body: JSON.stringify({
+                            lote_id: targetBtn.dataset.lote,
+                            sku: sku,
+                            decision: action,
+                            cantidad_excel: targetBtn.dataset.qty,
+                            almacen_id: targetBtn.dataset.almacen
+                        })
+                    });
+
+                    const data = await response.json();
+                    
+                    const msgDiv = document.getElementById(`colision-msg-${sku}`);
+                    msgDiv.classList.remove('hidden');
+
+                    if(response.ok && data.ok) {
+                        msgDiv.classList.add('bg-green-100', 'text-green-800', 'dark:bg-emerald-900/30', 'dark:text-emerald-400');
+                        msgDiv.textContent = `Resuelto (${data.decision}): ${data.mensaje}`;
+                        
+                        // Esconder botones tras resolver exitosamente
+                        container.querySelector('.flex.gap-2').classList.add('hidden');
+                        container.classList.add('opacity-70'); // Atenuar el contenedor
+                        
+                        // Actualizar contador
+                        colisionesCount.textContent = data.colisiones_pendientes;
+                        if(data.colisiones_pendientes === 0) {
+                            btnCloseModal.classList.remove('hidden');
+                        }
+                    } else {
+                        // Revertir estado si falló para reintentar
+                        msgDiv.classList.add('bg-red-100', 'text-red-800', 'dark:bg-red-900/30', 'dark:text-red-400');
+                        msgDiv.textContent = `Error: ${data.error}`;
+                        buttons.forEach(b => {
+                            b.disabled = false;
+                            b.classList.remove('opacity-50', 'cursor-not-allowed');
+                        });
+                        targetBtn.textContent = originalText;
+                    }
+                } catch(error) {
+                    alert(`Error de red resolviendo SKU ${sku}`);
+                    buttons.forEach(b => {
+                        b.disabled = false;
+                        b.classList.remove('opacity-50', 'cursor-not-allowed');
+                    });
+                    targetBtn.textContent = originalText;
+                }
+            });
+        });
+    }
+
+    btnCloseModal.addEventListener('click', () => {
+        modalColisiones.classList.add('hidden');
+    });
+
+})();
+</script>
+{% endblock %}

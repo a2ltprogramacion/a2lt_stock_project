@@ -1,0 +1,39 @@
+# ─── Entorno Virtual ────────────────────────────────────────────────────────
+.venv/
+
+# ─── Base de Datos de Desarrollo ────────────────────────────────────────────
+db.sqlite3
+
+# ─── Archivos Compilados de Python ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ─── Archivos de Distribución / Empaquetado ─────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ─── Archivos de Sistema Operativo ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Archivos de IDEs y Editores ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Variables de Entorno ────────────────────────────────────────────────────
+.env
+.env.*
+
+# ─── Archivos de Cobertura / Tests ──────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ─── Archivos de Carga Masiva (subidos por usuarios) ────────────────────────
+media/
+uploads/

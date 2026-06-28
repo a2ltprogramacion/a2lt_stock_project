@@ -1,0 +1,339 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section id="tab-contactos" class="space-y-6">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Directorio de Negocios</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Administra tus bases de datos de clientes
+                            y registros históricos de proveedores.</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="openContactModal('CLIENTE')"
+                            class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow">
+                            <i class="fa-solid fa-user-plus"></i> Registrar Cliente
+                        </button>
+                        <button onclick="openContactModal('PROVEEDOR')"
+                            class="bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-750 font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+                            <i class="fa-solid fa-truck-field"></i> Registrar Proveedor
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- CLIENTES LIST -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-users text-indigo-500"></i> Clientes para Marketing
+                            </h3>
+                            <span class="text-xs text-slate-500 dark:text-slate-400" id="client-count-lbl">Total: {{ clientes.count|default:0 }}</span>
+                        </div>
+                        <div class="overflow-x-auto h-96 overflow-y-auto">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">Cédula / RIF</th>
+                                        <th class="pb-2">Nombre Cliente</th>
+                                        <th class="pb-2">Teléfono</th>
+                                        <th class="pb-2">Red Social</th>
+                                        <th class="pb-2 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="contacts-clients-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                                    
+{% for c in clientes %}
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+    <td class="py-3 pr-2 font-bold">{{ c.identificacion }}</td>
+    <td class="py-3 pr-2">{{ c.nombre }}</td>
+    <td class="py-3 pr-2">{{ c.telefono|default:"--" }}</td>
+    <td class="py-3 pr-2 font-mono text-indigo-600 dark:text-indigo-400">{{ c.red_social|default:"--" }}</td>
+    <td class="py-3 text-right">
+        <button type="button" onclick="viewContactDetails('{{ c.nombre|escapejs }}', '{{ c.identificacion|escapejs }}', 'CLIENTE', '{{ c.telefono|escapejs }}', '{{ c.red_social|escapejs }}', '{{ c.direccion|escapejs }}', '{{ c.observaciones|escapejs }}')" class="text-slate-400 hover:text-indigo-600 transition" title="Ver detalles">
+            <i class="fa-solid fa-eye"></i>
+        </button>
+    </td>
+</tr>
+{% empty %}
+<tr><td colspan="5" class="py-4 text-center text-slate-500">No hay clientes registrados.</td></tr>
+{% endfor %}
+
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- PROVEEDORES LIST -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-2">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-truck-field text-indigo-500"></i> Control de Proveedores
+                            </h3>
+                            <span class="text-xs text-slate-500 dark:text-slate-400" id="supplier-count-lbl">Total: {{ proveedores.count|default:0 }}</span>
+                        </div>
+                        <div class="overflow-x-auto h-96 overflow-y-auto">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">RIF / ID</th>
+                                        <th class="pb-2">Razón Social</th>
+                                        <th class="pb-2">Teléfono</th>
+                                        <th class="pb-2">Estatus</th>
+                                        <th class="pb-2 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="contacts-suppliers-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                                    
+{% for p in proveedores %}
+<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+    <td class="py-3 pr-2 font-bold">{{ p.rif|default:p.identificacion }}</td>
+    <td class="py-3 pr-2">{{ p.nombre }}</td>
+    <td class="py-3 pr-2">{{ p.telefono|default:"--" }}</td>
+    <td class="py-3 pr-2"><span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400 rounded text-[9px] font-bold">ACTIVO</span></td>
+    <td class="py-3 text-right">
+        <button type="button" onclick="viewContactDetails('{{ p.nombre|escapejs }}', '{{ p.rif|default:p.identificacion|escapejs }}', 'PROVEEDOR', '{{ p.telefono|escapejs }}', '{{ p.red_social|escapejs }}', '{{ p.direccion|escapejs }}', '{{ p.observaciones|escapejs }}')" class="text-slate-400 hover:text-indigo-600 transition" title="Ver detalles">
+            <i class="fa-solid fa-eye"></i>
+        </button>
+    </td>
+</tr>
+{% empty %}
+<tr><td colspan="5" class="py-4 text-center text-slate-500">No hay proveedores registrados.</td></tr>
+{% endfor %}
+
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+<div id="modal-contact"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-lg w-full rounded-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2"
+                        id="contact-modal-title">
+                        <i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Contacto
+                    </h3>
+                    <button onclick="closeContactModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <form method="POST" action="{% url 'inventory:contactos' %}" class="space-y-3 text-xs">
+{% csrf_token %}
+                    <input type="hidden" id="form-c-type" name="tipo">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1"
+                                id="contact-id-lbl">Cédula / RIF</label>
+                            <input id="form-c-id" name="rif" type="text" placeholder="Ej. V-26412411 o J-41241"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
+                                Completo / Razón Social</label>
+                            <input id="form-c-name" name="nombre" type="text" placeholder="Ej. Corporación Metal-X C.A."
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Teléfono
+                                o Canal Comercial</label>
+                            <input id="form-c-phone" name="telefono" type="text" placeholder="Ej. 0412.186.92.11"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Correo
+                                Electrónico</label>
+                            <input id="form-c-email" name="correo" type="email" placeholder="Ej. info@empresa.com"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Red
+                                Social (IG/TikTok)</label>
+                            <input id="form-c-social" name="red_social" type="text" placeholder="Ej. @metal_x"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div id="form-group-nombre-asesor" class="hidden">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
+                                del Asesor (Proveedor)</label>
+                            <input id="form-c-asesor" name="nombre_asesor" type="text" placeholder="Ej. Juan Pérez"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Dirección
+                                Física Completa</label>
+                            <input id="form-c-address" name="direccion" type="text" placeholder="Ej. Zona Industrial San Diego, Cl. 4"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Observaciones
+                            / Comentarios Internos</label>
+                        <textarea id="form-c-notes" name="observaciones" rows="3"
+                            placeholder="Indique de forma libre observaciones para marketing, histórico o condiciones..."
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none h-24 font-medium"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL BUTTONS -->
+            <div
+                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
+                <button onclick="closeContactModal()"
+                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                    Cancelar
+                </button>
+                <button type="submit"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
+                    Guardar Contacto
+                </button>
+            </div>
+</form>
+        </div>
+    </div>
+
+    
+<div id="modal-contact-details"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-md w-full rounded-2xl shadow-2xl overflow-hidden">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                        <i class="fa-solid fa-id-card"></i> Ficha Informativa del Contacto
+                    </h3>
+                    <button onclick="closeContactDetailsModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <div class="space-y-3 text-xs leading-relaxed">
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Nombre /
+                            Razón Social</span>
+                        <span id="detail-c-name" class="font-bold text-slate-800 dark:text-slate-200 text-sm">--</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Identificación
+                                (RIF/C.I)</span>
+                            <span id="detail-c-id"
+                                class="font-mono text-slate-700 dark:text-slate-300 font-bold">--</span>
+                        </div>
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Tipo</span>
+                            <span id="detail-c-type" class="text-slate-700 dark:text-slate-300 font-semibold">--</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Teléfono</span>
+                            <span id="detail-c-phone" class="text-slate-700 dark:text-slate-300">--</span>
+                        </div>
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Red
+                                Social</span>
+                            <span id="detail-c-social" class="font-mono text-indigo-600 dark:text-indigo-400">--</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span
+                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Dirección</span>
+                        <span id="detail-c-address" class="text-slate-700 dark:text-slate-300">--</span>
+                    </div>
+
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span
+                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Observaciones
+                            y Comentarios</span>
+                        <p id="detail-c-notes" class="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">--</p>
+                    </div>
+                </div>
+            </div>
+
+<script>
+    function openContactModal(type) {
+        document.getElementById('form-c-type').value = type;
+        document.getElementById('contact-modal-title').innerHTML = type === 'CLIENTE' ? `<i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Cliente` : `<i class="fa-solid fa-truck-field text-indigo-500"></i> Registrar Proveedor`;
+        document.getElementById('contact-id-lbl').innerText = type === 'CLIENTE' ? 'Cédula / RIF del Cliente' : 'RIF / ID Fiscal del Proveedor';
+
+        document.getElementById('form-c-id').value = '';
+        document.getElementById('form-c-name').value = '';
+        document.getElementById('form-c-phone').value = '';
+        document.getElementById('form-c-email').value = '';
+        document.getElementById('form-c-social').value = '';
+        document.getElementById('form-c-address').value = '';
+        document.getElementById('form-c-notes').value = '';
+        document.getElementById('form-c-asesor').value = '';
+
+        const asesorGroup = document.getElementById('form-group-nombre-asesor');
+        if (type === 'PROVEEDOR') {
+            asesorGroup.classList.remove('hidden');
+        } else {
+            asesorGroup.classList.add('hidden');
+        }
+
+        document.getElementById('modal-contact').classList.remove('hidden');
+    }
+
+    function closeContactModal() {
+        document.getElementById('modal-contact').classList.add('hidden');
+    }
+
+    function viewContactDetails(name, id, type, phone, social, address, notes) {
+        document.getElementById('detail-c-name').innerText = name;
+        document.getElementById('detail-c-id').innerText = id;
+        document.getElementById('detail-c-type').innerText = type;
+        document.getElementById('detail-c-phone').innerText = phone || '--';
+        document.getElementById('detail-c-social').innerText = social || '--';
+        document.getElementById('detail-c-address').innerText = address || '--';
+        document.getElementById('detail-c-notes').innerText = notes || 'Sin comentarios registrados.';
+
+        document.getElementById('modal-contact-details').classList.remove('hidden');
+    }
+
+    function closeContactDetailsModal() {
+        document.getElementById('modal-contact-details').classList.add('hidden');
+    }
+</script>
+
+{% endblock %}

@@ -1,0 +1,37 @@
+{ datetime: "2026-06-25 08:00", bcv: 59.50, factor: 1.41, adjusted: 83.89, user: "Operador Principal" },
+{ datetime: "2026-06-25 09:00", bcv: 60.00, factor: 1.40, adjusted: 84.00, user: "Sincronizador API" }
+// Apply theme on load
+const savedTheme = localStorage.getItem('theme') || 'dark';
+document.getElementById('theme-toggle-icon').className = 'fa-solid fa-sun text-yellow-400';
+document.getElementById('theme-toggle-icon').className = 'fa-solid fa-moon text-slate-700';
+updateRates();
+function toggleTheme() {
+const themeIcon = document.getElementById('theme-toggle-icon');
+localStorage.setItem('theme', 'dark');
+themeIcon.className = 'fa-solid fa-sun text-yellow-400';
+localStorage.setItem('theme', 'light');
+themeIcon.className = 'fa-solid fa-moon text-slate-700';
+function switchTab(tabId) {
+function updateRates() {
+const bcvVal = parseFloat(document.getElementById('input-bcv').value);
+const factorVal = parseFloat(document.getElementById('input-factor').value);
+if (!isNaN(bcvVal) && !isNaN(factorVal)) {
+const isDiff = (globalBCV !== bcvVal) || (globalFactor !== factorVal);
+globalBCV = bcvVal;
+globalFactor = factorVal;
+document.getElementById('header-bcv-display').innerText = `${globalBCV.toFixed(2)} Bs`;
+document.getElementById('header-factor-display').innerText = `${globalFactor.toFixed(2)}x`;
+bcv: globalBCV,
+factor: globalFactor,
+<td class="py-1 text-right text-slate-800 dark:text-slate-300 font-bold">${log.bcv.toFixed(2)}</td>
+<td class="py-1 text-center text-slate-500 dark:text-slate-400">${log.factor.toFixed(2)}x</td>
+const p_bs_bcv = p_usd_ajustado * globalBCV;
+<span class="text-xs font-extrabold text-slate-800 dark:text-slate-200 font-mono">${p_bs_bcv.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs</span>
+text += "💱 Precios en Bs sujetos a cambio según tasa BCV\n\n";
+document.getElementById('input-bcv').value = "60.45";
+document.getElementById('input-factor').value = "1.39";
+updateRates();
+const factor = item.cobertura_ind ? item.cobertura_ind : globalFactor;
+weightedFactorSum += factor * itemTotal;
+document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
+switchTab('dashboard');

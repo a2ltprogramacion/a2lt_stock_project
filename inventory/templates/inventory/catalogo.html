@@ -1,0 +1,280 @@
+{% extends 'inventory/base.html' %}
+
+{% block title %}Catálogo Dinámico - A2LT Stock{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-6">
+
+<!-- Encabezado -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-zinc-100">Catálogo Dinámico</h1>
+            <p class="mt-2 text-gray-600 dark:text-zinc-400">Selecciona productos y genera textos de venta al instante.</p>
+        </div>
+    </div>
+
+    <!-- Filtros: Búsqueda + Categoría -->
+    <div class="bg-white dark:bg-zinc-800 rounded-xl shadow-sm border border-gray-200 dark:border-zinc-700 p-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="relative md:col-span-2">
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                    <i class="ph ph-magnifying-glass text-gray-400 dark:text-zinc-500 text-lg"></i>
+                </div>
+                <input type="text" id="search-input" onkeyup="filterProducts()" class="block w-full p-3 pl-10 text-sm text-gray-900 dark:text-zinc-100 bg-gray-50 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-lg focus:ring-corporate-500 focus:border-corporate-500" placeholder="Buscar por SKU, Nombre o Categoría...">
+            </div>
+            <div>
+                <select id="category-select" onchange="filterProducts()" class="block w-full p-3 text-sm text-gray-900 dark:text-zinc-100 bg-gray-50 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-lg focus:ring-corporate-500 focus:border-corporate-500">
+                    <option value="">Todas las Categorías</option>
+                    {% for key, label in articulos.0.CATEGORIA_CHOICES %}
+                    <option value="{{ key }}">{{ label }}</option>
+                    {% empty %}
+                    <option value="HOGAR">Hogar</option>
+                    <option value="HERRAMIENTAS">Herramientas</option>
+                    <option value="SOLARES">Solares</option>
+                    <option value="OTROS">Otros</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grid 2/1: Catálogo + Panel Social Selling -->
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+
+        <!-- COLUMNA IZQUIERDA: Tarjetas de Artículos (2/3) -->
+        <div class="xl:col-span-2 space-y-4" id="catalogo-grid">
+            {% for item in articulos_con_precios %}
+            {% with a=item.articulo %}
+            <!-- Tarjeta de Artículo -->
+            <div class="articulo-card bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md"
+                 data-sku="{{ a.sku }}"
+                 data-nombre="{{ a.nombre }}"
+                 data-categoria="{{ a.categoria }}"
+                 data-precio-base="{{ item.precio_divisa|stringformat:'.2f' }}"
+                 data-precio-ajustado="{{ item.precio_usd_ajustado|stringformat:'.2f' }}"
+                 data-precio-bs="{{ item.precio_bs_bcv|stringformat:'.2f' }}">
+
+                <!-- Cabecera -->
+                <div class="p-4 border-b border-gray-100 dark:border-zinc-700 flex justify-between items-start bg-gray-50/50 dark:bg-zinc-800/50">
+                    <div class="flex gap-3">
+                        <div class="pt-1">
+                            <input type="checkbox"
+                                   onchange="toggleSelectProduct('{{ a.sku }}')"
+                                   class="articulo-checkbox w-4 h-4 text-corporate-600 bg-white dark:bg-zinc-900 border-gray-300 dark:border-zinc-600 rounded focus:ring-corporate-500 dark:ring-offset-zinc-800">
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="px-2 py-0.5 text-xs font-bold bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200 rounded">{{ a.sku }}</span>
+                                {% if a.tipo == 'COMBO' %}
+                                <span class="px-2 py-0.5 text-xs font-bold bg-corporate-100 dark:bg-corporate-900/30 text-corporate-800 dark:text-corporate-400 rounded flex items-center"><i class="ph-fill ph-package mr-1"></i>COMBO</span>
+                                {% endif %}
+                            </div>
+                            <h3 class="font-bold text-gray-900 dark:text-zinc-100 text-lg leading-tight">{{ a.nombre }}</h3>
+                        </div>
+                    </div>
+                    <div class="text-right shrink-0 space-y-0.5">
+                        <p class="text-xs text-gray-500 dark:text-zinc-400">Precio USD</p>
+                        <p class="font-black text-xl text-emerald-600 dark:text-emerald-400">${{ a.precio_divisa|stringformat:".2f" }}</p>
+                        <p class="text-[10px] text-gray-400 dark:text-zinc-500">Ajustado: ${{ item.precio_usd_ajustado|stringformat:".2f" }}</p>
+                        <p class="text-[10px] text-gray-400 dark:text-zinc-500">Bs: {{ item.precio_bs_bcv|stringformat:".2f" }} Bs</p>
+                    </div>
+                </div>
+
+                <!-- Textos Rápidos -->
+                <div class="p-4 space-y-2">
+                    <p class="text-xs font-semibold text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Textos Rápidos para Ventas</p>
+
+                    <!-- Respuesta Rápida Redes -->
+                    <div class="flex items-stretch">
+                        <textarea id="quick-{{ a.sku }}" class="hidden">{{ a.social_quick|default:'' }}</textarea>
+                        <button onclick="copyToClipboard('quick-{{ a.sku }}', this)" data-precio-base="{{ item.precio_divisa|stringformat:'.2f' }}" data-precio-ajustado="{{ item.precio_usd_ajustado|stringformat:'.2f' }}" data-precio-bs="{{ item.precio_bs_bcv|stringformat:'.2f' }}" class="btn-copy flex-1 flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg hover:border-corporate-400 dark:hover:border-corporate-500 text-sm text-gray-700 dark:text-zinc-300 transition-colors group">
+                            <span class="flex items-center"><i class="fa-regular fa-message text-lg mr-2 text-corporate-500"></i> Respuesta Redes</span>
+                            <i class="fa-regular fa-copy opacity-50 group-hover:opacity-100 transition-opacity"></i>
+                        </button>
+                    </div>
+
+                    <!-- Mensaje Cross-Selling -->
+                    <div class="flex items-stretch">
+                        <textarea id="cross-{{ a.sku }}" class="hidden">{{ a.social_cross|default:'' }}</textarea>
+                        <button onclick="copyToClipboard('cross-{{ a.sku }}', this)" data-precio-base="{{ item.precio_divisa|stringformat:'.2f' }}" data-precio-ajustado="{{ item.precio_usd_ajustado|stringformat:'.2f' }}" data-precio-bs="{{ item.precio_bs_bcv|stringformat:'.2f' }}" class="btn-copy flex-1 flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg hover:border-corporate-400 dark:hover:border-corporate-500 text-sm text-gray-700 dark:text-zinc-300 transition-colors group">
+                            <span class="flex items-center"><i class="fa-regular fa-megaphone text-lg mr-2 text-orange-500"></i> Remarketing</span>
+                            <i class="fa-regular fa-copy opacity-50 group-hover:opacity-100 transition-opacity"></i>
+                        </button>
+                    </div>
+
+                    <!-- Ficha Técnica -->
+                    <div class="flex items-stretch">
+                        <textarea id="ficha-{{ a.sku }}" class="hidden">{{ a.ficha_tecnica|default:'' }}</textarea>
+                        <button onclick="copyToClipboard('ficha-{{ a.sku }}', this)" data-precio-base="{{ item.precio_divisa|stringformat:'.2f' }}" data-precio-ajustado="{{ item.precio_usd_ajustado|stringformat:'.2f' }}" data-precio-bs="{{ item.precio_bs_bcv|stringformat:'.2f' }}" class="btn-copy flex-1 flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-lg hover:border-corporate-400 dark:hover:border-corporate-500 text-sm text-gray-700 dark:text-zinc-300 transition-colors group">
+                            <span class="flex items-center"><i class="fa-regular fa-list-alt text-lg mr-2 text-gray-500"></i> Ficha Técnica</span>
+                            <i class="fa-regular fa-copy opacity-50 group-hover:opacity-100 transition-opacity"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endwith %}
+            {% empty %}
+            <div class="col-span-full py-12 text-center text-gray-500 dark:text-zinc-500">
+                <i class="ph ph-package text-5xl mb-3 opacity-50"></i>
+                <p>No hay artículos activos en el catálogo.</p>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- COLUMNA DERECHA: Panel Cross-Selling (1/3) -->
+        <div class="xl:col-span-1">
+            <div class="cross-selling-panel sticky top-20 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-sm overflow-hidden"
+                 data-cross-header="{{ config.cross_selling_header|default:'🔥 *SUPER OFERTA CONSOLIDADA A2LT* 🔥\n\nTenemos estos productos listos para ti:\n\n' }}"
+                 data-cross-footer="{{ config.cross_selling_footer|default:'¡Envíame un mensaje para coordinar tu pedido ahora mismo! 🚀' }}">
+                <div class="p-4 border-b border-gray-100 dark:border-zinc-700 bg-gray-50/50 dark:bg-zinc-800/50">
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-bold text-gray-900 dark:text-zinc-100 text-sm"><i class="ph-fill ph-shopping-cart text-corporate-500 mr-2"></i> Oferta Consolidada</h2>
+                        <span id="selected-count" class="text-xs font-mono text-gray-500 dark:text-zinc-400">0 productos seleccionados</span>
+                    </div>
+                </div>
+                <div class="p-4">
+                    <textarea id="cross-selling-output" readonly class="block w-full h-64 p-3 text-sm text-gray-900 dark:text-zinc-100 bg-gray-50 dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-lg resize-y focus:ring-corporate-500 focus:border-corporate-500" placeholder="Selecciona productos con el checkbox para generar una oferta consolidada..."></textarea>
+                    <button onclick="copyToClipboard('cross-selling-output')" class="w-full mt-2 flex items-center justify-center px-4 py-2.5 bg-corporate-600 hover:bg-corporate-700 text-white font-medium rounded-lg text-sm transition-colors">
+                        <i class="fa-regular fa-copy mr-2"></i> Copiar Oferta
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast-copy" class="fixed bottom-6 right-6 bg-gray-900 dark:bg-zinc-700 text-white px-5 py-3 rounded-xl shadow-2xl text-sm font-medium flex items-center gap-2 opacity-0 pointer-events-none transition-all duration-300 z-50">
+        <i class="fa-regular fa-check-circle text-emerald-400"></i> ¡Copiado al portapapeles!
+    </div>
+</div>
+
+<script>
+// ── Plantillas globales de Cross-Selling por Tenant
+const msgHeaderTemplate = "{{ config.cross_selling_header|escapejs }}";
+const msgFooterTemplate = "{{ config.cross_selling_footer|escapejs }}";
+
+// ── Array global de SKU seleccionados
+const selectedSKUs = [];
+
+// ── Filtrado en tiempo real
+function filterProducts() {
+    const query = document.getElementById('search-input').value.toLowerCase().trim();
+    const category = document.getElementById('category-select').value;
+    const cards = document.querySelectorAll('.articulo-card');
+
+    cards.forEach(card => {
+        const sku = (card.dataset.sku || '').toLowerCase();
+        const nombre = (card.dataset.nombre || '').toLowerCase();
+        const cat = card.dataset.categoria || '';
+
+        const matchSearch = sku.includes(query) || nombre.includes(query);
+        const matchCategory = !category || cat === category;
+        card.style.display = (matchSearch && matchCategory) ? '' : 'none';
+    });
+}
+
+// ── Selección de productos
+function toggleSelectProduct(sku) {
+    const idx = selectedSKUs.indexOf(sku);
+    if (idx === -1) {
+        selectedSKUs.push(sku);
+    } else {
+        selectedSKUs.splice(idx, 1);
+    }
+    updateCrossSellingOutput();
+}
+
+function updateCrossSellingOutput() {
+    const output = document.getElementById('cross-selling-output');
+    const count = document.getElementById('selected-count');
+
+    if (selectedSKUs.length === 0) {
+        output.value = '';
+        count.textContent = '0 productos seleccionados';
+        return;
+    }
+
+    let text = msgHeaderTemplate || '🔥 *SUPER OFERTA CONSOLIDADA A2LT* 🔥\n\nTenemos estos productos listos para ti:\n\n';
+
+    selectedSKUs.forEach(sku => {
+        const card = document.querySelector(`.articulo-card[data-sku="${sku}"]`);
+        const textarea = document.getElementById('cross-' + sku);
+
+        if (card && textarea) {
+            let value = textarea.value;
+            const pBase = card.dataset.precioBase;
+            const pAjustado = card.dataset.precioAjustado;
+            const pBs = card.dataset.precioBs;
+
+            value = value.replaceAll('$[PRECIO_USD]', pBase).replace(/\[Precio_USD\]/g, pBase);
+            value = value.replaceAll('$[PRECIO_BCV]', pAjustado).replace(/\[Precio_BCV\]/g, pAjustado);
+            value = value.replaceAll('$[PRECIO_BS]', pBs).replace(/\[Precio_Bs\]/g, pBs);
+
+            text += value + '\n---\n\n';
+        }
+    });
+
+    text += msgFooterTemplate || '\n¡Envíame un mensaje para coordinar tu pedido ahora mismo! 🚀';
+    output.value = text;
+    count.textContent = selectedSKUs.length + ' producto(s) seleccionado(s)';
+}
+
+// ── Copia al portapapeles (sustituye $[PRECIO_USD], $[PRECIO_BCV], $[PRECIO_BS])
+function copyToClipboard(elementId, btn) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+
+    const wasHidden = el.classList.contains('hidden');
+    if (wasHidden) {
+        el.classList.remove('hidden');
+        el.style.position = 'fixed';
+        el.style.left = '-9999px';
+    }
+
+    let text = el.value || el.textContent;
+
+    const pBase = btn ? btn.dataset.precioBase : null;
+    const pAjustado = btn ? btn.dataset.precioAjustado : '';
+    const pBs = btn ? btn.dataset.precioBs : '';
+    if (pBase) {
+        text = text.replaceAll('$[PRECIO_USD]', pBase).replace(/\[Precio_USD\]/g, pBase);
+        text = text.replaceAll('$[PRECIO_BCV]', pAjustado).replace(/\[Precio_BCV\]/g, pAjustado);
+        text = text.replaceAll('$[PRECIO_BS]', pBs).replace(/\[Precio_Bs\]/g, pBs);
+    }
+
+    if (wasHidden) {
+        el.classList.add('hidden');
+        el.style.position = '';
+        el.style.left = '';
+    }
+
+    navigator.clipboard.writeText(text.trim()).then(() => {
+        showToast();
+    }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text.trim();
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast();
+    });
+}
+
+// ── Toast
+let toastTimeout;
+
+function showToast() {
+    const toast = document.getElementById('toast-copy');
+    toast.classList.remove('opacity-0', 'pointer-events-none');
+    toast.classList.add('opacity-100');
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0', 'pointer-events-none');
+    }, 2500);
+}
+</script>
+{% endblock %}

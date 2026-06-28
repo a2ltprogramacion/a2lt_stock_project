@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acceso - A2LT Stock</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        corporate: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            200: '#c7d2fe',
+                            300: '#a5b4fc',
+                            400: '#818cf8',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            800: '#3730a3',
+                            900: '#312e81',
+                            950: '#1e1b4b',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 min-h-screen flex items-center justify-center p-4 selection:bg-corporate-500 selection:text-white">
+
+    <div class="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden relative">
+        <!-- Decoration line -->
+        <div class="h-1 w-full bg-gradient-to-r from-corporate-600 to-indigo-400"></div>
+        
+        <div class="p-8">
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-corporate-100 dark:bg-corporate-900/30 text-corporate-600 dark:text-corporate-400 mb-4">
+                    <i class="fa-solid fa-boxes-stacked text-2xl"></i>
+                </div>
+                <h1 class="text-2xl font-black text-slate-900 dark:text-white">A2LT Stock</h1>
+                <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Ingresa tus credenciales corporativas</p>
+            </div>
+
+            {% if messages %}
+                {% for message in messages %}
+                <div class="mb-4 p-3 rounded-lg text-sm font-bold bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/20 text-center">
+                    <i class="fa-solid fa-circle-exclamation mr-1"></i> {{ message }}
+                </div>
+                {% endfor %}
+            {% endif %}
+
+            <form method="POST" action="{% url 'inventory:login' %}" class="space-y-5">
+                {% csrf_token %}
+                
+                <div>
+                    <label for="username" class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Usuario</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fa-solid fa-user text-slate-400"></i>
+                        </div>
+                        <input type="text" name="username" id="username" class="block w-full pl-10 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-corporate-500 focus:border-corporate-500 sm:text-sm transition-all" placeholder="admin_user" required autofocus>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="password" class="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Contraseña</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fa-solid fa-lock text-slate-400"></i>
+                        </div>
+                        <input type="password" name="password" id="password" class="block w-full pl-10 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-corporate-500 focus:border-corporate-500 sm:text-sm transition-all" placeholder="••••••••" required>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-corporate-600 hover:bg-corporate-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-corporate-600/30 transition-all flex items-center justify-center gap-2">
+                        Iniciar Sesión <i class="fa-solid fa-arrow-right-to-bracket"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+        
+        <div class="bg-slate-50 dark:bg-slate-950/50 p-4 border-t border-slate-200 dark:border-slate-800 text-center">
+            <p class="text-xs text-slate-500 dark:text-slate-500">
+                A2LT Software &copy; {% now "Y" %} | Acceso Seguro SaaS
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>

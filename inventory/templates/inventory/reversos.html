@@ -1,0 +1,239 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white">Módulo de Contrapartidas</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Auditoría, reversos y anulaciones inmutables de operaciones.</p>
+        </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="flex border-b border-slate-200 dark:border-slate-800">
+        <button id="tab-btn-ventas" onclick="switchTab('ventas')" class="px-6 py-3 font-bold text-sm border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400 transition">
+            <i class="fa-solid fa-file-invoice-dollar mr-2"></i> Historial de Ventas
+        </button>
+        <button id="tab-btn-compras" onclick="switchTab('compras')" class="px-6 py-3 font-bold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition">
+            <i class="fa-solid fa-truck-ramp-box mr-2"></i> Historial de Compras
+        </button>
+    </div>
+
+    <!-- TAB VENTAS -->
+    <div id="tab-ventas" class="block">
+        <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div class="overflow-x-auto h-96 overflow-y-auto">
+                <table class="w-full text-left text-xs">
+                    <thead>
+                        <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                            <th class="pb-2">N° Nota</th>
+                            <th class="pb-2">Fecha</th>
+                            <th class="pb-2">Cliente</th>
+                            <th class="pb-2">Estado</th>
+                            <th class="pb-2 text-right">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                        {% for v in ventas %}
+                        <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                            <td class="py-3 font-bold">#{{ v.numero }}</td>
+                            <td class="py-3">{{ v.fecha|date:"d/m/Y H:i" }}</td>
+                            <td class="py-3">{{ v.cliente.nombre|default:"Consumidor Final" }}</td>
+                            <td class="py-3">
+                                <span id="badge-venta-{{ v.id }}" class="px-2 py-0.5 rounded text-[9px] font-bold 
+                                    {% if v.estado == 'ANULADA' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                                    {% else %}bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400{% endif %}">
+                                    {{ v.estado }}
+                                </span>
+                            </td>
+                            <td class="py-3 text-right">
+                                {% if v.estado != 'ANULADA' %}
+                                <button id="btn-venta-{{ v.id }}" type="button" data-tipo="VENTA" data-id="{{ v.id }}" data-ref="{{ v.numero }}" onclick="openAnularModal(this.dataset.tipo, this.dataset.id, this.dataset.ref)" 
+                                    class="bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/30 text-[10px] font-bold px-2 py-1 rounded transition whitespace-nowrap" title="Anular / Reversar Documento">
+                                    <i class="fa-solid fa-rotate-left mr-1"></i> Anular
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="py-4 text-center text-slate-500">No hay ventas registradas.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- TAB COMPRAS -->
+    <div id="tab-compras" class="hidden">
+        <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div class="overflow-x-auto h-96 overflow-y-auto">
+                <table class="w-full text-left text-xs">
+                    <thead>
+                        <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                            <th class="pb-2">Factura</th>
+                            <th class="pb-2">Fecha</th>
+                            <th class="pb-2">Proveedor</th>
+                            <th class="pb-2">Monto</th>
+                            <th class="pb-2">Estado</th>
+                            <th class="pb-2 text-right">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                        {% for c in compras %}
+                        <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                            <td class="py-3 font-bold">{{ c.numero_factura }}</td>
+                            <td class="py-3">{{ c.fecha_compra|date:"d/m/Y" }}</td>
+                            <td class="py-3">{{ c.proveedor.nombre }}</td>
+                            <td class="py-3">${{ c.monto_total_usd }}</td>
+                            <td class="py-3">
+                                <span id="badge-compra-{{ c.id }}" class="px-2 py-0.5 rounded text-[9px] font-bold 
+                                    {% if c.estado == 'ANULADO' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                                    {% else %}bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400{% endif %}">
+                                    {{ c.estado }}
+                                </span>
+                            </td>
+                            <td class="py-3 text-right">
+                                {% if c.estado != 'ANULADO' %}
+                                <button id="btn-compra-{{ c.id }}" type="button" data-tipo="COMPRA" data-id="{{ c.id }}" data-ref="{{ c.numero_factura }}" onclick="openAnularModal(this.dataset.tipo, this.dataset.id, this.dataset.ref)" 
+                                    class="bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/30 text-[10px] font-bold px-2 py-1 rounded transition whitespace-nowrap" title="Anular / Reversar Documento">
+                                    <i class="fa-solid fa-rotate-left mr-1"></i> Anular
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="py-4 text-center text-slate-500">No hay compras registradas.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- MODAL ANULACION -->
+<div id="modal-anular" class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-md w-full rounded-2xl shadow-2xl overflow-hidden">
+        <div class="p-6 space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                <h3 class="font-bold text-md text-red-600 dark:text-red-400 flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Confirmar Anulación
+                </h3>
+                <button onclick="closeAnularModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            
+            <p class="text-xs text-slate-600 dark:text-slate-300" id="anular-modal-text">
+                ¿Estás seguro de que deseas anular el documento <strong id="anular-doc-ref" class="font-mono text-slate-800 dark:text-white"></strong>? Esta acción es irreversible y afectará el Kárdex de forma inmediata.
+            </p>
+
+            <div>
+                <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Motivo de Anulación (Obligatorio)</label>
+                <textarea id="anular-motivo" rows="3" class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-red-500 resize-none font-medium" placeholder="Escriba la justificación para auditoría..."></textarea>
+            </div>
+        </div>
+        
+        <div class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
+            <button onclick="closeAnularModal()" class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">Cancelar</button>
+            <button onclick="confirmAnular()" id="btn-confirm-anular" class="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition flex items-center justify-center gap-2">
+                Anular Documento
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentAnularType = '';
+    let currentAnularId = null;
+
+    function switchTab(tab) {
+        document.getElementById('tab-ventas').classList.add('hidden');
+        document.getElementById('tab-compras').classList.add('hidden');
+        
+        document.getElementById('tab-btn-ventas').classList.replace('border-indigo-500', 'border-transparent');
+        document.getElementById('tab-btn-ventas').classList.replace('text-indigo-600', 'text-slate-500');
+        document.getElementById('tab-btn-ventas').classList.remove('dark:text-indigo-400');
+        
+        document.getElementById('tab-btn-compras').classList.replace('border-indigo-500', 'border-transparent');
+        document.getElementById('tab-btn-compras').classList.replace('text-indigo-600', 'text-slate-500');
+        document.getElementById('tab-btn-compras').classList.remove('dark:text-indigo-400');
+        
+        document.getElementById('tab-' + tab).classList.remove('hidden');
+        document.getElementById('tab-btn-' + tab).classList.replace('border-transparent', 'border-indigo-500');
+        document.getElementById('tab-btn-' + tab).classList.replace('text-slate-500', 'text-indigo-600');
+        document.getElementById('tab-btn-' + tab).classList.add('dark:text-indigo-400');
+    }
+
+    function openAnularModal(tipo, id, ref) {
+        currentAnularType = tipo;
+        currentAnularId = id;
+        document.getElementById('anular-doc-ref').innerText = ref;
+        document.getElementById('anular-motivo').value = '';
+        document.getElementById('modal-anular').classList.remove('hidden');
+    }
+
+    function closeAnularModal() {
+        document.getElementById('modal-anular').classList.add('hidden');
+        currentAnularType = '';
+        currentAnularId = null;
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    async function confirmAnular() {
+        const motivo = document.getElementById('anular-motivo').value.trim();
+        if(!motivo) {
+            alert('El motivo es obligatorio.');
+            return;
+        }
+        
+        const btn = document.getElementById('btn-confirm-anular');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+        
+        const endpoint = currentAnularType === 'VENTA' ? '{% url "inventory:api_reversar_venta" %}' : '{% url "inventory:api_reversar_compra" %}';
+        
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({ id: currentAnularId, motivo: motivo })
+            });
+            const data = await response.json();
+            
+            if(data.ok) {
+                let badge = document.getElementById(currentAnularType === 'VENTA' ? 'badge-venta-' + currentAnularId : 'badge-compra-' + currentAnularId);
+                badge.innerText = currentAnularType === 'VENTA' ? 'ANULADA' : 'ANULADO';
+                badge.className = "px-2 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400";
+                
+                let actionBtn = document.getElementById(currentAnularType === 'VENTA' ? 'btn-venta-' + currentAnularId : 'btn-compra-' + currentAnularId);
+                if(actionBtn) actionBtn.remove();
+                
+                closeAnularModal();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        } catch(e) {
+            alert('Error de conexión.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = 'Anular Documento';
+        }
+    }
+</script>
+{% endblock %}

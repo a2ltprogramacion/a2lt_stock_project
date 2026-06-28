@@ -1,0 +1,632 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section id="tab-ventas" class="tab-content space-y-6"><div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Emisión de Notas de Entrega</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de salida rápidos y
+                            calcula conversión exacta para el cliente.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- DETALLE DE FACTURACION Y SELECCION DE PRODUCTO -->
+                    <div
+                        class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-cart-plus text-indigo-500"></i> Agregar Artículos a la Nota
+                            </h3>
+                            <span class="text-[10px] text-slate-400">Paso 1: Agrega items y cantidades</span>
+                        </div>
+
+                        <!-- AGREGAR ITEM FORM (Buscador Altamente Eficiente) -->
+                        <div
+                            class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">
+
+                            <!-- Searchable input dropdown container -->
+                            <div class="md:col-span-6 relative" id="searchable-sale-item-container">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Buscar
+                                    y Seleccionar Artículo</label>
+                                <div class="relative">
+                                    <input id="sale-item-search" oninput="filterSaleItemDropdown()"
+                                        onfocus="showSaleItemDropdown()" type="text"
+                                        placeholder="Escribe SKU o nombre del producto..."
+                                        class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
+                                    <button onclick="clearSaleSearch()"
+                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
+                                        <i class="fa-solid fa-circle-xmark"></i>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="sale-item-selected-sku" value="">
+
+                                <!-- Dropdown flotante optimizado en RAM -->
+                                <div id="sale-item-dropdown"
+                                    class="hidden absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
+                                    <!-- Dynamic elements loaded via JS -->
+                                </div>
+                            </div>
+
+                            <div class="md:col-span-2">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
+                                    Origen</label>
+                                <select id="sale-warehouse-select"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                    {% for almacen in almacenes %}
+                                    <option value="{{ almacen.id }}">{{ almacen.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
+                                <input id="sale-item-qty" type="number" min="1" value="1"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                            </div>
+                            <div class="md:col-span-2">
+                                <button onclick="addItemToNote()"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow">
+                                    <i class="fa-solid fa-plus"></i> Añadir
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ITEMS TABLE IN NOTE -->
+                        <div class="overflow-x-auto pt-2">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">SKU</th>
+                                        <th class="pb-2">Artículo / Componentes</th>
+                                        <th class="pb-2 font-semibold">Almacén</th>
+                                        <th class="pb-2 text-center">Cantidad</th>
+                                        <th class="pb-2 text-right">Precio ($)</th>
+                                        <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total ($)
+                                        </th>
+                                        <th class="pb-2 text-center">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="note-items-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
+                                    <tr id="empty-note-row">
+                                        <td colspan="7"
+                                            class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                                            <i
+                                                class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                            Aún no has agregado artículos a esta nota de entrega.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- DATOS DEL CLIENTE, FACTURA Y TOTALES -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm h-fit">
+                        <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-receipt text-indigo-500"></i> Resumen de Pago y Cliente
+                            </h3>
+                        </div>
+
+                        <!-- CLIENT SELECTOR -->
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="flex-1">
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cliente</label>
+                                    <div class="relative" id="searchable-client-container">
+                                        <input id="client-search-input" oninput="filterClientDropdown()" onfocus="showClientDropdown()" type="text"
+                                            placeholder="Buscar cliente por nombre o RIF..."
+                                            class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold pr-8">
+                                        <button onclick="clearClientSearch()"
+                                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
+                                            <i class="fa-solid fa-circle-xmark"></i>
+                                        </button>
+                                        <div id="client-dropdown"
+                                            class="hidden absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="note-client-select" value="">
+                                </div>
+                                <button onclick="quickSetGenericClient()"
+                                    class="mt-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-750 text-[10px] font-bold px-2.5 py-2 rounded-xl transition whitespace-nowrap"
+                                    title="Establecer Cliente Genérico">
+                                    <i class="fa-solid fa-user-tag mr-1"></i> Genérico
+                                </button>
+                            </div>
+
+                            <div id="client-summary-card" class="hidden bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 space-y-1">
+                                <div class="flex justify-between items-center">
+                                    <span id="client-card-name" class="font-bold text-slate-800 dark:text-slate-200 text-xs"></span>
+                                    <span id="client-card-id" class="font-mono text-[10px] text-slate-500 dark:text-slate-400"></span>
+                                </div>
+                                <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400">
+                                    <span><i class="fa-solid fa-phone mr-1"></i><span id="client-card-phone">--</span></span>
+                                    <span><i class="fa-solid fa-location-dot mr-1"></i><span id="client-card-address">--</span></span>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
+                                        Factura Física</label>
+                                    <input id="note-invoice-ref" type="text" placeholder="Ej. F-00213"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
+                                        Nota Interna</label>
+                                    <input id="note-correlative-lbl" type="text" readonly
+                                        class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-850 rounded-xl p-2 text-xs text-slate-500 dark:text-slate-400 font-mono text-center font-bold">
+                                </div>
+                            </div>
+
+                            <!-- DIVISOR -->
+                            <div class="border-t border-slate-100 dark:border-slate-800 my-4"></div>
+
+                            <!-- PRICING BREAKDOWN -->
+                            <div
+                                class="space-y-2 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 font-mono">
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Subtotal Divisas ($):</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-bold"
+                                        id="note-subtotal-usd">$0.00</span>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Descuento Aplicado:</span>
+                                    <!-- Rojo para salidas o deducciones -->
+                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
+                                        id="note-discount-usd">-$0.00</span>
+                                </div>
+                                <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div class="flex justify-between items-center text-sm">
+                                    <!-- Verde para ingresos directos -->
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas
+                                        ($):</span>
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base"
+                                        id="note-total-usd">$0.00</span>
+                                </div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div
+                                    class="flex justify-between items-center text-xs text-indigo-600 dark:text-indigo-400">
+                                    <span>Divisa BCV (Ajustada):</span>
+                                    <span class="font-bold" id="note-total-bcv-usd">$0.00</span>
+                                </div>
+                                <div
+                                    class="flex justify-between items-center text-base text-slate-900 dark:text-slate-100">
+                                    <span class="font-bold">Total en Bolívares (Bs):</span>
+                                    <span class="font-bold text-lg text-indigo-600 dark:text-indigo-400"
+                                        id="note-total-ves">0.00 Bs</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Observaciones
+                                    de la Nota</label>
+                                <textarea id="sale-observaciones" rows="2"
+                                    placeholder="Comentarios internos para la nota de entrega..."
+                                    class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-medium"></textarea>
+                            </div>
+
+                            <div id="seriales-panel-container" class="hidden space-y-3">
+                                <div class="flex items-center gap-2 pb-1 border-b border-slate-100 dark:border-slate-800">
+                                    <i class="fa-solid fa-barcode text-amber-500 text-xs"></i>
+                                    <span class="font-bold text-slate-800 dark:text-slate-200 text-[10px] uppercase tracking-wider">Asignación de Seriales</span>
+                                </div>
+                                <div id="seriales-sections"></div>
+                            </div>
+
+                            <button onclick="processSale()"
+                                class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
+                                <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Venta
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+<script>
+    let globalFactor = Number("{{ config.factor_cobertura|stringformat:'.4f'|default:'1.0000' }}");
+    let globalBCV = Number("{{ config.tasa_bcv|stringformat:'.4f'|default:'0.0000' }}");
+    let lastCorrelative = 1;
+
+    let clientDataset = [
+        {id: '', nombre: 'Consumidor Final', identificacion: '', telefono: '', direccion: ''},
+        {% for cliente in clientes %}
+        {id: '{{ cliente.identificacion|escapejs }}', nombre: '{{ cliente.nombre|escapejs }}', identificacion: '{{ cliente.identificacion|escapejs }}', telefono: '{{ cliente.telefono|escapejs }}', direccion: '{{ cliente.direccion|escapejs }}'},
+        {% endfor %}
+    ];
+
+    function showClientDropdown() {
+        document.getElementById('client-dropdown').classList.remove('hidden');
+        if (!document.getElementById('client-search-input').value) {
+            renderClientDropdown(clientDataset);
+        }
+    }
+
+    function clearClientSearch() {
+        document.getElementById('client-search-input').value = '';
+        document.getElementById('note-client-select').value = '';
+        document.getElementById('client-dropdown').classList.add('hidden');
+        document.getElementById('client-summary-card').classList.add('hidden');
+    }
+
+    function filterClientDropdown() {
+        const query = document.getElementById('client-search-input').value.toLowerCase();
+        const dropdown = document.getElementById('client-dropdown');
+        dropdown.classList.remove('hidden');
+        const filtered = clientDataset.filter(c => c.nombre.toLowerCase().includes(query) || c.identificacion.toLowerCase().includes(query));
+        renderClientDropdown(filtered);
+    }
+
+    function renderClientDropdown(items) {
+        const dropdown = document.getElementById('client-dropdown');
+        dropdown.innerHTML = '';
+        if (items.length === 0) {
+            dropdown.innerHTML = '<div class="p-2 text-xs text-center text-rose-500">Sin resultados</div>';
+            return;
+        }
+        items.forEach(c => {
+            const div = document.createElement('div');
+            div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs";
+            div.innerHTML = `<span class="font-bold text-slate-800 dark:text-slate-200">${c.nombre}</span> <span class="text-slate-500 dark:text-slate-400 ml-2 font-mono text-[10px]">${c.identificacion}</span>`;
+            div.onclick = () => selectClient(c);
+            dropdown.appendChild(div);
+        });
+    }
+
+    function selectClient(c) {
+        document.getElementById('client-search-input').value = c.nombre;
+        document.getElementById('note-client-select').value = c.id;
+        document.getElementById('client-dropdown').classList.add('hidden');
+        const card = document.getElementById('client-summary-card');
+        if (c.id) {
+            document.getElementById('client-card-name').innerText = c.nombre;
+            document.getElementById('client-card-id').innerText = c.identificacion;
+            document.getElementById('client-card-phone').innerText = c.telefono || '--';
+            document.getElementById('client-card-address').innerText = c.direccion || '--';
+            card.classList.remove('hidden');
+        } else {
+            card.classList.add('hidden');
+        }
+    }
+
+    function quickSetGenericClient() {
+        selectClient(clientDataset[0]);
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    function showSaleItemDropdown() {
+        document.getElementById('sale-item-dropdown').classList.remove('hidden');
+    }
+    
+    function clearSaleSearch() {
+        document.getElementById('sale-item-search').value = '';
+        document.getElementById('sale-item-selected-sku').value = '';
+        document.getElementById('sale-item-dropdown').classList.add('hidden');
+    }
+
+    function filterSaleItemDropdown() {
+        const query = document.getElementById('sale-item-search').value.toLowerCase();
+        const dropdown = document.getElementById('sale-item-dropdown');
+        if (query.length < 2) return;
+        dropdown.innerHTML = '<div class="p-2 text-xs text-center text-slate-500">Buscando en servidor...</div>';
+        dropdown.classList.remove('hidden');
+        
+        fetch(`/catalogo/buscar/?q=${query}`)
+            .then(res => res.json())
+            .then(data => {
+                dropdown.innerHTML = '';
+                if(data.results.length === 0){
+                    dropdown.innerHTML = '<div class="p-2 text-xs text-center text-rose-500">Sin resultados</div>';
+                    return;
+                }
+                data.results.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs flex justify-between";
+                    div.innerHTML = `<span class="font-bold text-indigo-600">${item.sku}</span> <span class="text-slate-800 dark:text-slate-300">${item.nombre}</span> <span class="font-bold text-emerald-600">$${item.precio}</span>${item.usa_serial ? '<span class="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30 px-1 py-0.5 rounded ml-1">Serial</span>' : ''}`;
+                    div.onclick = () => {
+                        document.getElementById('sale-item-search').value = item.nombre;
+                        document.getElementById('sale-item-selected-sku').value = item.sku;
+                        document.getElementById('sale-item-selected-sku').dataset.nombre = item.nombre;
+                        document.getElementById('sale-item-selected-sku').dataset.precio = item.precio;
+                        document.getElementById('sale-item-selected-sku').dataset.tipo = item.tipo;
+                        document.getElementById('sale-item-selected-sku').dataset.usaSerial = item.usa_serial ? '1' : '';
+                        dropdown.classList.add('hidden');
+                    };
+                    dropdown.appendChild(div);
+                });
+            });
+    }
+
+    let draftNoteItems = [];
+    
+    async function addItemToNote() {
+        const skuInput = document.getElementById('sale-item-selected-sku');
+        const sku = skuInput.value;
+        const nombre = skuInput.dataset.nombre;
+        const precio = parseFloat(skuInput.dataset.precio);
+        const tipo = skuInput.dataset.tipo;
+        const usaSerial = skuInput.dataset.usaSerial === '1';
+        const almacenId = document.getElementById('sale-warehouse-select').value;
+        const qty = parseInt(document.getElementById('sale-item-qty').value);
+        
+        if(!sku || qty <= 0) return;
+
+        // Validar contra backend
+        const response = await fetch(`/ventas/validar_stock/${sku}/${almacenId}/`);
+        if(!response.ok) {
+            alert('Error o stock insuficiente según base de datos.');
+            return;
+        }
+        const data = await response.json();
+        if(data.stock_disponible < qty) {
+             alert('Stock insuficiente. Disponible: ' + data.stock_disponible);
+             return;
+        }
+
+        const existingItem = draftNoteItems.find(item => item.sku === sku && item.almacen === almacenId);
+        if (existingItem) {
+            existingItem.qty += qty;
+        } else {
+            draftNoteItems.push({
+                sku: sku,
+                nombre: nombre,
+                almacen: almacenId,
+                qty: qty,
+                precio: precio,
+                tipo: tipo,
+                usa_serial: usaSerial,
+                cobertura_ind: null,
+                seriales_seleccionados: []
+            });
+        }
+
+        document.getElementById('sale-item-search').value = '';
+        document.getElementById('sale-item-selected-sku').value = '';
+        renderNoteItems();
+        recalculateNoteTotal();
+
+        if (usaSerial) {
+            loadSerialesForItem(draftNoteItems.find(i => i.sku === sku && i.almacen === almacenId) || {sku, almacen: almacenId});
+            setTimeout(() => renderSerialesPanel(), 300);
+        }
+    }
+
+    function removeNoteItem(index) {
+        const removed = draftNoteItems.splice(index, 1);
+        renderNoteItems();
+        recalculateNoteTotal();
+        renderSerialesPanel();
+    }
+
+    function renderNoteItems() {
+        const tbody = document.getElementById('note-items-tbody');
+        tbody.innerHTML = '';
+
+        if (draftNoteItems.length === 0) {
+            tbody.innerHTML = `
+                <tr id="empty-note-row">
+                    <td colspan="7" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                        <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                        Aún no has agregado artículos a esta nota de entrega.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        draftNoteItems.forEach((item, index) => {
+            const itemTotal = item.precio * item.qty;
+            const row = document.createElement('tr');
+            row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
+            row.innerHTML = `
+                <td class="py-3 px-2 text-slate-500 dark:text-slate-400 font-bold">${item.sku}</td>
+                <td class="py-3 px-2 text-slate-800 dark:text-slate-200 font-medium">
+                    ${item.nombre}
+                    ${item.tipo === 'COMBO' ? '<span class="text-[9px] bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30 px-1 py-0.5 rounded ml-1">Combo</span>' : ''}
+                </td>
+                <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
+                <td class="py-3 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
+                <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.precio.toFixed(2)}</td>
+                <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
+                <td class="py-3 px-2 text-center">
+                    <button onclick="removeNoteItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function recalculateNoteTotal() {
+        let subtotal = 0;
+        let weightedFactorSum = 0;
+        let totalWeight = 0;
+
+        draftNoteItems.forEach(item => {
+            const itemTotal = item.precio * item.qty;
+            subtotal += itemTotal;
+            const factor = item.cobertura_ind ? item.cobertura_ind : globalFactor;
+            weightedFactorSum += factor * itemTotal;
+            totalWeight += itemTotal;
+        });
+
+        const exactFactor = totalWeight > 0 ? (weightedFactorSum / totalWeight) : globalFactor;
+        const discountPercent = 0; // Configurable si se desea
+        const discount = subtotal * (discountPercent / 100);
+        const totalUSD = subtotal - discount;
+        const totalBCVUSD = totalUSD * exactFactor;
+        const totalVES = totalBCVUSD * globalBCV;
+
+        document.getElementById('note-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
+        document.getElementById('note-discount-usd').innerText = `-$${discount.toFixed(2)}`;
+        document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
+        document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
+        document.getElementById('note-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+    }
+
+    let serialesCache = {};
+
+    async function loadSerialesForItem(item) {
+        const cacheKey = `${item.sku}_${item.almacen}`;
+        if (serialesCache[cacheKey]) return;
+        try {
+            const res = await fetch(`/ventas/seriales/${item.sku}/${item.almacen}/`);
+            const data = await res.json();
+            if (data.ok) {
+                serialesCache[cacheKey] = data.data;
+            }
+        } catch(e) {
+            serialesCache[cacheKey] = [];
+        }
+    }
+
+    function renderSerialesPanel() {
+        const container = document.getElementById('seriales-panel-container');
+        const sectionsDiv = document.getElementById('seriales-sections');
+        const serialItems = draftNoteItems.filter(i => i.usa_serial);
+
+        if (serialItems.length === 0) {
+            container.classList.add('hidden');
+            sectionsDiv.innerHTML = '';
+            return;
+        }
+
+        container.classList.remove('hidden');
+        sectionsDiv.innerHTML = '';
+
+        serialItems.forEach((item, idx) => {
+            const cacheKey = `${item.sku}_${item.almacen}`;
+            const disponibles = serialesCache[cacheKey] || [];
+            const seleccionados = item.seriales_seleccionados || [];
+            const completado = seleccionados.length === item.qty;
+            const progreso = `${seleccionados.length}/${item.qty}`;
+
+            const section = document.createElement('div');
+            section.className = "bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl p-3 space-y-2";
+
+            let html = `<div class="flex justify-between items-center">
+                <span class="font-bold text-xs text-slate-800 dark:text-slate-200">${item.nombre} <span class="font-mono text-[10px] text-slate-500">(${item.sku})</span></span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded ${completado ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'}">${completado ? 'Completo' : 'Pendiente'} — ${progreso}</span>
+            </div>`;
+
+            if (disponibles.length === 0) {
+                html += `<div class="text-[10px] text-slate-400 text-center py-2">Cargando seriales...</div>`;
+            } else {
+                html += `<div class="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1">`;
+                disponibles.forEach(s => {
+                    const checked = seleccionados.includes(s.serial);
+                    const disabled = !checked && completado;
+                    html += `<label class="flex items-center gap-2 text-[10px] p-1.5 rounded-lg cursor-pointer transition ${checked ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800/40' : disabled ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'}">
+                        <input type="checkbox" class="serial-checkbox accent-indigo-600" data-item-sku="${item.sku}" data-item-almacen="${item.almacen}" data-serial="${s.serial}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="toggleSerial(this)">
+                        <span class="font-mono font-bold text-slate-800 dark:text-slate-200">${s.serial}</span>
+                    </label>`;
+                });
+                html += `</div>`;
+            }
+
+            section.innerHTML = html;
+            sectionsDiv.appendChild(section);
+        });
+    }
+
+    function toggleSerial(checkbox) {
+        const sku = checkbox.dataset.itemSku;
+        const almacen = checkbox.dataset.itemAlmacen;
+        const serial = checkbox.dataset.serial;
+        const item = draftNoteItems.find(i => i.sku === sku && i.almacen === almacen);
+        if (!item) return;
+
+        if (checkbox.checked) {
+            if (item.seriales_seleccionados.length >= item.qty) {
+                checkbox.checked = false;
+                return;
+            }
+            item.seriales_seleccionados.push(serial);
+        } else {
+            item.seriales_seleccionados = item.seriales_seleccionados.filter(s => s !== serial);
+        }
+        renderSerialesPanel();
+    }
+
+    function processSale() {
+        if (draftNoteItems.length === 0) {
+            alert("No hay productos en la nota de entrega.");
+            return;
+        }
+
+        const serialItems = draftNoteItems.filter(i => i.usa_serial);
+        for (const item of serialItems) {
+            if ((item.seriales_seleccionados || []).length !== item.qty) {
+                alert(`Debe seleccionar ${item.qty} serial(es) para "${item.nombre}" (${item.sku}). Actualmente tiene ${(item.seriales_seleccionados || []).length}.`);
+                return;
+            }
+        }
+
+        const clientId = document.getElementById('note-client-select').value;
+        const almacenId = document.getElementById('sale-warehouse-select').value;
+        const observaciones = document.getElementById('sale-observaciones').value.trim();
+
+        const payload = {
+            empresa_id: {{ request.session.empresa_id|default:'null' }},
+            cliente_id: clientId || null,
+            almacen_id: parseInt(almacenId),
+            observaciones: observaciones,
+            items: draftNoteItems.map(i => ({
+                sku: i.sku,
+                cantidad: i.qty,
+                precio_unitario_usd: i.precio,
+                seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
+            }))
+        };
+
+        fetch('/ventas/crear/', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if(data.ok) {
+                alert(`Venta registrada con éxito. Nota Interna: ${data.correlativo}`);
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.error}`);
+            }
+        })
+        .catch(err => {
+            alert("Error de conexión con el servidor.");
+        });
+    }
+</script>
+
+{% endblock %}

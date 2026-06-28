@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nota de Entrega #{{ nota.numero }}</title>
+    <!-- Tailwind via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Optimizaciones para Impresión */
+        @media print {
+            @page {
+                margin: 10mm;
+                size: auto;
+            }
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                background-color: white !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            /* Sombras y bordes decorativos fuera de papel */
+            .print-border-0 { border: none !important; box-shadow: none !important; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900 font-sans p-4 md:p-8">
+
+    <!-- Controles en pantalla (ocultos al imprimir) -->
+    <div class="max-w-4xl mx-auto mb-6 flex justify-between items-center no-print">
+        <a href="javascript:history.back()" class="text-blue-600 hover:underline flex items-center font-medium">
+            &larr; Volver
+        </a>
+        <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow">
+            Imprimir Nota
+        </button>
+    </div>
+
+    <!-- Lienzo de Impresión (Factura) -->
+    <div class="max-w-4xl mx-auto bg-white border border-gray-300 shadow-md p-8 md:p-12 print-border-0">
+        
+        <!-- Cabecera de Empresa -->
+        <header class="flex justify-between items-start border-b-2 border-gray-800 pb-6 mb-6">
+            <div>
+                <h1 class="text-3xl font-black tracking-tight text-gray-900">{{ config.empresa.nombre|default:"A2LT Stock" }}</h1>
+                <p class="text-sm text-gray-600 mt-1">RIF: {{ config.empresa.rif|default:"J-00000000-0" }}</p>
+                <p class="text-sm text-gray-600 w-64 mt-2 leading-relaxed">{{ config.empresa.direccion|default:"Dirección no configurada" }}</p>
+                <p class="text-sm text-gray-600 mt-1">Tel: {{ config.empresa.telefono|default:"N/A" }} | Email: {{ config.empresa.correo|default:"N/A" }}</p>
+            </div>
+            <div class="text-right">
+                <h2 class="text-2xl font-bold text-gray-800 uppercase">Nota de Entrega</h2>
+                <p class="text-lg font-bold text-red-600 mt-1">N° {{ nota.numero }}</p>
+                <p class="text-sm text-gray-600 mt-2"><strong>Fecha:</strong> {{ nota.fecha_creacion|date:"d/m/Y H:i" }}</p>
+            </div>
+        </header>
+
+        <!-- Datos del Cliente y Snapshot Cambiario -->
+        <div class="flex justify-between items-start mb-8">
+            <div class="w-1/2">
+                <h3 class="text-sm font-bold uppercase text-gray-500 mb-2 border-b border-gray-200 pb-1">Facturado a:</h3>
+                <p class="font-bold text-lg">{{ nota.cliente.nombre }}</p>
+                <p class="text-gray-700">CI/RIF: {{ nota.cliente.identificacion }}</p>
+                <p class="text-gray-700">Almacén de Salida: {{ nota.almacen.nombre }}</p>
+            </div>
+            
+            <div class="w-1/3 bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                <h3 class="text-xs font-bold uppercase text-gray-500 mb-2 text-center">Snapshot de Divisas</h3>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="text-gray-600">Tasa BCV Aplicada:</span>
+                    <span class="font-mono font-bold">Bs. {{ nota.tasa_bcv_aplicada|stringformat:".2f" }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-gray-600">Factor Cobertura:</span>
+                    <span class="font-mono">{{ nota.factor_cobertura_aplicado|stringformat:".4f" }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabla de Productos -->
+        <table class="w-full text-left border-collapse mb-8">
+            <thead>
+                <tr class="bg-gray-100 border-y border-gray-300 text-sm">
+                    <th class="py-3 px-4 font-bold text-gray-700 w-16 text-center">CANT.</th>
+                    <th class="py-3 px-4 font-bold text-gray-700">DESCRIPCIÓN / SKU</th>
+                    <th class="py-3 px-4 font-bold text-gray-700 text-right w-32">PRECIO REF.</th>
+                    <th class="py-3 px-4 font-bold text-gray-700 text-right w-32">TOTAL REF.</th>
+                </tr>
+            </thead>
+            <tbody class="text-sm">
+                {% for d in detalles %}
+                <tr class="border-b border-gray-200 hover:bg-gray-50">
+                    <td class="py-3 px-4 text-center font-bold text-gray-800">{{ d.cantidad|stringformat:".0f" }}</td>
+                    <td class="py-3 px-4">
+                        <p class="font-bold text-gray-900">{{ d.articulo.nombre }}</p>
+                        <p class="text-xs text-gray-500 font-mono">{{ d.articulo.sku }}</p>
+                    </td>
+                    <td class="py-3 px-4 text-right font-mono">${{ d.precio_unitario_usd|stringformat:".2f" }}</td>
+                    <td class="py-3 px-4 text-right font-mono font-bold">${% widthratio d.cantidad 1 d.precio_unitario_usd %}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" class="py-6 text-center text-gray-500 italic">No hay productos en esta nota de entrega.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- Totales -->
+        <div class="flex justify-end">
+            <div class="w-1/2 md:w-1/3">
+                <div class="flex justify-between py-2 text-lg font-bold border-b border-gray-300">
+                    <span>TOTAL REF:</span>
+                    <span class="font-mono text-blue-800">${{ total_usd|stringformat:".2f" }}</span>
+                </div>
+                <div class="flex justify-between py-2 text-xl font-black mt-2">
+                    <span>TOTAL BS:</span>
+                    <span class="font-mono text-green-700">Bs. {{ total_bs|stringformat:".2f" }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="mt-16 pt-8 border-t border-gray-300 text-center text-xs text-gray-500">
+            <p>Este documento es un comprobante interno de entrega física del sistema A2LT Stock.</p>
+            <p class="mt-1">Emitido por: {{ nota.creado_por|default:"Sistema" }}</p>
+        </div>
+
+    </div>
+</body>
+</html>

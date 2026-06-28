@@ -1,0 +1,117 @@
+<section id="tab-carga" class="tab-content hidden space-y-6">
+                <div class="max-w-4xl mx-auto space-y-6">
+                    <div
+                        class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div class="flex items-center gap-3">
+                            <div class="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-3 rounded-xl">
+                                <i class="fa-solid fa-file-arrow-up text-2xl"></i>
+                            </div>
+                            <div>
+                                <h2 class="font-bold text-lg text-slate-900 dark:text-white">Carga Masiva Tolerante a
+                                    Fallos</h2>
+                                <p class="text-xs text-slate-500 dark:text-slate-400">Sube tu listado de Excel para
+                                    actualizar precios, costos, descripciones o niveles de stock de forma rápida.</p>
+                            </div>
+                        </div>
+
+                        <!-- DROPZONE SIMULATION -->
+                        <div class="border-2 border-dashed border-slate-300 hover:border-indigo-500 dark:border-slate-700 dark:hover:border-indigo-500/50 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer bg-slate-50 dark:bg-slate-900/50 transition duration-200"
+                            onclick="triggerSimulatedUpload()">
+                            <i
+                                class="fa-solid fa-cloud-arrow-up text-4xl text-slate-400 dark:text-slate-500 animate-pulse"></i>
+                            <div class="text-center">
+                                <p class="text-sm font-semibold text-slate-700 dark:text-slate-300">Haz clic aquí para
+                                    simular la carga masiva</p>
+                                <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">Formatos soportados: .xlsx,
+                                    .xls, .csv</p>
+                            </div>
+                            <span
+                                class="text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 px-3 py-1 rounded-full font-mono shadow-sm">plantilla_inventario_a2lt.xlsx</span>
+                        </div>
+
+                        <div
+                            class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-900/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span>Almacén de destino por defecto: <strong
+                                    class="text-slate-850 dark:text-slate-200 font-semibold">San Diego
+                                    (Principal)</strong></span>
+                            <a href="#" class="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"><i
+                                    class="fa-solid fa-download mr-1"></i> Descargar Plantilla Excel de Modelo</a>
+                        </div>
+                    </div>
+
+                    <!-- SIMULATED PROCESSING STATE -->
+                    <div id="upload-processing"
+                        class="hidden bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-2 text-slate-900 dark:text-slate-100">
+                                <i class="fa-solid fa-circle-notch animate-spin text-indigo-500"></i>
+                                <span class="font-semibold text-sm">Validando transacciones e integrando
+                                    kárdex...</span>
+                            </div>
+                            <span class="text-xs font-mono text-indigo-600 dark:text-indigo-400 font-bold"
+                                id="processing-percent">0%</span>
+                        </div>
+                        <div
+                            class="w-full bg-slate-100 dark:bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-200 dark:border-slate-850">
+                            <div id="processing-bar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
+                        </div>
+                    </div>
+
+                    <!-- REPORT PANEL -->
+                    <div id="upload-result-panel"
+                        class="hidden bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div class="flex justify-between items-center">
+                            <h3
+                                class="font-bold text-md text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                                <i class="fa-solid fa-circle-check"></i> Carga Masiva Procesada Correctamente
+                            </h3>
+                            <div class="flex gap-2">
+                                <button onclick="copyToClipboard('log-text', 'btn-copy-log')" id="btn-copy-log"
+                                    class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 transition flex items-center gap-1">
+                                    <i class="fa-solid fa-copy"></i> Copiar Auditoría
+                                </button>
+                                <button onclick="downloadLog()"
+                                    class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 transition flex items-center gap-1">
+                                    <i class="fa-solid fa-download"></i> Descargar Log (.txt)
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
+                                <div class="text-2xl font-bold text-emerald-600 dark:text-emerald-400">4</div>
+                                <div
+                                    class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">
+                                    Registros Exitosos</div>
+                            </div>
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
+                                <div class="text-2xl font-bold text-orange-500" id="collision-resolve-counter-lbl">2
+                                </div>
+                                <div
+                                    class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">
+                                    Conflictos Resueltos</div>
+                            </div>
+                            <div
+                                class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 text-rose-500">
+                                <div class="text-2xl font-bold">2</div>
+                                <div
+                                    class="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-bold">
+                                    Registros Omitidos</div>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label
+                                class="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">Auditoría
+                                de Incidencias e Integración Kárdex:</label>
+                            <textarea id="log-text" readonly
+                                class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 text-rose-600 dark:text-rose-400 p-3 rounded-xl text-xs font-mono h-24 focus:outline-none"
+                                style="resize:none;">[ERROR] Fila 14: SKU "H134" duplicado en origen.
+[AVISO] Fila 32 [SKU F012]: Modificación de costo detectada. Nuevo costo cargado: $31.00 USD.
+[ERROR] Fila 54: El Almacén 'Valencia-Norte' no existe en la base de datos local.</textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>

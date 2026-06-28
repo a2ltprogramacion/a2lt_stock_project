@@ -1,0 +1,752 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section id="tab-compras" class="tab-content space-y-6"><div class="flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Recepción de Compras a Proveedores</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de entrada rápidos y
+                            calcula conversión exacta para el proveedor.</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- DETALLE DE FACTURACION Y SELECCION DE PRODUCTO -->
+                    <div
+                        class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        <div
+                            class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-cart-plus text-indigo-500"></i> Agregar Artículos a la Nota
+                            </h3>
+                            <span class="text-[10px] text-slate-400">Paso 1: Agrega items y cantidades</span>
+                        </div>
+
+                        <!-- AGREGAR ITEM FORM (Buscador Altamente Eficiente) -->
+                        <div
+                            class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">
+
+                            <!-- Searchable input dropdown container -->
+                            <div class="md:col-span-6 relative" id="searchable-sale-item-container">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Buscar
+                                    y Seleccionar Artículo</label>
+                                <div class="relative">
+                                    <input id="sale-item-search" oninput="filterSaleItemDropdown()"
+                                        onfocus="showSaleItemDropdown()" type="text"
+                                        placeholder="Escribe SKU o nombre del producto..."
+                                        class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
+                                    <button onclick="clearSaleSearch()"
+                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
+                                        <i class="fa-solid fa-circle-xmark"></i>
+                                    </button>
+                                </div>
+                                <input type="hidden" id="sale-item-selected-sku" value="">
+
+                                <!-- Dropdown flotante optimizado en RAM -->
+                                <div id="sale-item-dropdown"
+                                    class="hidden absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
+                                    <!-- Dynamic elements loaded via JS -->
+                                </div>
+                            </div>
+
+                            <div class="md:col-span-2">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
+                                    Origen</label>
+                                <select id="sale-warehouse-select"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                    {% for almacen in almacenes %}
+                                    <option value="{{ almacen.id }}">{{ almacen.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="md:col-span-1">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Costo</label>
+                                <input id="sale-item-cost" type="number" min="0" step="0.01" value="0.00"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                            </div>
+                            <div class="md:col-span-1">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cant.</label>
+                                <input id="sale-item-qty" type="number" min="1" value="1"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                            </div>
+                            <div class="md:col-span-2">
+                                <button onclick="addItemToPurchase()"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow">
+                                    <i class="fa-solid fa-plus"></i> Añadir
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ITEMS TABLE IN NOTE -->
+                        <div class="overflow-x-auto pt-2">
+                            <table class="w-full text-left text-xs">
+                                <thead>
+                                    <tr
+                                        class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                        <th class="pb-2">SKU</th>
+                                        <th class="pb-2">Artículo / Componentes</th>
+                                        <th class="pb-2 font-semibold">Almacén</th>
+                                        <th class="pb-2 text-center">Cantidad</th>
+                                        <th class="pb-2 text-right">Costo Factura ($)</th>
+                                        <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total ($)
+                                        </th>
+                                        <th class="pb-2 text-center">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="note-items-tbody"
+                                    class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
+                                    <tr id="empty-note-row">
+                                        <td colspan="7"
+                                            class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                                            <i
+                                                class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                            Aún no has agregado artículos a esta nota de entrega.
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- DATOS DEL CLIENTE, FACTURA Y TOTALES -->
+                    <div
+                        class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm h-fit">
+                        <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
+                            <h3
+                                class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                                <i class="fa-solid fa-receipt text-indigo-500"></i> Resumen de Factura y Proveedor
+                            </h3>
+                        </div>
+
+                        <!-- CLIENT SELECTOR -->
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between gap-2">
+                                <div class="flex-1">
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Proveedor</label>
+                                    <div class="relative" id="searchable-provider-container">
+                                        <input id="provider-search-input" oninput="filterProviderDropdown()" onfocus="showProviderDropdown()" type="text"
+                                            placeholder="Buscar proveedor por nombre o RIF..."
+                                            class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold pr-8">
+                                        <button onclick="clearProviderSearch()"
+                                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
+                                            <i class="fa-solid fa-circle-xmark"></i>
+                                        </button>
+                                        <div id="provider-dropdown"
+                                            class="hidden absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
+                                        </div>
+                                    </div>
+                                    <input type="hidden" id="note-provider-select" value="">
+                                </div>
+                                <button type="button" onclick="openContactModal('PROVEEDOR')"
+                                    class="mt-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 text-[10px] font-bold px-2.5 py-2 rounded-xl transition whitespace-nowrap"
+                                    title="Registrar Nuevo Proveedor">
+                                    <i class="fa-solid fa-plus mr-1"></i> Nuevo
+                                </button>
+                            </div>
+
+                            <div id="provider-summary-card" class="hidden bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 space-y-1">
+                                <div class="flex justify-between items-center">
+                                    <span id="provider-card-name" class="font-bold text-slate-800 dark:text-slate-200 text-xs"></span>
+                                    <span id="provider-card-id" class="font-mono text-[10px] text-slate-500 dark:text-slate-400"></span>
+                                </div>
+                                <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400">
+                                    <span><i class="fa-solid fa-phone mr-1"></i><span id="provider-card-phone">--</span></span>
+                                    <span><i class="fa-solid fa-location-dot mr-1"></i><span id="provider-card-address">--</span></span>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
+                                        Factura Física</label>
+                                    <input id="note-invoice-ref" type="text" placeholder="Ej. F-00213"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label
+                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
+                                        Nota Interna</label>
+                                    <input id="note-date-lbl" type="date"
+                                        class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-850 rounded-xl p-2 text-xs text-slate-500 dark:text-slate-400 font-mono text-center font-bold">
+                                </div>
+                            </div>
+
+                            <!-- DIVISOR -->
+                            <div class="border-t border-slate-100 dark:border-slate-800 my-4"></div>
+
+                            <!-- PRICING BREAKDOWN -->
+                            <div
+                                class="space-y-2 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 font-mono">
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Subtotal Divisas ($):</span>
+                                    <span class="text-slate-800 dark:text-slate-200 font-bold"
+                                        id="note-subtotal-usd">$0.00</span>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Descuento Aplicado:</span>
+                                    <!-- Rojo para salidas o deducciones -->
+                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
+                                        id="note-discount-usd">-$0.00</span>
+                                </div>
+                                <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div class="flex justify-between items-center text-sm">
+                                    <!-- Verde para ingresos directos -->
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas
+                                        ($):</span>
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base"
+                                        id="note-total-usd">$0.00</span>
+                                </div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div
+                                    class="flex justify-between items-center text-xs text-indigo-600 dark:text-indigo-400">
+                                    <span>Divisa BCV (Ajustada):</span>
+                                    <span class="font-bold" id="note-total-bcv-usd">$0.00</span>
+                                </div>
+                                <div
+                                    class="flex justify-between items-center text-base text-slate-900 dark:text-slate-100">
+                                    <span class="font-bold">Total en Bolívares (Bs):</span>
+                                    <span class="font-bold text-lg text-indigo-600 dark:text-indigo-400"
+                                        id="note-total-ves">0.00 Bs</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Observaciones
+                                    de la Compra</label>
+                                <textarea id="purchase-observaciones" rows="2"
+                                    placeholder="Comentarios internos para la factura de compra..."
+                                    class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-medium"></textarea>
+                            </div>
+
+                            <button onclick="processPurchase()"
+                                class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
+                                <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Compra
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+<script>
+    let globalFactor = Number("{{ config.factor_cobertura|stringformat:'.4f'|default:'1.0000' }}");
+    let globalBCV = Number("{{ config.tasa_bcv|stringformat:'.4f'|default:'0.0000' }}");
+    let lastCorrelative = 1;
+
+    let providerDataset = [
+        {% for proveedor in proveedores %}
+        {id: '{{ proveedor.identificacion|escapejs }}', nombre: '{{ proveedor.nombre|escapejs }}', identificacion: '{{ proveedor.identificacion|escapejs }}', telefono: '{{ proveedor.telefono|escapejs }}', direccion: '{{ proveedor.direccion|escapejs }}'},
+        {% endfor %}
+    ];
+
+    function showProviderDropdown() {
+        document.getElementById('provider-dropdown').classList.remove('hidden');
+        if (!document.getElementById('provider-search-input').value) {
+            renderProviderDropdown(providerDataset);
+        }
+    }
+
+    function clearProviderSearch() {
+        document.getElementById('provider-search-input').value = '';
+        document.getElementById('note-provider-select').value = '';
+        document.getElementById('provider-dropdown').classList.add('hidden');
+        document.getElementById('provider-summary-card').classList.add('hidden');
+    }
+
+    function filterProviderDropdown() {
+        const query = document.getElementById('provider-search-input').value.toLowerCase();
+        const dropdown = document.getElementById('provider-dropdown');
+        dropdown.classList.remove('hidden');
+        const filtered = providerDataset.filter(p => p.nombre.toLowerCase().includes(query) || p.identificacion.toLowerCase().includes(query));
+        renderProviderDropdown(filtered);
+    }
+
+    function renderProviderDropdown(items) {
+        const dropdown = document.getElementById('provider-dropdown');
+        dropdown.innerHTML = '';
+        if (items.length === 0) {
+            dropdown.innerHTML = '<div class="p-2 text-xs text-center text-rose-500">Sin resultados</div>';
+            return;
+        }
+        items.forEach(p => {
+            const div = document.createElement('div');
+            div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs";
+            div.innerHTML = `<span class="font-bold text-slate-800 dark:text-slate-200">${p.nombre}</span> <span class="text-slate-500 dark:text-slate-400 ml-2 font-mono text-[10px]">${p.identificacion}</span>`;
+            div.onclick = () => selectProvider(p);
+            dropdown.appendChild(div);
+        });
+    }
+
+    function selectProvider(p) {
+        document.getElementById('provider-search-input').value = p.nombre;
+        document.getElementById('note-provider-select').value = p.id;
+        document.getElementById('provider-dropdown').classList.add('hidden');
+        document.getElementById('provider-card-name').innerText = p.nombre;
+        document.getElementById('provider-card-id').innerText = p.identificacion;
+        document.getElementById('provider-card-phone').innerText = p.telefono || '--';
+        document.getElementById('provider-card-address').innerText = p.direccion || '--';
+        document.getElementById('provider-summary-card').classList.remove('hidden');
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    function showSaleItemDropdown() {
+        document.getElementById('sale-item-dropdown').classList.remove('hidden');
+    }
+    
+    function clearSaleSearch() {
+        document.getElementById('sale-item-search').value = '';
+        document.getElementById('sale-item-selected-sku').value = '';
+        document.getElementById('sale-item-dropdown').classList.add('hidden');
+    }
+
+    function filterSaleItemDropdown() {
+        const query = document.getElementById('sale-item-search').value.toLowerCase();
+        const dropdown = document.getElementById('sale-item-dropdown');
+        if (query.length < 2) return;
+        dropdown.innerHTML = '<div class="p-2 text-xs text-center text-slate-500">Buscando en servidor...</div>';
+        dropdown.classList.remove('hidden');
+        
+        fetch(`/catalogo/buscar/?q=${query}`)
+            .then(res => res.json())
+            .then(data => {
+                dropdown.innerHTML = '';
+                if(data.results.length === 0){
+                    dropdown.innerHTML = '<div class="p-2 text-xs text-center text-rose-500">Sin resultados</div>';
+                    return;
+                }
+                data.results.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs flex justify-between";
+                    div.innerHTML = `<span class="font-bold text-indigo-600">${item.sku}</span> <span class="text-slate-800 dark:text-slate-300">${item.nombre}</span> <span class="font-bold text-emerald-600">$${item.precio}</span>`;
+                    div.onclick = () => {
+                        document.getElementById('sale-item-search').value = item.nombre;
+                        document.getElementById('sale-item-selected-sku').value = item.sku;
+                        // Store full item temp
+                        document.getElementById('sale-item-selected-sku').dataset.nombre = item.nombre;
+                        document.getElementById('sale-item-selected-sku').dataset.precio = item.precio;
+                        document.getElementById('sale-item-selected-sku').dataset.tipo = item.tipo;
+                        document.getElementById('sale-item-selected-sku').dataset.usa_serial = item.usa_serial ? 'true' : 'false';
+                        dropdown.classList.add('hidden');
+                    };
+                    dropdown.appendChild(div);
+                });
+            });
+    }
+
+    let draftNoteItems = [];
+    
+    async function addItemToPurchase() {
+        const skuInput = document.getElementById('sale-item-selected-sku');
+        const sku = skuInput.value;
+        const nombre = skuInput.dataset.nombre;
+        const precio = parseFloat(skuInput.dataset.precio);
+        const tipo = skuInput.dataset.tipo;
+        const almacenId = document.getElementById('sale-warehouse-select').value;
+        const qty = parseInt(document.getElementById('sale-item-qty').value);
+        
+        if(!sku || qty <= 0) return;
+
+        // Validar contra backend
+        const response = await fetch(`/ventas/validar_stock/${sku}/${almacenId}/`);
+        if(!response.ok) {
+            alert('Error o stock insuficiente según base de datos.');
+            return;
+        }
+        const data = await response.json();
+        if(data.stock_disponible < qty) {
+             alert('Stock insuficiente. Disponible: ' + data.stock_disponible);
+             return;
+        }
+
+        const existingItem = draftNoteItems.find(item => item.sku === sku && item.almacen === almacenId);
+        if (existingItem) {
+            existingItem.qty += qty;
+        } else {
+            draftNoteItems.push({
+                sku: sku,
+                nombre: nombre,
+                almacen: almacenId,
+                qty: qty,
+                precio: precio,
+                tipo: tipo,
+                cobertura_ind: null
+            });
+        }
+
+        document.getElementById('sale-item-search').value = '';
+        document.getElementById('sale-item-selected-sku').value = '';
+        renderNoteItems();
+        recalculateNoteTotal();
+    }
+    
+    function removeNoteItem(index) {
+        draftNoteItems.splice(index, 1);
+        renderNoteItems();
+        recalculateNoteTotal();
+    }
+
+    function renderNoteItems() {
+        const tbody = document.getElementById('note-items-tbody');
+        tbody.innerHTML = '';
+
+        if (draftNoteItems.length === 0) {
+            tbody.innerHTML = `
+                <tr id="empty-note-row">
+                    <td colspan="7" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                        <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                        Aún no has agregado artículos a esta nota de entrega.
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        draftNoteItems.forEach((item, index) => {
+            const itemTotal = item.precio * item.qty;
+            const row = document.createElement('tr');
+            row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
+            row.innerHTML = `
+                <td class="py-3 px-2 text-slate-500 dark:text-slate-400 font-bold">${item.sku}</td>
+                <td class="py-3 px-2 text-slate-800 dark:text-slate-200 font-medium">
+                    ${item.nombre}
+                    ${item.tipo === 'COMBO' ? '<span class="text-[9px] bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30 px-1 py-0.5 rounded ml-1">Combo</span>' : ''}
+                </td>
+                <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
+                <td class="py-3 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
+                <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.precio.toFixed(2)}</td>
+                <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
+                <td class="py-3 px-2 text-center">
+                    <button onclick="removeNoteItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    function recalculateNoteTotal() {
+        let subtotal = 0;
+        let weightedFactorSum = 0;
+        let totalWeight = 0;
+
+        draftNoteItems.forEach(item => {
+            const itemTotal = item.precio * item.qty;
+            subtotal += itemTotal;
+            const factor = item.cobertura_ind ? item.cobertura_ind : globalFactor;
+            weightedFactorSum += factor * itemTotal;
+            totalWeight += itemTotal;
+        });
+
+        const exactFactor = totalWeight > 0 ? (weightedFactorSum / totalWeight) : globalFactor;
+        const discountPercent = 0; // Configurable si se desea
+        const discount = subtotal * (discountPercent / 100);
+        const totalUSD = subtotal - discount;
+        const totalBCVUSD = totalUSD * exactFactor;
+        const totalVES = totalBCVUSD * globalBCV;
+
+        document.getElementById('note-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
+        document.getElementById('note-discount-usd').innerText = `-$${discount.toFixed(2)}`;
+        document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
+        document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
+        document.getElementById('note-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+    }
+
+    function processPurchase() {
+        if (draftNoteItems.length === 0) {
+            alert("No hay productos en la compra.");
+            return;
+        }
+
+        const proveedorId = document.getElementById('note-provider-select').value;
+        const numeroFactura = document.getElementById('note-invoice-ref').value;
+        const fechaCompra = document.getElementById('note-date-lbl').value;
+        const almacenId = document.getElementById('sale-warehouse-select').value;
+        const observaciones = document.getElementById('purchase-observaciones').value.trim();
+
+        if (!proveedorId) { alert("Seleccione un proveedor."); return; }
+        if (!numeroFactura) { alert("Ingrese el número de factura."); return; }
+        if (!fechaCompra) { alert("Ingrese la fecha de compra."); return; }
+
+        const listaItems = draftNoteItems.map(i => ({
+            sku: i.sku,
+            cantidad: i.qty,
+            costo_factura: i.precio
+        }));
+
+        const montoTotal = listaItems.reduce((sum, item) => sum + (item.cantidad * item.costo_factura), 0);
+
+        const payload = {
+            empresa_id: {{ request.session.empresa_id|default:'null' }},
+            proveedor_id: proveedorId,
+            numero_factura: numeroFactura,
+            fecha_compra: fechaCompra,
+            monto_total_usd: montoTotal,
+            almacen_id: parseInt(almacenId),
+            lista_items: listaItems,
+            observaciones: observaciones
+        };
+
+        fetch('/compras/registrar/', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if(data.ok) {
+                alert(`Compra registrada con éxito.`);
+                window.location.reload();
+            } else {
+                alert(`Error: ${data.error}`);
+            }
+        })
+        .catch(err => {
+            alert("Error de conexión con el servidor.");
+        });
+    }
+</script>
+
+<div id="modal-contact"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-lg w-full rounded-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2"
+                        id="contact-modal-title">
+                        <i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Contacto
+                    </h3>
+                    <button onclick="closeContactModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <form method="POST" action="{% url 'inventory:contactos' %}" class="space-y-3 text-xs">
+{% csrf_token %}
+                    <input type="hidden" id="form-c-type" name="tipo">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1"
+                                id="contact-id-lbl">Cédula / RIF</label>
+                            <input id="form-c-id" name="rif" type="text" placeholder="Ej. V-26412411 o J-41241"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
+                                Completo / Razón Social</label>
+                            <input id="form-c-name" name="nombre" type="text" placeholder="Ej. Corporación Metal-X C.A."
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Teléfono
+                                o Canal Comercial</label>
+                            <input id="form-c-phone" name="telefono" type="text" placeholder="Ej. 0412.186.92.11"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Correo
+                                Electrónico</label>
+                            <input id="form-c-email" name="correo" type="email" placeholder="Ej. info@empresa.com"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Red
+                                Social (IG/TikTok)</label>
+                            <input id="form-c-social" name="red_social" type="text" placeholder="Ej. @metal_x"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div id="form-group-nombre-asesor" class="hidden">
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
+                                del Asesor (Proveedor)</label>
+                            <input id="form-c-asesor" name="nombre_asesor" type="text" placeholder="Ej. Juan Pérez"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-medium focus:outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label
+                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Dirección
+                                Física Completa</label>
+                            <input id="form-c-address" name="direccion" type="text" placeholder="Ej. Zona Industrial San Diego, Cl. 4"
+                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label
+                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Observaciones
+                            / Comentarios Internos</label>
+                        <textarea id="form-c-notes" name="observaciones" rows="3"
+                            placeholder="Indique de forma libre observaciones para marketing, histórico o condiciones..."
+                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none h-24 font-medium"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL BUTTONS -->
+            <div
+                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
+                <button onclick="closeContactModal()"
+                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
+                    Cancelar
+                </button>
+                <button type="submit"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
+                    Guardar Contacto
+                </button>
+            </div>
+</form>
+        </div>
+    </div>
+
+    
+<div id="modal-contact-details"
+        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div
+            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-md w-full rounded-2xl shadow-2xl overflow-hidden">
+            <div class="p-6 space-y-4">
+                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
+                    <h3 class="font-bold text-md text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
+                        <i class="fa-solid fa-id-card"></i> Ficha Informativa del Contacto
+                    </h3>
+                    <button onclick="closeContactDetailsModal()"
+                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
+                            class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+
+                <div class="space-y-3 text-xs leading-relaxed">
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Nombre /
+                            Razón Social</span>
+                        <span id="detail-c-name" class="font-bold text-slate-800 dark:text-slate-200 text-sm">--</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Identificación
+                                (RIF/C.I)</span>
+                            <span id="detail-c-id"
+                                class="font-mono text-slate-700 dark:text-slate-300 font-bold">--</span>
+                        </div>
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Tipo</span>
+                            <span id="detail-c-type" class="text-slate-700 dark:text-slate-300 font-semibold">--</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span
+                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Teléfono</span>
+                            <span id="detail-c-phone" class="text-slate-700 dark:text-slate-300">--</span>
+                        </div>
+                        <div
+                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Red
+                                Social</span>
+                            <span id="detail-c-social" class="font-mono text-indigo-600 dark:text-indigo-400">--</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span
+                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Dirección</span>
+                        <span id="detail-c-address" class="text-slate-700 dark:text-slate-300">--</span>
+                    </div>
+
+                    <div
+                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                        <span
+                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Observaciones
+                            y Comentarios</span>
+                        <p id="detail-c-notes" class="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">--</p>
+                    </div>
+                </div>
+            </div>
+
+<script>
+    function openContactModal(type) {
+        document.getElementById('form-c-type').value = type;
+        document.getElementById('contact-modal-title').innerHTML = type === 'CLIENTE' ? `<i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Cliente` : `<i class="fa-solid fa-truck-field text-indigo-500"></i> Registrar Proveedor`;
+        document.getElementById('contact-id-lbl').innerText = type === 'CLIENTE' ? 'Cédula / RIF del Cliente' : 'RIF / ID Fiscal del Proveedor';
+
+        document.getElementById('form-c-id').value = '';
+        document.getElementById('form-c-name').value = '';
+        document.getElementById('form-c-phone').value = '';
+        document.getElementById('form-c-email').value = '';
+        document.getElementById('form-c-social').value = '';
+        document.getElementById('form-c-address').value = '';
+        document.getElementById('form-c-notes').value = '';
+        document.getElementById('form-c-asesor').value = '';
+
+        const asesorGroup = document.getElementById('form-group-nombre-asesor');
+        if (type === 'PROVEEDOR') {
+            asesorGroup.classList.remove('hidden');
+        } else {
+            asesorGroup.classList.add('hidden');
+        }
+
+        document.getElementById('modal-contact').classList.remove('hidden');
+    }
+
+    function closeContactModal() {
+        document.getElementById('modal-contact').classList.add('hidden');
+    }
+
+    function viewContactDetails(name, id, type, phone, social, address, notes) {
+        document.getElementById('detail-c-name').innerText = name;
+        document.getElementById('detail-c-id').innerText = id;
+        document.getElementById('detail-c-type').innerText = type;
+        document.getElementById('detail-c-phone').innerText = phone || '--';
+        document.getElementById('detail-c-social').innerText = social || '--';
+        document.getElementById('detail-c-address').innerText = address || '--';
+        document.getElementById('detail-c-notes').innerText = notes || 'Sin comentarios registrados.';
+
+        document.getElementById('modal-contact-details').classList.remove('hidden');
+    }
+
+    function closeContactDetailsModal() {
+        document.getElementById('modal-contact-details').classList.add('hidden');
+    }
+</script>
+{% endblock %}

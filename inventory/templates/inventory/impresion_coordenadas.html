@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Impresión de Nota NE-{{ nota.numero|stringformat:"05d" }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Forzamos el salto de página y las dimensiones si es necesario */
+        @media print {
+            body {
+                width: 210mm;
+                height: 297mm;
+                margin: 0;
+                padding: 0;
+            }
+            @page {
+                size: auto;
+                margin: 0mm;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+        
+        .print-canvas {
+            position: relative;
+            width: 100%;
+            height: 100vh; /* en papel será determinado por contenido/papel */
+            background-color: white;
+            font-family: monospace; /* Típicamente usado en impresoras matriciales/tickets */
+            font-size: 12px;
+        }
+
+        /* Coordenadas relativas dinámicas utilizando Tailwind custom variables o CSS puro */
+        .movable-layer {
+            position: absolute;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="no-print p-4 bg-gray-800 text-white flex justify-between items-center shadow-md">
+        <div>
+            <h1 class="text-xl font-bold">Impresión por Coordenadas</h1>
+            <p class="text-sm text-gray-300">Offset X: {{ config.print_offset_x }}mm | Offset Y: {{ config.print_offset_y }}mm</p>
+        </div>
+        <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-bold transition">🖨️ Imprimir</button>
+    </div>
+
+    <!-- Lienzo principal desplazado globalmente -->
+    <div class="print-canvas" style="left: {{ config.print_offset_x }}mm; top: {{ config.print_offset_y }}mm;">
+        
+        <!-- Cabecera de la Nota de Entrega -->
+        <div class="movable-layer" style="top: 20mm; left: 10mm; font-weight: bold; font-size: 16px;">
+            NOTA DE ENTREGA: NE-{{ nota.numero|stringformat:"05d" }}
+        </div>
+        
+        <div class="movable-layer" style="top: 30mm; left: 10mm;">
+            Fecha: {{ nota.fecha|date:"d/m/Y H:i" }}
+        </div>
+        
+        <div class="movable-layer" style="top: 40mm; left: 10mm;">
+            Cliente: {{ nota.cliente.nombre|default:"Cliente Genérico" }}
+        </div>
+
+        <div class="movable-layer" style="top: 45mm; left: 10mm;">
+            RIF/Cédula: {{ nota.cliente.identificacion|default:"N/A" }}
+        </div>
+
+        <!-- Encabezados de tabla falsos -->
+        <div class="movable-layer" style="top: 60mm; left: 10mm; font-weight: bold;">
+            CANT.
+        </div>
+        <div class="movable-layer" style="top: 60mm; left: 30mm; font-weight: bold;">
+            DESCRIPCIÓN
+        </div>
+        <div class="movable-layer" style="top: 60mm; left: 120mm; font-weight: bold;">
+            P.UNIT (USD)
+        </div>
+        <div class="movable-layer" style="top: 60mm; left: 160mm; font-weight: bold;">
+            TOTAL (USD)
+        </div>
+
+        <!-- Bucle dinámico para el detalle de productos -->
+        {% for d in detalles %}
+            <!-- Usamos CSS inline. El top arranca en 70mm y suma el index_0 * print_row_spacing -->
+            <!-- Ya que Django no permite matemáticas directas sin custom tags en templates estándar, 
+                 podemos usar widthratio para multiplicar si es necesario, pero como print_row_spacing es decimal, 
+                 el frontend o una lógica en vista sería mejor. 
+                 Si no, asumimos que config.print_row_spacing ya lo aplica o lo calculamos aquí: -->
+            <!-- Nota: para multiplicar en Django de forma limpia (ej: forloop.counter0 * spacing): -->
+            <!-- Vamos a pasar una variable estilo 'top' desde la vista? No, podemos poner un wrapper relativo -->
+            
+            <div class="movable-layer" style="top: calc(70mm + ({{ forloop.counter0 }} * {{ config.print_row_spacing }}mm)); left: 10mm;">
+                {{ d.cantidad }}
+            </div>
+            <div class="movable-layer" style="top: calc(70mm + ({{ forloop.counter0 }} * {{ config.print_row_spacing }}mm)); left: 30mm; max-width: 80mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                {{ d.articulo.nombre }}
+            </div>
+            <div class="movable-layer" style="top: calc(70mm + ({{ forloop.counter0 }} * {{ config.print_row_spacing }}mm)); left: 120mm;">
+                ${{ d.precio_unitario_usd|stringformat:".2f" }}
+            </div>
+            <div class="movable-layer" style="top: calc(70mm + ({{ forloop.counter0 }} * {{ config.print_row_spacing }}mm)); left: 160mm;">
+                <!-- Usamos widthratio como hack de multiplicacion, pero la vista nos da mejor precision. Como pediste CSS, calc es la solucion correcta de HTML5 -->
+                $<span class="line-total" data-qty="{{ d.cantidad }}" data-price="{{ d.precio_unitario_usd }}"></span>
+                <script>
+                    document.currentScript.previousElementSibling.innerText = (parseFloat("{{ d.cantidad|stringformat:'.2f' }}") * parseFloat("{{ d.precio_unitario_usd|stringformat:'.2f' }}")).toFixed(2);
+                </script>
+            </div>
+        {% endfor %}
+
+        <!-- Zona de Totales, empujada dinámicamente hacia abajo -->
+        <div class="movable-layer font-bold" style="top: calc(80mm + ({{ detalles|length }} * {{ config.print_row_spacing }}mm)); left: 120mm;">
+            TOTAL USD:
+        </div>
+        <div class="movable-layer font-bold text-lg" style="top: calc(80mm + ({{ detalles|length }} * {{ config.print_row_spacing }}mm)); left: 160mm;">
+            ${{ total_usd|stringformat:".2f" }}
+        </div>
+        <div class="movable-layer" style="top: calc(85mm + ({{ detalles|length }} * {{ config.print_row_spacing }}mm)); left: 120mm;">
+            Equiv. Bs:
+        </div>
+        <div class="movable-layer" style="top: calc(85mm + ({{ detalles|length }} * {{ config.print_row_spacing }}mm)); left: 160mm;">
+            Bs {{ total_bs|stringformat:".2f" }}
+        </div>
+    </div>
+</body>
+</html>
