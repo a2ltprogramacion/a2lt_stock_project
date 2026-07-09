@@ -1245,6 +1245,8 @@ class TestControlCostosYCompras(TransactionTestCase):
         self.articulo.margen_ind = Decimal('0.00')
         self.articulo.costo = Decimal('10.00')
         self.articulo.precio_divisa = Decimal('14.29') # 10 / 0.70
+        # Asegurar metodo MARGIN para preservar el espiritu original del test
+        self.articulo.metodo_ganancia = 'MARGIN'
         self.articulo.save()
 
         self.proveedor = Contacto.objects.create(
@@ -2528,4 +2530,115 @@ class TestReversoIdempotencia(TransactionTestCase):
                 "Debe existir exactamente 1 movimiento DEVOLUCION_VENTA. "
                 "El bug histórico generaba 2 (uno por cada doble click)."
             )
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C2: RESPETO DE metodo_ganancia EN COMPRAS (regresión bug siempre-MARGIN)
+# ─────────────────────────────────────────────────────────────────────────────
+# Previene el bug donde registrar_compra_proveedor ignoraba articulo.metodo_ganancia
+# y aplicaba SIEMPRE la formula MARGIN (costo / (1 - margen/100)).
+# Como el modelo Articulo define default='MARKUP', TODOS los articulos nuevos
+# nacian con MARKUP pero recibian el calculo de MARGIN, sobrevalorando precios
+# ~10% (ejemplo: costo 100 con margen 30 -> esperado 130, calculaba 142.86).
+
+class TestMetodoGananciaCompras(TransactionTestCase):
+    """
+    Garantiza que registrar_compra_proveedor respete metodo_ganancia del articulo:
+      - MARKUP: precio = costo * (1 + margen/100)
+      - MARGIN: precio = costo / (1 - margen/100)
+    """
+
+    def setUp(self):
+        from .models import ConfiguracionEmpresa, Contacto
+        self.empresa = crear_empresa(nombre='GananciaTest', rif='J-GAN-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.margen_global = Decimal('30.00')
+        self.config.save()
+        self.almacen = crear_almacen(self.empresa, nombre='Almacén Ganancia')
+
+        # Proveedor (requerido por registrar_compra_proveedor)
+        self.proveedor = Contacto.objects.create(
+            empresa=self.empresa,
+            identificacion='J-GAN-PROV',
+            tipo='PROVEEDOR',
+            nombre='Proveedor Ganancia',
+            rif='J-GAN-PROV',
+            nombre_asesor='Asesor Test'
+        )
+
+        # Articulo MARKUP (usa margen_ind explícito)
+        self.articulo_markup = crear_articulo_fisico(
+            self.empresa, sku='MK-001', nombre='Articulo MARKUP'
+        )
+        self.articulo_markup.metodo_ganancia = 'MARKUP'
+        self.articulo_markup.margen_ind = Decimal('30.00')
+        self.articulo_markup.save()
+
+        # Articulo MARGIN (usa margen_ind explícito)
+        self.articulo_margin = crear_articulo_fisico(
+            self.empresa, sku='MG-001', nombre='Articulo MARGIN'
+        )
+        self.articulo_margin.metodo_ganancia = 'MARGIN'
+        self.articulo_margin.margen_ind = Decimal('30.00')
+        self.articulo_margin.save()
+
+    def _comprar(self, sku, costo_factura, numero_factura):
+        """Helper: ejecuta registrar_compra_proveedor para un sku dado."""
+        from inventory.services import registrar_compra_proveedor
+        return registrar_compra_proveedor(
+            proveedor_id=str(self.proveedor.pk),
+            numero_factura=numero_factura,
+            fecha_compra='2026-06-25',
+            monto_total_usd=Decimal('1000.00'),
+            almacen_id=self.almacen.pk,
+            lista_items=[{
+                'sku': sku,
+                'cantidad': Decimal('10.00'),
+                'costo_factura': costo_factura
+            }],
+            usuario='Admin'
+        )
+
+    def test_markup_calcula_precio_correcto(self):
+        """
+        MARKUP 30% con costo 100.00 -> precio 130.00 (no 142.86)
+        El bug siempre-MARGIN calculaba 142.86, sobrevalorando ~10%.
+        """
+        self._comprar('MK-001', Decimal('100.00'), 'F-MK-001')
+        self.articulo_markup.refresh_from_db()
+        self.assertEqual(
+            self.articulo_markup.precio_divisa, Decimal('130.00'),
+            msg="MARKUP 30% sobre costo 100 debe dar 130.00 (no 142.86 que es MARGIN)."
+        )
+
+    def test_margin_calcula_precio_correcto(self):
+        """
+        MARGIN 30% con costo 100.00 -> precio 142.86 (preserva formula de margen real).
+        """
+        self._comprar('MG-001', Decimal('100.00'), 'F-MG-001')
+        self.articulo_margin.refresh_from_db()
+        self.assertEqual(
+            self.articulo_margin.precio_divisa, Decimal('142.86'),
+            msg="MARGIN 30% sobre costo 100 debe dar 142.86."
+        )
+
+    def test_markup_y_margin_producen_precios_distintos(self):
+        """
+        Regresión clave: MARKUP y MARGIN con mismo margen deben producir precios
+        diferentes. Si el bug vuelve, ambos coincidirían con MARGIN.
+        """
+        self._comprar('MK-001', Decimal('100.00'), 'F-DIST-MK')
+        self._comprar('MG-001', Decimal('100.00'), 'F-DIST-MG')
+        self.articulo_markup.refresh_from_db()
+        self.articulo_margin.refresh_from_db()
+        self.assertNotEqual(
+            self.articulo_markup.precio_divisa,
+            self.articulo_margin.precio_divisa,
+            msg="MARKUP y MARGIN deben dar precios distintos. Si coinciden, el bug siempre-MARGIN regresó."
+        )
+        self.assertLess(
+            self.articulo_markup.precio_divisa,
+            self.articulo_margin.precio_divisa,
+            msg="MARKUP siempre da precio menor que MARGIN para el mismo margen %."
         )

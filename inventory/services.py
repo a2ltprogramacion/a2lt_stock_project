@@ -1685,11 +1685,19 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
                 config = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
                 margen = config.margen_global if config.margen_global else Decimal('30.00') # Default 30%
 
-            factor_margen = Decimal('1') - (margen / Decimal('100'))
-            if factor_margen <= 0:
-                raise ValueError("El margen comercial no puede ser igual o mayor al 100%.")
+            metodo = (articulo.metodo_ganancia or 'MARKUP').upper()
+            if metodo == 'MARKUP':
+                # MARKUP: precio = costo * (1 + margen/100)
+                # Ejemplo con margen 30%: 100 * 1.30 = 130.00
+                precio_recalculado = costo_factura * (Decimal('1') + (margen / Decimal('100')))
+            else:  # MARGIN
+                # MARGIN: precio = costo / (1 - margen/100)
+                # Ejemplo con margen 30%: 100 / 0.70 = 142.86
+                factor_margen = Decimal('1') - (margen / Decimal('100'))
+                if factor_margen <= 0:
+                    raise ValueError("El margen comercial no puede ser igual o mayor al 100%.")
+                precio_recalculado = costo_factura / factor_margen
 
-            precio_recalculado = costo_factura / factor_margen
             articulo.precio_divisa = precio_recalculado.quantize(Decimal('0.01'))
             articulo.save(update_fields=['costo', 'precio_divisa', 'fecha_actualizacion'])
 
