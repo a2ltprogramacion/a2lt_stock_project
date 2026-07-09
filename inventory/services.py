@@ -1947,7 +1947,6 @@ def procesar_devolucion_venta(nota_entrega_id: int, items_devolucion: list, tipo
 # ─────────────────────────────────────────────────────────────────────────────
 
 @transaction.atomic
-@transaction.atomic
 def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
     from .models import NotaEntrega, SerialArticulo
     from .services import registrar_movimiento
@@ -1957,7 +1956,7 @@ def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
     if nota.estado == 'ANULADO':
         raise ValueError("La Nota de Entrega ya se encuentra anulada.")
     
-    nota.estado = 'ANULADA'
+    nota.estado = 'ANULADO'
     nota.motivo_anulacion = motivo
     nota.save(update_fields=['estado', 'motivo_anulacion'])
     

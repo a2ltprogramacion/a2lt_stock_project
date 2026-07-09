@@ -40,13 +40,13 @@
                             <td class="py-3">{{ v.cliente.nombre|default:"Consumidor Final" }}</td>
                             <td class="py-3">
                                 <span id="badge-venta-{{ v.id }}" class="px-2 py-0.5 rounded text-[9px] font-bold 
-                                    {% if v.estado == 'ANULADA' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                                    {% if v.estado == 'ANULADO' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
                                     {% else %}bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400{% endif %}">
                                     {{ v.estado }}
                                 </span>
                             </td>
                             <td class="py-3 text-right">
-                                {% if v.estado != 'ANULADA' %}
+                                {% if v.estado != 'ANULADO' %}
                                 <button id="btn-venta-{{ v.id }}" type="button" data-tipo="VENTA" data-id="{{ v.id }}" data-ref="{{ v.numero }}" onclick="openAnularModal(this.dataset.tipo, this.dataset.id, this.dataset.ref)" 
                                     class="bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/30 text-[10px] font-bold px-2 py-1 rounded transition whitespace-nowrap" title="Anular / Reversar Documento">
                                     <i class="fa-solid fa-rotate-left mr-1"></i> Anular
@@ -218,7 +218,7 @@
             
             if(data.ok) {
                 let badge = document.getElementById(currentAnularType === 'VENTA' ? 'badge-venta-' + currentAnularId : 'badge-compra-' + currentAnularId);
-                badge.innerText = currentAnularType === 'VENTA' ? 'ANULADA' : 'ANULADO';
+                badge.innerText = currentAnularType === 'VENTA' ? 'ANULADO' : 'ANULADO';
                 badge.className = "px-2 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400";
                 
                 let actionBtn = document.getElementById(currentAnularType === 'VENTA' ? 'btn-venta-' + currentAnularId : 'btn-compra-' + currentAnularId);

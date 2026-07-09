@@ -2427,3 +2427,105 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
         )
         doc = DocumentoCompra.objects.get(pk=resultado['documento_id'])
         self.assertEqual(doc.observaciones, 'Factura con descuento especial')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C1: IDEMPOTENCIA DE REVERSO (regresión bug ANULADO vs ANULADA)
+# ─────────────────────────────────────────────────────────────────────────────
+# Previene el bug crítico donde reversar_nota_entrega guardaba
+# estado='ANULADA' (inexistente en ESTADO_CHOICES) en lugar de 'ANULADO'.
+# Como el check de guardia comparaba con 'ANULADO', un segundo intento
+# de anular volvía a pasar el guard y duplicaba el movimiento de devolución,
+# inflando el stock silenciosamente. Este test hubiera detectado el bug.
+
+class TestReversoIdempotencia(TransactionTestCase):
+    """
+    Garantiza que un segundo reverso sobre la misma NotaEntrega sea rechazado
+    y que el stock NO se inflate por doble click (caso de uso real).
+    """
+
+    def setUp(self):
+        from .models import ConfiguracionEmpresa
+        self.empresa = crear_empresa(nombre='IdempotenciaTest', rif='J-IDEMP-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.0000')
+        self.config.factor_cobertura = Decimal('1.0500')
+        self.config.save()
+        self.almacen = crear_almacen(self.empresa, nombre='Almacén Idempotencia')
+        self.articulo = crear_articulo_fisico(
+            self.empresa, sku='IDEMP-001', nombre='Artículo Idempotencia'
+        )
+        seed_inventario(self.articulo, self.almacen, cantidad=100)
+
+    def test_doble_reverso_lanza_error_y_no_infla_stock(self):
+        """
+        Criterio: La segunda llamada a reversar_nota_entrega() debe lanzar
+        ValueError y NO generar un segundo movimiento DEVOLUCION_VENTA.
+        El stock debe quedar exactamente en su valor original (100).
+        """
+        items = [{
+            'articulo_sku': 'IDEMP-001',
+            'cantidad': 5,
+            'precio_unitario_usd': '20.00',
+            'seriales': []
+        }]
+        nota = svc.procesar_venta(None, items, self.almacen.pk, 'Admin')
+        self.assertEqual(
+            InventarioAlmacen.objects.get(
+                articulo=self.articulo, almacen=self.almacen
+            ).cantidad_disponible,
+            Decimal('95.00'),
+            msg="Tras venta de 5 unidades, el stock debe ser 95."
+        )
+
+        # Primer reverso: debe pasar sin error
+        resultado = svc.reversar_nota_entrega(
+            self.empresa.pk, nota.pk, 'Primer reverso'
+        )
+        self.assertTrue(resultado['ok'])
+
+        nota.refresh_from_db()
+        self.assertEqual(
+            nota.estado, 'ANULADO',
+            msg="Tras el primer reverso, el estado debe ser 'ANULADO' (alineado con ESTADO_CHOICES)."
+        )
+        self.assertEqual(
+            InventarioAlmacen.objects.get(
+                articulo=self.articulo, almacen=self.almacen
+            ).cantidad_disponible,
+            Decimal('100.00'),
+            msg="Tras el primer reverso, el stock debe regresar a 100."
+        )
+
+        # Segundo reverso: DEBE lanzar ValueError (idempotencia)
+        with self.assertRaises(ValueError) as ctx:
+            svc.reversar_nota_entrega(
+                self.empresa.pk, nota.pk, 'Segundo reverso — no debe pasar'
+            )
+        self.assertIn(
+            'ya se encuentra anulada', str(ctx.exception).lower(),
+            msg="El ValueError debe explicar que la nota ya está anulada."
+        )
+
+        # El stock NO debe haberse inflado por el segundo intento
+        self.assertEqual(
+            InventarioAlmacen.objects.get(
+                articulo=self.articulo, almacen=self.almacen
+            ).cantidad_disponible,
+            Decimal('100.00'),
+            msg="El segundo reverso no debe inflar el stock: debe seguir en 100 (bug ANULADA histórico lo inflaba a 105)."
+        )
+
+        # Solo debe existir UN movimiento DEVOLUCION_VENTA, no dos
+        movs_devolucion = MovimientoKardex.objects.filter(
+            nota_entrega=nota,
+            tipo='ENTRADA',
+            concepto='DEVOLUCION_VENTA'
+        )
+        self.assertEqual(
+            movs_devolucion.count(), 1,
+            msg=(
+                "Debe existir exactamente 1 movimiento DEVOLUCION_VENTA. "
+                "El bug histórico generaba 2 (uno por cada doble click)."
+            )
+        )
