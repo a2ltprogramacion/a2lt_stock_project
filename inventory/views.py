@@ -14,6 +14,7 @@ import logging
 from django.http import JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt  # Temporal hasta implementar tokens CSRF en JS
@@ -808,14 +809,18 @@ def vista_buscar_seriales_articulo(request, articulo_sku, almacen_id):
     return JsonResponse({'ok': True, 'data': data})
 
 
-@csrf_exempt
+@login_required
 def articulos_view(request):
     """
     Vista para administrar artículos (GET=listar, POST=crear/actualizar).
+    Multi-tenant: opera sobre la empresa activa del ContextVar.
+
+    Requiere @login_required + CSRF token en el fetch (articulos.html).
     """
     from django.http import JsonResponse
     from decimal import Decimal
-    from .models import Articulo, Empresa
+    from .models import Articulo
+    from .managers import get_current_empresa
 
     if request.method == 'POST':
         data = json.loads(request.body) if request.content_type == 'application/json' else request.POST
@@ -825,8 +830,8 @@ def articulos_view(request):
         if not sku or not nombre:
             return JsonResponse({'ok': False, 'error': 'SKU y Nombre son obligatorios.'}, status=400)
 
-        empresa = Empresa.objects.first()
-        if not empresa:
+        empresa_id = get_current_empresa()
+        if not empresa_id:
             return JsonResponse({'ok': False, 'error': 'No hay empresa activa.'}, status=400)
 
         defaults = {
@@ -843,7 +848,7 @@ def articulos_view(request):
 
         articulo, created = Articulo.objects.update_or_create(
             sku=sku,
-            empresa=empresa,
+            empresa_id=empresa_id,
             defaults=defaults,
         )
 
@@ -928,8 +933,6 @@ def configuracion_view(request):
 # ─────────────────────────────────────────────────────────────────────────────
 # TICKET #19: POS Inverso (Compras)
 # ─────────────────────────────────────────────────────────────────────────────
-
-from django.contrib.auth.decorators import login_required
 
 @login_required
 def compras_view(request):
