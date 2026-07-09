@@ -2994,3 +2994,70 @@ class TestContactosYRespaldoMultiTenant(TestCase):
             response.status_code, 403,
             f"Sin empresa activa debe retornar 403, got {response.status_code}"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C6: vista_crear_venta no esquiva CSRF (sin @csrf_exempt)
+# ─────────────────────────────────────────────────────────────────────────────
+# Bug original: @csrf_exempt desactivaba la proteccion CSRF en el endpoint
+# de creacion de ventas. La vista_crear_venta es el endpoint de escritura
+# mas sensible del sistema (procesa ventas + Kardex). Fue protegida
+# porque el JS antiguo no enviaba X-CSRFToken. Tras A6 (getCookie global
+# en base.html) ventas.html ya enviaba correctamente el token via
+# getCookie('csrftoken'), por lo que el @csrf_exempt quedo obsoleto.
+#
+# Test: estructural via atributos de la funcion wrapped. No usa Client
+# para evitar la pelea CSRF-cookies que ya cubrimos en A7 vs Fase B.
+
+class TestVistaCrearVentaCSRF(TestCase):
+    """
+    Garantiza que vista_crear_venta NO esta exenta de proteccion CSRF.
+    El frontend (ventas.html:613) ya envia X-CSRFToken via getCookie global.
+    """
+
+    def test_vista_crear_venta_no_tiene_csrf_exempt(self):
+        """
+        Criterio: la funcion de vista NO debe tener csrf_exempt=True.
+        django.views.decorators.csrf.csrf_exempt() modifica el atributo
+        csrf_exempt de la funcion envolviéndola; basta con inspeccionarlo.
+        """
+        from inventory import views
+        view_func = views.vista_crear_venta
+
+        self.assertFalse(
+            getattr(view_func, 'csrf_exempt', False),
+            msg=(
+                "vista_crear_venta tiene csrf_exempt=True. "
+                "Quita @csrf_exempt para que Django CSRF middleware valide tokens."
+            )
+        )
+
+    def test_frontend_ventas_envia_csrf_token_al_endpoint(self):
+        """
+        Criterio: ventas.html debe enviar 'X-CSRFToken': csrftoken en el
+        fetch POST a /ventas/crear/. Sin esto, quitar @csrf_exempt romperia
+        el flujo de ventas completamente para el usuario final.
+        """
+        import re
+        from pathlib import Path
+        ventas_path = Path('inventory/templates/inventory/ventas.html')
+        with open(ventas_path, encoding='utf-8') as f:
+            html = f.read()
+
+        # csrf_token disponible (getCookie global, A6)
+        self.assertIn(
+            "getCookie('csrftoken')", html,
+            msg="ventas.html debe invocar getCookie('csrftoken') para obtener el CSRF token"
+        )
+        # csrf_header en el fetch POST
+        # el regex busca: 'X-CSRFToken': csrftoken  o  'X-CSRFToken': getCookie('csrftoken')
+        pattern = re.compile(r"'X-CSRFToken'\s*:\s*(\w+|'getCookie\([^)]*\)')")
+        match = pattern.search(html)
+        self.assertIsNotNone(
+            match,
+            msg=(
+                "ventas.html debe contener 'X-CSRFToken': csrftoken (o getCookie) "
+                "en el header del fetch POST a /ventas/crear/. Sin esto el flujo "
+                "de ventas quedaria roto tras quitar @csrf_exempt."
+            )
+        )

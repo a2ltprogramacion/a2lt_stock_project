@@ -521,7 +521,6 @@ import json
 from django.http import JsonResponse
 
 @require_http_methods(["POST"])
-@csrf_exempt
 def vista_crear_venta(request):
     """Endpoint AJAX para procesar el carrito de compras y generar Nota de Entrega."""
     try:
