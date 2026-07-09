@@ -656,6 +656,15 @@ def contactos(request):
     from .models import Contacto
     from django.core.exceptions import ValidationError
     from django.contrib import messages
+    from .managers import get_current_empresa
+    from django.http import HttpResponseForbidden
+
+    # Resolver empresa activa del ContextVar (TenantMiddleware lo setea).
+    # Esto reemplaza getattr(request, 'empresa', None) que NUNCA se setea
+    # (el middleware solo setea el ContextVar, no request.empresa).
+    empresa_id = get_current_empresa()
+    if not empresa_id:
+        return HttpResponseForbidden("Sesión de empresa no detectada.")
 
     if request.method == 'POST':
         tipo = request.POST.get('tipo', 'CLIENTE')
@@ -671,7 +680,7 @@ def contactos(request):
         try:
             if not nombre:
                 raise ValidationError("El nombre del contacto es obligatorio.")
-                
+
             if tipo == 'PROVEEDOR':
                 if not rif:
                     raise ValidationError("El RIF es obligatorio para proveedores.")
@@ -681,7 +690,7 @@ def contactos(request):
             # Buscar si existe (update) o crear nuevo
             import uuid
             Contacto.objects.create(
-                empresa=getattr(request, 'empresa', None),
+                empresa_id=empresa_id,
                 identificacion=rif if rif else str(uuid.uuid4())[:20],
                 tipo=tipo,
                 nombre=nombre,
@@ -696,11 +705,10 @@ def contactos(request):
             messages.success(request, f"{tipo.capitalize()} registrado exitosamente.")
         except ValidationError as e:
             messages.error(request, e.message)
-            
+
     # Listados para las pestañas
-    empresa_actual = getattr(request, 'empresa', None)
-    clientes = Contacto.objects.filter(empresa=empresa_actual, tipo='CLIENTE').order_by('nombre')
-    proveedores = Contacto.objects.filter(empresa=empresa_actual, tipo='PROVEEDOR').order_by('nombre')
+    clientes = Contacto.objects.filter(empresa_id=empresa_id, tipo='CLIENTE').order_by('nombre')
+    proveedores = Contacto.objects.filter(empresa_id=empresa_id, tipo='PROVEEDOR').order_by('nombre')
 
     return render(request, 'inventory/contactos.html', {
         'clientes': clientes,
@@ -757,13 +765,11 @@ def vista_exportar_respaldo(request):
     from django.utils.text import slugify
     import time
     from .services import exportar_datos_tenant
-    
+
     from .managers import get_current_empresa
-    empresa_id = getattr(request, 'empresa', None)
-    if empresa_id:
-        empresa_id = empresa_id.pk
+    empresa_id = get_current_empresa()
     if not empresa_id:
-        empresa_id = get_current_empresa()
+        return JsonResponse({'ok': False, 'error': 'Sesión de empresa no detectada.'}, status=403)
     payload = exportar_datos_tenant(empresa_id=empresa_id, meses_historico=6)
     
     json_data = json.dumps(payload, cls=DjangoJSONEncoder, indent=2)

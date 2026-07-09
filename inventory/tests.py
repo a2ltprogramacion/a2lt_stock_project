@@ -1570,10 +1570,15 @@ class TestExportacionLogicaSaaS(TestCase):
         """El controlador web entrega el JSON con content_type application/json."""
         from django.test import RequestFactory
         from inventory.views import vista_exportar_respaldo
-        
+        from inventory.managers import set_current_empresa
+
+        # Resolver empresa via ContextVar (no via request.empresa como hacia
+        # el codigo buggy original). Tras el fix en A8 la vista usa
+        # get_current_empresa() exclusivamente.
+        set_current_empresa(self.empresa1.id)
+
         factory = RequestFactory()
         request = factory.get('/respaldo/')
-        request.empresa = self.empresa1
         
         response = vista_exportar_respaldo(request)
         
@@ -2875,4 +2880,117 @@ class TestArticulosViewMultiTenant(TestCase):
                 "articulos_view debe pasar empresa_id=empresa_id (no empresa=Empresa.objects.first()). "
                 "El test pasa si encuentra empresa_id=empresa_id en el codigo."
             )
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C5: contactos + vista_exportar_respaldo usan ContextVar (multi-tenant)
+# ─────────────────────────────────────────────────────────────────────────────
+# Cubre 2 bugs de la auditoría:
+#   1. contactos (views.py:684, 701): getattr(request, 'empresa', None)
+#      El middleware NUNCA setea request.empresa (solo el ContextVar),
+#      así que getattr siempre devolvía None y la creacion/listado
+#      de contactos fallaba silenciosamente (IntegrityError).
+#   2. vista_exportar_respaldo (views.py:762): mismo anti-patron.
+#
+# Tests estructurales via inspect.getsource (sin pelearnos con CSRF):
+#   - El codigo debe usar get_current_empresa() para resolver la empresa.
+#   - El codigo NO debe usar getattr(request, 'empresa', None).
+
+class TestContactosYRespaldoMultiTenant(TestCase):
+    """
+    Garantiza que contactos y vista_exportar_respaldo usan el ContextVar
+    multi-tenant (TenantMiddleware ya setea el contexto antes de llamarlas).
+    """
+
+    def test_contactos_usa_contextvar_no_request_empresa(self):
+        """
+        Criterio: vista contactos (POST y GET) debe usar get_current_empresa()
+        para resolver la empresa. No debe usar getattr(request, 'empresa', None)
+        porque dicho atributo NUNCA es seteado por el middleware.
+        """
+        import inspect
+        import re
+        from inventory import views
+
+        view_func = views.contactos
+        source = inspect.getsource(view_func)
+
+        # Quitar lineas de comentario que mencionan el patron (solo docstring).
+        lines_fuera_de_comentarios = []
+        for line in source.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                continue
+            lines_fuera_de_comentarios.append(line)
+        codigo_sin_comentarios = '\n'.join(lines_fuera_de_comentarios)
+
+        # NO debe usar el anti-patrón (fuera de comentarios)
+        self.assertNotIn(
+            "getattr(request, 'empresa'",
+            codigo_sin_comentarios,
+            msg=(
+                "contactos view contiene getattr(request, 'empresa', None) "
+                "(instruccion, NO comentario). Este atributo NUNCA es seteado "
+                "por TenantMiddleware (solo setea el ContextVar). Toda recuperacion "
+                "de empresa debe ser via get_current_empresa()."
+            )
+        )
+        # Debe usar el ContextVar
+        self.assertIn(
+            'get_current_empresa',
+            source,
+            msg=(
+                "contactos view debe llamar get_current_empresa() para resolver la empresa."
+            )
+        )
+
+    def test_vista_exportar_respaldo_usa_contextvar(self):
+        """
+        Criterio: vista_exportar_respaldo debe usar get_current_empresa()
+        para resolver la empresa. Misma justificación que contactos.
+        """
+        import inspect
+        from inventory import views
+
+        source = inspect.getsource(views.vista_exportar_respaldo)
+
+        # Quitar comentarios
+        lines = [l for l in source.split('\n') if not l.strip().startswith('#')]
+        codigo_sin_comentarios = '\n'.join(lines)
+
+        self.assertNotIn(
+            "getattr(request, 'empresa'",
+            codigo_sin_comentarios,
+            msg=(
+                "vista_exportar_respaldo contiene getattr(request, 'empresa', None) "
+                "como instruccion. Debe usarse get_current_empresa()."
+            )
+        )
+        self.assertIn(
+            'get_current_empresa',
+            source,
+            msg="vista_exportar_respaldo debe llamar get_current_empresa()."
+        )
+
+    def test_vista_exportar_respaldo_sin_empresa_retorna_403(self):
+        """
+        Criterio funcional: si no hay empresa en el ContextVar, la vista
+        retorna 403 (Forbidden) en lugar de explotar.
+        """
+        import django.test
+        from inventory.managers import set_current_empresa
+
+        # Empresa (no necesaria para este test, pero sin empresa el
+        # middleware devolveria 403 antes de llegar aqui; lo simulamos)
+        set_current_empresa(None)
+
+        factory = django.test.RequestFactory()
+        request = factory.get('/respaldo/')
+
+        from inventory.views import vista_exportar_respaldo
+        response = vista_exportar_respaldo(request)
+        self.assertEqual(
+            response.status_code, 403,
+            f"Sin empresa activa debe retornar 403, got {response.status_code}"
         )
