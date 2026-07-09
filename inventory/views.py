@@ -202,14 +202,6 @@ def ventas(request):
     return render(request, 'inventory/ventas.html', context)
 
 
-def movimientos(request):
-    return render(request, 'inventory/movimientos.html')
-
-
-def contactos(request):
-    return render(request, 'inventory/contactos.html')
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # TICKET #3: Vista de Carga Masiva
 # ─────────────────────────────────────────────────────────────────────────────
