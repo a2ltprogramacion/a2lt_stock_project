@@ -229,6 +229,26 @@
 
     <!-- Theme and Global Utilities script -->
     <script>
+        // ── CSRF helper global ──────────────────────────────────────────────
+        // Funcion estandar de la documentacion de Django para leer csrftoken.
+        // Debe ser global para que todos los fetch AJAX la usen sin duplicar
+        // su definicion en cada template (carga.html, compras.html, etc.).
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        // ── Theme toggle ───────────────────────────────────────────────────
         function toggleTheme() {
             const isDark = document.documentElement.classList.toggle('dark');
             const themeIcon = document.getElementById('theme-toggle-icon');
@@ -253,5 +273,7 @@
             }
         });
     </script>
+
+    {% block extra_js %}{% endblock %}
 </body>
 </html>

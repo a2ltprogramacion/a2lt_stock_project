@@ -2642,3 +2642,87 @@ class TestMetodoGananciaCompras(TransactionTestCase):
             self.articulo_margin.precio_divisa,
             msg="MARKUP siempre da precio menor que MARGIN para el mismo margen %."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C3: base.html define getCookie + extra_js (regresión carga masiva rota)
+# ─────────────────────────────────────────────────────────────────────────────
+# Previene 2 bugs duales detectados en la auditoría (no cubiertos por los
+# 5 informes previos en su conjunto):
+#   1. base.html NO declaraba {% block extra_js %}, pero carga.html SÍ lo usaba
+#      (líneas 128-392 de carga.html). Django descarta silenciosamente todo
+#      el contenido de un bloque que el template padre no declara.
+#      Por ende las 263 líneas de JS de carga.html NUNCA llegaban al browser.
+#   2. base.html NO definía getCookie(name), pero carga.html la invoca con
+#      un comentario que decía erroneamente "definida en base.html".
+#      Llamaba a getCookie('csrftoken') en submit de upload Excel y resolCSV
+#      de colisiones, lanzando ReferenceError en runtime.
+#
+# Este test es el PRIMERO en usar self.client.login() en lugar de
+# RequestFactory, ejecutando el middleware real (Ticket Fase B).
+
+from django.urls import reverse
+
+
+class TestBaseHtmlCsrfYExtraJs(TestCase):
+    """
+    Valida que base.html defina los cimientos globales para que todos los
+    templates hijos que usan AJAX/CSRF/token funcionen.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from inventory.managers import set_current_empresa
+        from inventory.models import Empresa, PerfilUsuario
+
+        # Crear empresa y usuario con permiso (para pasar el middleware)
+        self.empresa = Empresa.objects.create(nombre='BaseHtmlTest', rif='J-BH-001', activa=True)
+        set_current_empresa(self.empresa.id)
+        self.user = User.objects.create_user('basehtml', password='test1234')
+        # El signal crear_perfil_usuario (models.py:267) crea el PerfilUsuario
+        # automaticamente al crear el User. Lo recuperamos en lugar de duplicar.
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+
+        # client + login + session (asi ejecuta el middleware completo)
+        self.client.login(username='basehtml', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+    def test_base_html_define_getCookie_global(self):
+        """
+        Criterio: renderizar cualquier pagina que herede de base.html debe
+        incluir la definicion JS de function getCookie(...) en el HTML final.
+        Sin esto, templates como carga.html lanzan ReferenceError en runtime.
+        """
+        response = self.client.get(reverse('inventory:dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response, 'function getCookie(name)',
+            msg_prefix="base.html debe definir globalmente function getCookie(name). "
+                       "Sin esto, carga.html y otros templates lanzan ReferenceError al hacer fetch."
+        )
+
+    def test_base_html_define_bloque_extra_js(self):
+        """
+        Criterio: base.html debe declarar {% block extra_js %}{% endblock %}
+        para que los templates hijos puedan inyectar JavaScript especifico.
+        Confirma mediante carga.html que el contenido del bloque se renderiza.
+        """
+        response_carga = self.client.get(reverse('inventory:carga_masiva'))
+        self.assertEqual(response_carga.status_code, 200)
+        # Si el bloque extra_js no esta declarado en base.html, el contenido
+        # del bloque en carga.html es descartado silenciosamente por Django.
+        # Verificamos que aparezca una variable tipica del JS de carga.html
+        # (dropZone) que vive dentro de {% block extra_js %} en ese template.
+        self.assertContains(
+            response_carga, 'dropZone',
+            msg_prefix=(
+                "El contenido del bloque extra_js de carga.html no se renderizo. "
+                "Posible causa: base.html no declara {% block extra_js %}, "
+                "y Django descarta silenciosamente el contenido del bloque del hijo."
+            )
+        )
