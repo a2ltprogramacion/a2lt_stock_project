@@ -16,9 +16,7 @@ Funciones principales:
   - procesar_salida_combo(...) → Desagregación atómica de componentes (Ticket #2)
 """
 
-import math
 import logging
-import decimal
 from decimal import Decimal
 
 from django.db import transaction
@@ -250,9 +248,7 @@ def calcular_stock_combo(combo: Articulo, almacen: Almacen) -> int:
             )
             return 0
 
-        combos_posibles_con_este = math.floor(
-            float(stock_componente) / float(cantidad_requerida)
-        )
+        combos_posibles_con_este = int(stock_componente // cantidad_requerida)
         stocks_posibles.append(combos_posibles_con_este)
 
     return min(stocks_posibles) if stocks_posibles else 0

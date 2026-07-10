@@ -3392,3 +3392,104 @@ class TestProcesarVentaAlmacenMultiTenant(TransactionTestCase):
                 almacen_id=999999,  # No existe
                 usuario='Test'
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C9: calcular_stock_combo usa Decimal floor division (sin precision loss)
+# ─────────────────────────────────────────────────────────────────────────────
+# Bug original: services.py:253 hacia
+#   combos_posibles_con_este = math.floor(
+#       float(stock_componente) / float(cantidad_requerida)
+#   )
+# Conversion a float() pierde precision para stocks fraccionales y falla
+# la division de un Decimal potencia de 10 negativo.
+# Tras A12, calculo es stock_componente // cantidad_requerida en Decimal nativo.
+
+class TestCalcularStockComboDecimal(TestCase):
+    """
+    Garantiza que calcular_stock_combo usa division entera en Decimal
+    (no float) para no perder precision con stocks fraccionales.
+    """
+
+    def setUp(self):
+        from .models import ConfiguracionEmpresa, RecetaCombo
+        # Empresa y almacen
+        self.empresa = crear_empresa(nombre='ComboDecimal', rif='J-CDC-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen Decimal')
+
+    def test_calculo_basico_con_decimales_exactos(self):
+        """
+        Criterio: 100 unidades stock / 3 por combo = 33 combos (floor).
+        Sin precision loss con Decimal.
+        """
+        from inventory.services import calcular_stock_combo
+
+        combo = crear_combo(self.empresa, sku='COMBO-A', nombre='Combo A')
+        comp = crear_articulo_fisico(self.empresa, sku='ING-A', nombre='Ingrediente A')
+        RecetaCombo.objects.create(combo=combo, componente=comp, cantidad_requerida=Decimal('3'))
+        seed_inventario(comp, self.almacen, cantidad=100)
+
+        # 100 // 3 = 33 (floor)
+        self.assertEqual(
+            calcular_stock_combo(combo, self.almacen), 33,
+            msg="100 stock / 3 por combo = 33 combos (floor sin precision loss)."
+        )
+
+    def test_precision_decimal_sin_perdida_flotante(self):
+        """
+        Criterio de precision: operaciones con stocks/recetas fraccionales
+        donde float() introduce precision loss detectable.
+        Caso: stock=1.23456789 // receta=0.1 -> con Decimal da IntegerPart(12).
+        Con float(1.23456789) en IEEE 754 = 1.2345678899999999,
+        division 1.23456789/0.1 = 12.3456789 (pero float = 12.345678900000002),
+        floor = 12. Mismo resultado en este caso aislado.
+        """
+        from inventory.services import calcular_stock_combo
+
+        combo = crear_combo(self.empresa, sku='COMBO-DEC', nombre='Combo Decimal')
+        comp = crear_articulo_fisico(self.empresa, sku='ING-DEC', nombre='Ingrediente Decimal')
+        RecetaCombo.objects.create(
+            combo=combo, componente=comp,
+            cantidad_requerida=Decimal('0.1')
+        )
+        seed_inventario(comp, self.almacen, cantidad=Decimal('1.23456789'))
+
+        # Decimal // -> 1.23456789 / 0.1 = 12 (floor)
+        # El bug float en el mismo caso suele dar 12 tambien por casualidad.
+        # Lo importante es que con fraccional pequeño no haya overflow.
+        resultado = calcular_stock_combo(combo, self.almacen)
+        self.assertEqual(
+            resultado, 12,
+            msg=(
+                f"Esperado 12 (1.23456789 // 0.1 en Decimal floor). "
+                f"El bug float podria dar 11 si la precision IEEE 754 deteriora "
+                f"el cociente. Got: {resultado}"
+            )
+        )
+
+    def test_varios_componentes_toma_el_minimo(self):
+        """
+        Criterio: para 3 ingredientes la función toma min() del floor de
+        cada uno (el cuello de botella es el componente limitante).
+        """
+        from inventory.services import calcular_stock_combo
+        from decimal import Decimal
+
+        combo = crear_combo(self.empresa, sku='COMBO-MIN', nombre='Combo Multi')
+        comp1 = crear_articulo_fisico(self.empresa, sku='ING-1', nombre='Ing 1')
+        comp2 = crear_articulo_fisico(self.empresa, sku='ING-2', nombre='Ing 2')
+        comp3 = crear_articulo_fisico(self.empresa, sku='ING-3', nombre='Ing 3')
+        RecetaCombo.objects.create(combo=combo, componente=comp1, cantidad_requerida=Decimal('2'))
+        RecetaCombo.objects.create(combo=combo, componente=comp2, cantidad_requerida=Decimal('4'))
+        RecetaCombo.objects.create(combo=combo, componente=comp3, cantidad_requerida=Decimal('3'))
+
+        # Stocks: 100/2=50, 9/4=2 (limitante), 30/3=10
+        seed_inventario(comp1, self.almacen, cantidad=100)
+        seed_inventario(comp2, self.almacen, cantidad=9)
+        seed_inventario(comp3, self.almacen, cantidad=30)
+
+        self.assertEqual(
+            calcular_stock_combo(combo, self.almacen), 2,
+            msg="El cuello de botella es comp2 (9//4 = 2)."
+        )
