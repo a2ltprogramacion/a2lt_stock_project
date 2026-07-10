@@ -1,4 +1,6 @@
 from django.http import HttpResponseForbidden
+from django.shortcuts import redirect
+from django.contrib import messages
 from .managers import set_current_empresa, reset_current_empresa
 
 
@@ -55,21 +57,38 @@ class TenantMiddleware:
         """
         Retorna:
           - None si la peticion esta autorizada (empresa cargada en sesion).
-          - HttpResponseForbidden (403) en caso contrario.
+          - HttpResponseRedirect a /login/?next=... si el usuario no esta
+            autenticado (UX amigable; preserva el destino original).
+          - HttpResponseForbidden (403) en caso contrario (vector de
+            seguridad real: usuario autenticado intentando acceder a
+            tenant no permitido, empresa inactiva, etc.).
 
         Validaciones en orden:
-        1. usuario autenticado.
-        2. PerfilUsuario existe.
-        3. empresa_id en sesion.
-        4. Empresa existe y activa.
-        5. Empresa esta en perfil.empresas_permitidas.
+        1. usuario autenticado.              [redirect a login]
+        2. PerfilUsuario existe.             [403]
+        3. empresa_id en sesion.             [403]
+        4. Empresa existe y activa.          [403]
+        5. Empresa esta en perfil.empresas_permitidas. [403]
         """
-        # 1. autenticacion
+        # 1. autenticacion — sin login → redirect a /login/?next=<path>
+        #    (mismo comportamiento que @login_required, para UX consistente).
+        #    Pero UNICAMENTE para usuarios no autenticados; usuarios
+        #    autenticados sin permiso siguen retornando 403 (vector real).
         user = getattr(request, 'user', None)
         if user is None or not user.is_authenticated:
-            return HttpResponseForbidden(
-                'Acceso Denegado: requiere sesion de usuario.'
-            )
+            # Inyectar mensaje amigable para mostrar en login.html
+            if hasattr(request, 'session'):
+                try:
+                    messages.warning(
+                        request,
+                        'Inicia sesion para continuar.'
+                    )
+                except Exception:
+                    # messages puede fallar si no hay backend de
+                    # sesion configurado; no bloqueamos el redirect.
+                    pass
+            next_url = request.path if request.path else '/'
+            return redirect(f'/login/?next={next_url}')
 
         # 2. perfil
         perfil = getattr(user, 'perfil', None)
