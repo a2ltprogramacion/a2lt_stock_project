@@ -74,6 +74,7 @@ def logout_view(request):
     return redirect('inventory:login')
 
 @require_http_methods(["POST"])
+@login_required
 def cambiar_empresa_view(request):
     empresa_id = request.POST.get('empresa_id')
     user = request.user
@@ -102,10 +103,13 @@ def cambiar_empresa_view(request):
 # VISTAS GENERALES (Placeholders - se implementarán en tickets posteriores)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 def dashboard(request):
     """
     Panel de Control Analítico (Ticket #10).
     Métricas ejecutadas directamente en el motor de base de datos (0 loops en Python).
+    Defense-in-depth: TenantMiddleware ya exige sesion multi-tenant;
+    @login_required refuerza con redirect amigable a / si no autenticado.
     """
     from django.db.models import Sum, F
     from django.utils import timezone
@@ -151,6 +155,7 @@ def dashboard(request):
     return render(request, 'inventory/dashboard.html', context)
 
 
+@login_required
 def catalogo(request):
     from decimal import Decimal
     from .models import Articulo, ConfiguracionEmpresa
@@ -180,6 +185,7 @@ def catalogo(request):
     })
 
 
+@login_required
 def ventas(request):
     from .models import Articulo, Almacen, Contacto, ConfiguracionEmpresa
     from .managers import get_current_empresa
@@ -207,6 +213,7 @@ def ventas(request):
 # TICKET #3: Vista de Carga Masiva
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 @require_http_methods(['GET', 'POST'])
 def vista_descargar_plantilla(request):
     """
@@ -234,6 +241,7 @@ def vista_descargar_plantilla(request):
     return response
 
 
+@login_required
 def vista_carga_masiva(request):
     """
     GET  → Renderiza el formulario de carga masiva con la lista de almacenes.
@@ -319,6 +327,7 @@ def vista_carga_masiva(request):
 
 # ── Vista de Carga Masiva Atómica (Ticket #27) ──────────────────────────
 
+@login_required
 def vista_carga_masiva_excel(request):
     """
     Endpoint estrictamente atómico para carga masiva Excel (Ticket #27).
@@ -360,6 +369,7 @@ def vista_carga_masiva_excel(request):
 # TICKET #3: Vista de Resolución de Colisiones (Los 3 Botones del Modal)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 @require_http_methods(['POST'])
 def vista_resolver_colision(request):
     """
@@ -465,6 +475,7 @@ def vista_resolver_colision(request):
 from django.views.decorators.http import require_GET
 
 
+@login_required
 @require_GET
 def api_buscar_articulos(request):
     from .models import Articulo, ConfiguracionEmpresa
@@ -499,6 +510,7 @@ def api_buscar_articulos(request):
     return JsonResponse({'results': results})
 
 
+@login_required
 @require_GET
 def api_validar_stock(request, sku, almacen_id):
     from .models import Articulo, Almacen
@@ -520,6 +532,7 @@ def api_validar_stock(request, sku, almacen_id):
 import json
 from django.http import JsonResponse
 
+@login_required
 @require_http_methods(["POST"])
 def vista_crear_venta(request):
     """Endpoint AJAX para procesar el carrito de compras y generar Nota de Entrega."""
@@ -560,6 +573,7 @@ def vista_crear_venta(request):
         return JsonResponse({'ok': False, 'error': 'Error interno del servidor.'}, status=500)
 
 
+@login_required
 @require_http_methods(["GET"])
 def vista_imprimir_nota(request, nota_id):
     """Renderiza el layout minimalista de la Nota de Entrega para impresión."""
@@ -585,6 +599,7 @@ def vista_imprimir_nota(request, nota_id):
 # 6. TASAS DE CAMBIO
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 def vista_sincronizar_tasa(request):
     """
     Endpoint para sincronizar la tasa de cambio.
@@ -602,6 +617,7 @@ def vista_sincronizar_tasa(request):
 # 7. AUDITORÍA Y KÁRDEX
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 def vista_movimientos(request):
     """
     Renderiza la tabla histórica de MovimientoKardex con filtros avanzados.
@@ -752,6 +768,7 @@ def vista_registrar_asiento_manual(request):
 # 8. CONTACTOS Y COMPRAS (TICKET #9)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 def contactos(request):
     """
     Gestión segmentada de Clientes y Proveedores.
@@ -823,6 +840,7 @@ def contactos(request):
 # 9. IMPRESIÓN PARAMETRIZADA POR COORDENADAS (TICKET #12)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 def vista_imprimir_coordenadas(request, nota_id):
     """
     Recupera una Nota de Entrega y la renderiza usando un lienzo de impresión libre.
@@ -859,6 +877,7 @@ def vista_imprimir_coordenadas(request, nota_id):
 # 10. EXPORTACIÓN Y TELEMETRÍA (TICKET #13)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 def vista_exportar_respaldo(request):
     """
     Controlador para descargar el snapshot lógico en JSON del Tenant activo.
@@ -892,6 +911,7 @@ def vista_exportar_respaldo(request):
 # 11. TRAZABILIDAD Y CONTROL DE SERIALES (TICKET #14-SAAS)
 # ─────────────────────────────────────────────────────────────────────────────
 
+@login_required
 @require_http_methods(["GET"])
 def vista_buscar_seriales_articulo(request, articulo_sku, almacen_id):
     """
@@ -976,6 +996,7 @@ def articulos_view(request):
     })
 
 
+@login_required
 def configuracion_view(request):
     """
     Vista para ver y guardar la configuración global de la empresa inquilina.
