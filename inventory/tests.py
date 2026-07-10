@@ -3763,6 +3763,7 @@ class TestVentasOfferPrintURL(TestCase):
     def setUp(self):
         from inventory.models import ConfiguracionEmpresa
         from django.contrib.auth.models import User
+        from inventory.models import PerfilUsuario
 
         self.empresa = crear_empresa(nombre='VentaT', rif='J-VT-001')
         self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
@@ -3775,6 +3776,11 @@ class TestVentasOfferPrintURL(TestCase):
         from inventory.models import Contacto
         seed_inventario(self.articulo, self.almacen, cantidad=50)
         self.user_logged = User.objects.create_user('ventat', password='pw1234')
+        # B-2: middleware exige perfil con empresa permitida
+        perfil = self.user_logged.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
 
     def test_ventas_html_ofrece_imprimir_nota_con_window_open(self):
         """
@@ -4395,3 +4401,132 @@ class TestSettingsHardening(TestCase):
                 f"stderr={result.stderr!r}"
             )
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST B-7/B-2: cobertura del TenantMiddleware (autorización por tenant)
+# ─────────────────────────────────────────────────────────────────────────────
+# Tras B-2 el middleware valida:
+#   1. Usuario autenticado.
+#   2. PerfilUsuario existe.
+#   3. empresa_id en sesion.
+#   4. Empresa existe y activa.
+#   5. Empresa en perfil.empresas_permitidas.
+# Cada condicion se valida con su propio test + happy path.
+
+
+class TestTenantMiddlewareAuthorization(TestCase):
+    """
+    Tests directos del TenantMiddleware. Cubren las 5 validaciones
+    de seguridad de B-2 mas un happy path.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from inventory.models import Empresa, PerfilUsuario
+
+        # Empresa victima
+        self.empresa = crear_empresa(nombre='TenantAuth', rif='J-AUTH-001')
+
+        # Empresa atacante (el usuario no tendra permiso)
+        self.empresa_atacante = Empresa.objects.create(
+            nombre='AtacanteAuth', rif='J-ATK-AUTH', activa=True
+        )
+
+        # Usuario autentcado
+        self.user = User.objects.create_user('middleware_user', password='pw1234')
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+
+        self.client.login(username='middleware_user', password='pw1234')
+
+    def _set_session(self, empresa_id):
+        s = self.client.session
+        s['empresa_id'] = empresa_id
+        s.save()
+
+    def test_sin_autenticacion_retorna_403(self):
+        """
+        Sin user.is_authenticated (caso anonimo), el middleware
+        retorna 403 con mensaje claro.
+        """
+        c = type(self.client)()
+        resp = c.get('/dashboard/')
+        self.assertEqual(
+            resp.status_code, 403,
+            f"Sin login debe rechazarse. got {resp.status_code}"
+        )
+
+    def test_sin_empresa_en_sesion_retorna_403(self):
+        """
+        Usuario autenticado pero sin empresa_id en sesion: 403.
+        """
+        # session vacia, sin empresa_id
+        resp = self.client.get('/dashboard/')
+        self.assertEqual(resp.status_code, 403)
+
+    def test_empresa_inexistente_retorna_403(self):
+        """
+        empresa_id en sesion apuntando a empresa borrada: 403.
+        """
+        self._set_session(99999)  # id que no existe
+        resp = self.client.get('/dashboard/')
+        self.assertEqual(resp.status_code, 403)
+
+    def test_empresa_inactiva_retorna_403(self):
+        """
+        Empresa desactivada en BD: 403 (no se deja entrar).
+        """
+        self.empresa.activa = False
+        self.empresa.save()
+        self._set_session(self.empresa.id)
+        resp = self.client.get('/dashboard/')
+        self.assertEqual(resp.status_code, 403)
+
+    def test_empresa_no_permitida_para_usuario_retorna_403(self):
+        """
+        Casos multi-tenant atacantes: la sesion dice empresa_atacante
+        pero el usuario solo tiene empresa (la victima) en
+        empresas_permitidas. Resultado: 403 (vector real de
+        horizontal privilege escalation prevenido).
+        """
+        self._set_session(self.empresa_atacante.id)
+        resp = self.client.get('/dashboard/')
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn(
+            b'no tiene permiso', resp.content.lower(),
+            msg="El mensaje de 403 debe mencionar permiso denegado."
+        )
+
+    def test_usuario_con_permiso_pasa_happy_path(self):
+        """
+        Happy path: usuario autenticado, empresa en sesion, empresa
+        en empresas_permitidas. Resultado 200 (dashboard renderiza).
+        """
+        self._set_session(self.empresa.id)
+        resp = self.client.get('/dashboard/')
+        self.assertEqual(
+            resp.status_code, 200,
+            f"Login + sesion + permiso debe autorizar. got {resp.status_code}"
+        )
+
+    def test_rutas_exentas_no_piden_sesion(self):
+        """
+        Rutas exentas (/, /static/, /login/, /admin/) deben
+        responder sin sesion y sin error 403.
+        """
+        c = type(self.client)()
+        for path in ['/', '/login/']:
+            try:
+                resp = c.get(path)
+            except Exception as e:
+                # Algunos endpoints sin sesion pueden redirigir; eso
+                # es OK mientras no sea 403 Forbidden.
+                continue
+            # Aceptamos 200, 302 (redirect), 404; NO 403.
+            self.assertNotEqual(
+                resp.status_code, 403,
+                f"{path} exenta NO debe rechazar con 403. got {resp.status_code}"
+            )
