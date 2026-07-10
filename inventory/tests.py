@@ -4572,3 +4572,208 @@ class TestTenantMiddlewareAuthorization(TestCase):
                 resp.status_code, 403,
                 f"{path} exenta NO debe rechazar con 403. got {resp.status_code}"
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C14/C15 - FASE 3 MODELAJE: Moneda, TasaCambio, snapshot en compras
+# ─────────────────────────────────────────────────────────────────────────────
+# Cobertura de los nuevos modelos multimoneda introducidos en FASE 3:
+#   - Moneda: catalogo de monedas por tenant (USD/VES por defecto).
+#   - TasaCambio: historico inmutable de tasas por par.
+#   - Snapshot de tasa en DocumentoCompra (reglas contables).
+#
+# Ademas se valida el signal create_tenant_defaults que ahora siembra
+# monedas USD/VES + tasa inicial 1:Nbcv al crear una Empresa nueva.
+
+
+class TestMultimonedaModelos(TestCase):
+    """
+    Tests de los modelos multimoneda: signal de Empresa crea monedas
+    USD/VES + tasa inicial; TasaCambio.obtener_tasa resuelve la
+    ultima tasa disponible hasta una fecha; Moneda.save() garantiza
+    una sola moneda base por tenant.
+    """
+
+    def test_signal_crea_monedas_y_tasa_inicial(self):
+        """
+        Signal create_tenant_defaults ahora crea USD (base) + VES +
+        una TasaCambio inicial USD->VES al crear Empresa.
+        """
+        from inventory.models import Moneda, TasaCambio
+        empresa = crear_empresa(nombre='MultiSeed', rif='J-MULTI-001')
+
+        monedas = list(Moneda.objects.filter(empresa=empresa).order_by('-es_base', 'codigo'))
+        self.assertEqual(len(monedas), 2, f"Esperado 2 monedas, got {monedas}")
+        codigos = {m.codigo for m in monedas}
+        self.assertEqual(codigos, {'USD', 'VES'})
+
+        # USD debe ser la base
+        usd = next(m for m in monedas if m.codigo == 'USD')
+        self.assertTrue(usd.es_base)
+        ves = next(m for m in monedas if m.codigo == 'VES')
+        self.assertFalse(ves.es_base)
+
+        # Tasa inicial USD -> VES segun configuracion (60 * 1.4 = 84)
+        tasas_iniciales = list(TasaCambio.objects.filter(
+            empresa=empresa, moneda_origen=usd, moneda_destino=ves
+        ))
+        self.assertGreaterEqual(len(tasas_iniciales), 1)
+        self.assertEqual(
+            tasas_iniciales[0].tasa,
+            Decimal('84.000000'),
+            f"Esperado 60.0 bcv * 1.4 cobertura. got {tasas_iniciales[0].tasa}"
+        )
+
+    def test_solo_una_moneda_base_por_tenant(self):
+        """
+        Moneda.save() garantiza unica moneda base por tenant via
+        query UPDATE en save().
+        """
+        from inventory.models import Moneda
+        empresa = crear_empresa(nombre='SingleBase', rif='J-SB-001')
+        # La primera moneda base es USD (via signal).
+        # Crear otra moneda NO-base para luego promoverla a base.
+        eur = Moneda.objects.create(
+            empresa=empresa, codigo='EUR', nombre='Euro',
+            simbolo='E', es_base=False
+        )
+        # Forzar que EUR pase a es_base=True; USD debe pasar a False.
+        eur.es_base = True
+        eur.save()
+
+        eur.refresh_from_db()
+        usd = Moneda.objects.get(empresa=empresa, codigo='USD')
+        self.assertTrue(eur.es_base)
+        self.assertFalse(
+            usd.es_base,
+            msg=(
+                "Moneda.save deberia haber deseseteado usd.es_base al "
+                "guardar eur.es_base=True"
+            )
+        )
+
+    def test_tasa_cambio_obtener_tasa_resuelve_la_mas_reciente(self):
+        """
+        TasaCambio.obtener_tasa() retorna la tasa mas reciente <= fecha.
+        Lanza ValueError si no existe el par.
+        """
+        from inventory.models import Moneda, TasaCambio
+        from datetime import date, timedelta
+        empresa = crear_empresa(nombre='TasaHist', rif='J-TH-001')
+        usd = Moneda.objects.get(empresa=empresa, codigo='USD')
+        ves = Moneda.objects.get(empresa=empresa, codigo='VES')
+
+        TasaCambio.objects.create(
+            empresa=empresa, moneda_origen=usd, moneda_destino=ves,
+            tasa=Decimal('40.000000'), fecha=date(2025, 1, 1), fuente='MANUAL'
+        )
+        TasaCambio.objects.create(
+            empresa=empresa, moneda_origen=usd, moneda_destino=ves,
+            tasa=Decimal('42.000000'), fecha=date(2025, 6, 1), fuente='MANUAL'
+        )
+        TasaCambio.objects.create(
+            empresa=empresa, moneda_origen=usd, moneda_destino=ves,
+            tasa=Decimal('44.000000'), fecha=date(2025, 12, 1), fuente='MANUAL'
+        )
+
+        # Pedir al 15 de julio: la tasa mas reciente <= es la de junio (42)
+        tasa = TasaCambio.obtener_tasa(
+            'USD', 'VES', empresa.id, fecha=date(2025, 7, 15)
+        )
+        self.assertEqual(tasa.tasa, Decimal('42.000000'))
+
+        # Pedir al 31 diciembre: la mas reciente es la de diciembre (44)
+        tasa = TasaCambio.obtener_tasa(
+            'USD', 'VES', empresa.id, fecha=date(2025, 12, 31)
+        )
+        self.assertEqual(tasa.tasa, Decimal('44.000000'))
+
+        # Pedir antes de existir tasa: lanza ValueError
+        with self.assertRaises(ValueError):
+            TasaCambio.obtener_tasa(
+                'USD', 'VES', empresa.id, fecha=date(2020, 1, 1)
+            )
+
+
+class TestSnapshotTasaEnCompra(TestCase):
+    """
+    Validacion del snapshot de tasa al registrar_compra_proveedor.
+    Regla contable: aunque la configuracion global cambie despues,
+    el documento conserva la tasa con la que se emitio.
+    """
+
+    def test_compra_guarda_snapshot_y_no_cambia_con_config(self):
+        """
+        Criterio: el DocumentoCompra guarda tasa_bcv_aplicada,
+        tasa_mercado_aplicada, factor_cobertura_aplicado,
+        fuente_tasa y monto_total_bs_snapshot. Si se modifica la
+        configuracion del tenant luego, los valores del documento NO
+        cambian.
+        """
+        from inventory.models import (
+            DocumentoCompra, ConfiguracionEmpresa, Contacto,
+        )
+        from inventory.services import registrar_compra_proveedor
+        from inventory.managers import set_current_empresa
+
+        empresa = crear_empresa(nombre='SnapShot', rif='J-SNAP-001')
+        config = ConfiguracionEmpresa.objects.get(empresa=empresa)
+        config.tasa_bcv = Decimal('40.0000')
+        config.factor_cobertura = Decimal('1.20')
+        config.save()
+
+        almacen = crear_almacen(empresa, nombre='Almacen Snap')
+        articulo = crear_articulo_fisico(empresa, sku='SNAP-001')
+        proveedor = Contacto.objects.create(
+            empresa=empresa, identificacion='J-SNAP-PROV',
+            tipo='PROVEEDOR', nombre='Prov Snap', rif='J-SNAP-PROV',
+            nombre_asesor='Asesor Snap'
+        )
+
+        set_current_empresa(empresa.pk)
+        resultado = registrar_compra_proveedor(
+            proveedor_id=str(proveedor.pk),
+            numero_factura='FACT-SNAP-001',
+            fecha_compra='2026-07-15',
+            monto_total_usd=Decimal('100.00'),
+            almacen_id=almacen.pk,
+            lista_items=[{
+                'sku': 'SNAP-001',
+                'cantidad': Decimal('5'),
+                'costo_factura': Decimal('20.00'),
+            }],
+            usuario='test',
+            empresa_id=empresa.pk,
+        )
+
+        doc = DocumentoCompra.objects.get(pk=resultado['documento_id'])
+        # Snapshot al momento de la compra
+        self.assertEqual(doc.tasa_bcv_aplicada, Decimal('40.0000'))
+        self.assertEqual(doc.factor_cobertura_aplicado, Decimal('1.2000'))
+        # monto_bs = 100 * (mercado/bcv) * bcv = 100 * 40 (asumiendo
+        # tasa_market = bcv por defecto)
+        self.assertGreater(
+            doc.monto_total_bs_snapshot, Decimal('0'),
+            msg=f"monto_total_bs_snapshot debe > 0. got {doc.monto_total_bs_snapshot}"
+        )
+
+        # Modificar config post-compra y verificar que el snapshot NO cambia
+        doc.refresh_from_db()
+        snapshot_bcv = doc.tasa_bcv_aplicada
+        snapshot_factor = doc.factor_cobertura_aplicado
+        snapshot_monto = doc.monto_total_bs_snapshot
+
+        config.tasa_bcv = Decimal('99.0000')
+        config.factor_cobertura = Decimal('5.0000')
+        config.save()
+
+        # Re-leer el documento (no debe cambiar)
+        doc.refresh_from_db()
+        self.assertEqual(doc.tasa_bcv_aplicada, snapshot_bcv)
+        self.assertEqual(doc.factor_cobertura_aplicado, snapshot_factor)
+        self.assertEqual(doc.monto_total_bs_snapshot, snapshot_monto)
+        self.assertEqual(doc.tasa_bcv_aplicada, Decimal('40.0000'),
+                         msg=(
+                             "Tras cambiar config global, el snapshot del "
+                             "DocumentoCompra debe mantenerse para auditoría."
+                         ))

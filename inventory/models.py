@@ -768,6 +768,29 @@ class DocumentoCompra(models.Model):
     numero_factura = models.CharField(max_length=100, blank=True, default='', verbose_name='Número de Factura')
     fecha_compra = models.DateField(blank=True, null=True, default=None, verbose_name='Fecha de Compra')
     monto_total_usd = models.DecimalField(max_digits=14, decimal_places=4, verbose_name='Monto Total (USD)')
+
+    # FASE 3 — Snapshot de tasa al momento de la compra (regla contable)
+    tasa_bcv_aplicada = models.DecimalField(
+        max_digits=12, decimal_places=4, default=0.0000, null=True, blank=True,
+        verbose_name='Tasa BCV aplicada (snapshot)'
+    )
+    tasa_mercado_aplicada = models.DecimalField(
+        max_digits=12, decimal_places=4, default=0.0000, null=True, blank=True,
+        verbose_name='Tasa mercado aplicada (snapshot)'
+    )
+    factor_cobertura_aplicado = models.DecimalField(
+        max_digits=8, decimal_places=4, default=1.0000, null=True, blank=True,
+        verbose_name='Factor cobertura aplicada (snapshot)'
+    )
+    fuente_tasa = models.CharField(
+        max_length=20, blank=True, default='',
+        verbose_name='Fuente de la tasa (BCV/MANUAL/BINANCE)'
+    )
+    monto_total_bs_snapshot = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0.00, null=True, blank=True,
+        verbose_name='Monto total en Bs (snapshot)'
+    )
+
     fecha_registro = models.DateTimeField(auto_now_add=True)
     
     ESTADO_CHOICES = [
@@ -1280,3 +1303,134 @@ class DetalleNotaCredito(models.Model):
 
     def __str__(self):
         return f"{self.articulo.nombre} × {self.cantidad} (NC: {self.nota_credito.numero_control})"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 3 — MULTIMODEDA: MODELOS DE MONEDA Y TASAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Moneda(models.Model):
+    """
+    Catalogo de monedas que soporta el sistema. Por defecto USD y VES
+    (bolivar venezolano). La moneda base del tenant esta marcada con
+    es_base=True; las demas son monedas alternas para conversion.
+    """
+    empresa = models.ForeignKey(
+        Empresa,
+        on_delete=models.CASCADE,
+        related_name='monedas'
+    )
+    codigo = models.CharField(
+        max_length=3,
+        verbose_name='Codigo ISO 4217',
+        help_text='Por ejemplo: USD, VES, EUR, COP, ARS'
+    )
+    nombre = models.CharField(max_length=50)
+    simbolo = models.CharField(max_length=5, default='$')
+    decimales = models.PositiveSmallIntegerField(default=2)
+    es_base = models.BooleanField(
+        default=False,
+        verbose_name='Moneda base del tenant',
+        help_text='Si True, todos los precios se almacenan en esta moneda.'
+    )
+    activa = models.BooleanField(default=True)
+
+    objects = EmpresaManager()
+    global_objects = models.Manager()
+
+    class Meta:
+        verbose_name = 'Moneda'
+        verbose_name_plural = 'Monedas'
+        unique_together = [('empresa', 'codigo')]
+        ordering = ['es_base', 'codigo']
+
+    def __str__(self):
+        return f"{self.codigo} ({self.simbolo})"
+
+    def save(self, *args, **kwargs):
+        # Garantizar que solo haya UNA moneda es_base=True por tenant.
+        if self.es_base:
+            qs = Moneda.objects.filter(
+                empresa=self.empresa, es_base=True
+            ).exclude(pk=self.pk)
+            qs.update(es_base=False)
+        super().save(*args, **kwargs)
+
+
+class TasaCambio(models.Model):
+    """
+    Historico inmutable de tasas de cambio por par de monedas y fecha.
+    Cada snapshot de AuditoriaTasa o sincronizacion guarda un registro
+    aqui para conservar trazabilidad historica.
+    """
+    Fuente = [
+        ('BCV', 'Banco Central de Venezuela (oficial)'),
+        ('MANUAL', 'Ingreso manual del operador'),
+        ('API', 'API externa (e.g. Binance P2P)'),
+        ('INFLATION', 'Tasa calculada por inflacion interna'),
+    ]
+
+    empresa = models.ForeignKey(
+        Empresa, on_delete=models.CASCADE, related_name='tasas_cambio'
+    )
+    moneda_origen = models.ForeignKey(
+        Moneda, on_delete=models.PROTECT, related_name='tasas_origen'
+    )
+    moneda_destino = models.ForeignKey(
+        Moneda, on_delete=models.PROTECT, related_name='tasas_destino'
+    )
+    tasa = models.DecimalField(
+        max_digits=18, decimal_places=6,
+        verbose_name='Tasa (1 origen = N destino)'
+    )
+    fecha = models.DateField(verbose_name='Fecha de la tasa')
+    fuente = models.CharField(max_length=20, choices=Fuente, default='MANUAL')
+    usuario = models.CharField(max_length=150, blank=True, default='')
+    notas = models.CharField(max_length=255, blank=True, default='')
+    creada_en = models.DateTimeField(auto_now_add=True)
+
+    objects = EmpresaManager()
+    global_objects = models.Manager()
+
+    class Meta:
+        verbose_name = 'Tasa de Cambio'
+        verbose_name_plural = 'Tasas de Cambio'
+        indexes = [
+            models.Index(fields=['empresa', 'moneda_origen', 'moneda_destino', '-fecha']),
+        ]
+        ordering = ['-fecha', '-creada_en']
+
+    def __str__(self):
+        return f"1 {self.moneda_origen.codigo} = {self.tasa} {self.moneda_destino.codigo} ({self.fecha})"
+
+    @classmethod
+    def obtener_tasa(cls, origen_codigo, destino_codigo, empresa_id, fecha=None):
+        """
+        Retorna la tasa mas reciente del par origen->destino <= fecha.
+        Si no existe, lanza ValueError operacional.
+        """
+        from django.utils import timezone
+        empresa_id_int = int(empresa_id)
+        fecha = fecha or timezone.localdate()
+        # Usar Moneda.manager por tenant para resolver origen/destino
+        monedas = Moneda.objects.filter(empresa_id=empresa_id_int)
+        try:
+            origen = monedas.get(codigo=origen_codigo.upper())
+            destino = monedas.get(codigo=destino_codigo.upper())
+        except Moneda.DoesNotExist:
+            raise ValueError(
+                f"Moneda origen o destino no configurada en el tenant."
+            )
+        # Buscar la tasa mas reciente via global_objects (no filtrar
+        # por ContextVar aunque sirva de hint).
+        tasa = cls.global_objects.filter(
+            empresa_id=empresa_id_int,
+            moneda_origen=origen,
+            moneda_destino=destino,
+            fecha__lte=fecha
+        ).order_by('-fecha', '-creada_en').first()
+        if not tasa:
+            raise ValueError(
+                f"No hay tasa {origen_codigo}->{destino_codigo} al {fecha}"
+            )
+        return tasa

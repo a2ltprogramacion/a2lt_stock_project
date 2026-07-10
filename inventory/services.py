@@ -1677,13 +1677,43 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
                 f"o no existe."
             )
 
+        # FASE 3 — Snapshot de tasa al momento de la compra.
+        # Sin importar la fuente (BCV/MANUAL/API), los valores
+        # auditables se guardan en el documento para conservarlos
+        # aunque la configuracion global cambie despues.
+        config_tasa = ConfiguracionEmpresa.objects.get(
+            empresa_id=empresa_id_int
+        )
+        tasa_bcv_snap = config_tasa.tasa_bcv
+        tasa_mercado_snap = (config_tasa.tasa_mercado
+                             if hasattr(config_tasa, 'tasa_mercado')
+                             else config_tasa.tasa_bcv)
+        factor_snap = (config_tasa.factor_cobertura
+                       if hasattr(config_tasa, 'factor_cobertura')
+                       else Decimal('1.0000'))
+        # Monto en Bs: USD * (mercado / bcv) * bcv (formula venezolano
+        # que mantiene auditabilidad: dos factores separados)
+        if tasa_bcv_snap > 0:
+            monto_bs_snap = (
+                Decimal(str(monto_total_usd))
+                * (tasa_mercado_snap / tasa_bcv_snap)
+                * tasa_bcv_snap
+            ).quantize(Decimal('0.01'))
+        else:
+            monto_bs_snap = Decimal('0.00')
+
         documento = DocumentoCompra.objects.create(
             empresa_id=empresa_id_int,
             proveedor=proveedor,
             numero_factura=numero_factura,
             fecha_compra=fecha_compra,
             monto_total_usd=monto_total_usd,
-            observaciones=observaciones
+            observaciones=observaciones,
+            tasa_bcv_aplicada=tasa_bcv_snap,
+            tasa_mercado_aplicada=tasa_mercado_snap,
+            factor_cobertura_aplicado=factor_snap,
+            fuente_tasa='MANUAL',
+            monto_total_bs_snapshot=monto_bs_snap,
         )
 
         for item in lista_items:
