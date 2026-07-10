@@ -17,7 +17,6 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
-from django.views.decorators.csrf import csrf_exempt  # Temporal hasta implementar tokens CSRF en JS
 from django.db import models as db_models
 
 from . import services as svc

@@ -69,11 +69,16 @@ Abrir http://127.0.0.1:8000
 
 - `docs/AUDITORIA_INICIAL.md` — hallazgos previos a la Fase A.
 - `docs/PLAN.md` — plan de estabilización completo (Etapas A, B, 
-  Fase 3, 4, 5, 6 y reglas de calidad).
+  Fase 3, 4, 5, 6 y reglas de calidad) + matriz de tests C1-C19.
+- `docs/ARQUITECTURA.md` — diagrama de capas, multi-tenant ContextVar, 
+  regla sagrada del kardex, snapshots inmutables, mapa de `services.py`, 
+  migraciones y lista de los 23 modelos.
+- `docs/ADR.md` — 16 Decisiones de Arquitectura formales (ADR-01 a ADR-22).
 - `docs/ROADMAP.md` — features post-100% (cuentas por cobrar/pagar, 
   factura electrónica Seniat, bitácora de auditoría).
 - `docs/OPERACION.md` — guía de instalación detallada, módulos, 
   troubleshooting y reglas operativas.
+- `CHANGELOG.md` — registro de cambios por release (Keep a Changelog).
 
 ## Producción
 

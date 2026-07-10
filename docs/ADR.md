@@ -1,0 +1,248 @@
+# Decisiones de Arquitectura (ADRs)
+
+**Última actualización:** 2026-07-10
+
+Este archivo centraliza todas las Decisiones de Arquitectura (ADR – 
+*Architecture Decision Records*) referenciadas en el código y la 
+documentación del sistema A2LT Stock. Cada ADR describe una decisión 
+tomada, su contexto y sus consecuencias.
+
+---
+
+## ADR-01: Esquema de Nota de Entrega como documento de salida
+
+**Estado:** Aceptada  
+**Contexto:** Necesidad de un documento correlativo único por empresa 
+que registre toda salida de inventario al cliente, persistiendo el 
+número correlativo y el estado operativo.  
+**Decisión:** Modelo `NotaEntrega` con `unique_together = 
+('empresa', 'numero')`, `numero` autogenerado por `save()`, estado 
+`PROCESADO`/`ANULADO` con motivo de anulación.  
+**Consecuencias:** El número correlativo se respeta por tenant; las 
+anulaciones queden trazadas. `services.reversar_nota_entrega()` es la 
+única vía autorizada para marcar ANULADO + generar contramovimientos.
+
+## ADR-02: DecimalField para todas las cantidades y precios
+
+**Estado:** Aceptada  
+**Contexto:** El sector requiere unidades fraccionables (kits, 
+fracciones de combos). `FloatField` introduce errores de 
+redondeo acumulativos en reportes histórico.  
+**Decisión:** Todos los campos de cantidad, costo y precio se 
+declaran como `DecimalField` con `max_digits` adecuado (12-18, 2-6 
+decimales).  
+**Consecuencias:** Mayor uso de memoria y(storage) pero reportes 
+determinísticos. `services.calcular_stock_combo` usa `Decimal //` 
+floor division desde A12 (commit `29a09ec`).
+
+## ADR-03: Soft-delete en Articulo
+
+**Estado:** Aceptada  
+**Contexto:** El kárdex inmutable referencia Articulo por FK. Si se 
+borra un Articulo, el histórico del kardex queda huérfano.  
+**Decisión:** Articulo tiene `activo = BooleanField(default=True)`. 
+Los borrados lógicos solo desactivan. Las consultas por default 
+filtran `activo=True`.  
+**Consecuencias:** El admin y las vistas de negocio deben respetar 
+`activo`; las consultas históricas que reportan movimientos pasados 
+usan `global_objects` para no perder referencias.
+
+## ADR-04: Configuración por inquilino (no Singleton global)
+
+**Estado:** Aceptada (modificada en migración `0001_normalizar_config`)  
+**Contexto:** Originalmente existía un Singleton global. En multi-tenant, 
+cada empresa necesita su propia configuración de tasas, márgenes, API, 
+cuarentena, etc.  
+**Decisión:** Modelo `ConfiguracionEmpresa` con FK OneToOne hacia 
+`Empresa`. Cada tenant tiene su propio registro.  
+**Consecuencias:** El context processor `inject_config` usa 
+`ConfiguracionEmpresa.objects.first()` que opera vía `EmpresaManager` 
+(ContextVar), por lo que respeta al tenant activo.
+
+## ADR-05: Contacto unificado (Clientes + Proveedores)
+
+**Estado:** Aceptada  
+**Contexto:** Los comercios necesitan gestionar clientes y proveedores 
+con campos casi idénticos; mantener dos modelos duplica tablas.  
+**Decisión:** Modelo único `Contacto` con campo `tipo = 
+CLIENTE|PROVEEDOR`. Los proxy models `Cliente` y `Proveedor` exponen 
+managers filtrados por tipo.  
+**Consecuencias:** Tabla única en DB; los FK `cliente` y `proveedor` 
+usan `limit_choices_to={'tipo': '...'}` para validar a nivel form.
+
+## ADR-06: Empresa como entidad raíz multi-tenant
+
+**Estado:** Aceptada  
+**Contexto:** Necesidad de aislar datos entre comercios sin recurrir 
+a PostgreSQL schemas (regla: solo SQLite) ni a `tenant_id` manual en 
+cada consulta.  
+**Decisión:** `Empresa` es el padre multi-tenant. Todos los modelos 
+multi-tenant tienen FK a `Empresa` y usan `objects = EmpresaManager()`. 
+**Consecuencias:** Ver ADR-17 — el manager filtra automáticamente.
+
+## ADR-08: TransactionTestCase para tests de rollback
+
+**Estado:** Aceptada  
+**Contexto:** Los tests que verifican `@transaction.atomic` con 
+rollback real no funcionan con `TestCase` (usa savepoints).  
+**Decisión:** Tests de reversos, anular venta/compra, y rollback de 
+carga masiva usan `TransactionTestCase`.  
+**Consecuencias:** Suite más lenta (~30 segundos más) pero verificación 
+real de atomicidad en BD.
+
+## ADR-09: Colisiones de carga masiva via sesión Django
+
+**Estado:** Aceptada  
+**Contexto:** La carga masiva puede encontrar conflictos (SKU ya 
+existe con datos distintos). Necesitamos un UX de resolución sin BD 
+intermedia.  
+**Decisión:** Las colisiones se persisten en `request.session` bajo 
+la clave `carga_{lote_id}`. La vista `vista_resolver_colision` las 
+lee y permite al operador elegir "sumar" o "sustituir".  
+**Consecuencias:** Sin tabla de staging; ver `views.py:353`.
+
+## ADR-10: Validación de formato Excel
+
+**Estado:** Aceptada  
+**Contexto:** Los operadores suben archivos que a veces son `.xls` 
+viejos o con macros; necesitamos rechazo temprano y claro.  
+**Decisión:** `validar_formato_excel()` en `services.py:378` valida 
+extensión, magic bytes y estructura básica de `openpyxl`. Rechaza 
+`.xls` (legacy) y exige `.xlsx`.  
+**Consecuencias:** Mensaje claro al operador; `ProcesarCargaMasivaExcel` 
+espera un `io.BytesIO` válido.
+
+## ADR-11: Carga masiva atómica por lote
+
+**Estado:** Aceptada  
+**Contexto:** Una carga masiva con 100 filas no puede dejar 
+resultados parciales si la fila 50 falla.  
+**Decisión:** `procesar_carga_masiva()` envuelve todo en 
+`@transaction.atomic`. Cualquier error hace rollback total y 
+devuelve el lote_id + filas afectadas para diagnóstico.
+
+## ADR-12: Fixtures Excel en memoria (sin disco)
+
+**Estado:** Aceptada  
+**Contexto:** Tests repetitivos no pueden generar archivos temporales.  
+**Decisión:** Los helpers de tests (`crear_excel_*` en `tests.py:453`) 
+usan `openpyxl.Workbook` en `io.BytesIO`. Sin `NamedTemporaryFile`.
+
+## ADR-13: Contrato de cabecera Excel para carga masiva
+
+**Estado:** Aceptada  
+**Contexto:** Un campo cambiado en la cabecera del Excel rompe toda 
+la carga automáticamente sin mensaje claro.  
+**Decisión:** Cabecera obligatoria documentada y validada por 
+`procesar_carga_masiva_excel` (ver `services.py:469`). La orden de 
+columnas también está validada.
+
+## ADR-17: EmpresaManager + ContextVar multi-tenant
+
+**Estado:** Aceptada  
+**Contexto:** Reemplazo del patrón manual `filter(empresa=...)` por 
+un mecanismo automático que filtre por el tenant activo sin que el 
+código de negocio repita `filter(empresa_id=...)` en cada consulta.  
+**Decisión:** 
+- `contextvars.ContextVar('current_empresa')` en `inventory/managers.py`.
+- `EmpresaManager(models.Manager)` sobreescribe `get_queryset()` 
+  para filtrar por la empresa del contexto. Si `ContextVar` es None, 
+  retorna queryset vacío (no `all()`) como defensa anti-fugas.
+- `TenantMiddleware._authorize()` valida 5 condiciones y setea el 
+  ContextVar en cada request.
+- `global_objects = models.Manager()` se reserva para consultas 
+  administrativas explícitas.
+
+**Consecuencias:** Toda lectura/escritura multi-tenant pasa por 
+`EmpresaManager` automáticamente. La única forma de bypassear es 
+`global_objects` (auditable en code review).  
+**Uso:** `get_current_empresa()` es la única forma de resolver el 
+tenant activo desde servicios.
+
+## ADR-18: Snapshots inmutables en NotaEntrega y DocumentoCompra
+
+**Estado:** Aceptada  
+**Contexto:** Las tasas de cambio cambian frecuentemente. Si los 
+reportes históricos usan la config global, los totales del pasado 
+varían con cada cambio de tasa.  
+**Decisión:** 
+- `DetalleNotaEntrega` graba `precio_unitario_usd`, 
+  `precio_unitario_bs`, `costo_unitario_snapshot` al momento de la 
+  venta (inmutables).
+- `NotaEntrega` graba `tasa_bcv_aplicada` y 
+  `factor_cobertura_aplicado`.
+- `DocumentoCompra` graba `tasa_bcv_aplicada`, 
+  `tasa_mercado_aplicada`, `factor_cobertura_aplicado`, 
+  `fuente_tasa`, `monto_total_bs_snapshot`.
+- `services.reversar_documento_compra` y 
+  `reversar_nota_entrega` no modifican los snapshots; crean 
+  contramovimientos del kárdex con el costo snapshot original.
+
+**Consecuencias:** Los reportes históricos (Fase 4) son 
+determinísticos; el test C15 valida inmutabilidad explícita.
+
+## ADR-21: No partir services.py en submódulos
+
+**Estado:** Aceptada  
+**Contexto:** services.py tiene 2085+ líneas con 17 funciones 
+públicas mezclando dominios (kardex, ventas, compras, devoluciones, 
+carga masiva, reversos, tasas). Refactor natural: partirla en 
+`services/kardex.py`, `services/ventas.py`, etc.  
+**Decisión:** **No partir**. Se agrega un índice de secciones en 
+el header del archivo (commit `5d5e45f`, Fase 5) que mapea cada 
+dominio con el número de línea de su sección.  
+**Motivos:** 
+1. Riesgo de imports circulares (models ↔ services) — `Articulo.get_stock_disponible()` importa `services` de forma lazy.
+2. Suite verde con 157 tests; un split puede romper imports 
+   accidentalmente.
+3. El índice en el header hace navegable el archivo sin 
+   fragmentación.
+
+**Consecuencias:** El archivo seguirá creciendo linea por linea 
+pero el índice ayuda. Cuando los tests dejen de correr en <3 min 
+o el archivo supere 5000 líneas, se podrá revocar este ADR.  
+**Tests C18:** 2 tests protegen la API surface (17 funciones 
+públicas deben estar presentes).
+
+## ADR-22: Backups del sistema fuera del repositorio
+
+**Estado:** Aceptada  
+**Contexto:** El comando `backup_db` genera archivos SQLite en 
+`backups/` que pueden pesar MBs y no aportan nada al repositorio.  
+**Decisión:** `.gitignore` incluye `backups/` y `*.sqlite3` ya 
+estaba. `logs/` y `*.log` también se excluyen.  
+**Consecuencias:** Cada ambiente on-premise mantiene sus propios 
+backups en disco; el repositorio queda limpio de artefactos.
+
+## ADRs no implementadas / candidatas
+
+Las siguientes ADRs aparecen referenciadas en código pero no tienen 
+desarrollo formal en este archivo:
+
+- **ADR-06**: ya cubierta por ADR-17 (ContextVar). Se conserva la 
+  referencia histórica en `models.py:7`.
+- **ADR-19, ADR-20**: reservadas para futuras decisiones (sin uso 
+  actual).
+
+---
+
+## Mapa de ADRs por componente
+
+| ADR | Afecta a | Implementado en |
+|-----|----------|-----------------|
+| 01 | NotaEntrega | `models.NotaEntrega`, `services.reversar_nota_entrega` |
+| 02 | Cantidades/precios Decimal | todos los modelos con DecimalField |
+| 03 | Soft-delete Articulo | `models.Articulo.activo` |
+| 04 | ConfiguracionEmpresa OneToOne | `models.ConfiguracionEmpresa` |
+| 05 | Contacto unificado | `models.Contacto`, `Cliente`, `Proveedor` |
+| 06 | Empresa raíz multi-tenant | `models.Empresa` |
+| 08 | TransactionTestCase | `tests.TestRollbackAtomicidad`, etc. |
+| 09 | Carga masiva via sesión | `views.py:353` |
+| 10 | Validación Excel | `services.validar_formato_excel` |
+| 11 | Carga atómica | `services.procesar_carga_masiva` |
+| 12 | Fixtures en memoria | `tests.crear_excel_*` |
+| 13 | Contrato cabecera Excel | `services.procesar_carga_masiva_excel` |
+| 17 | EmpresaManager ContextVar | `managers.py`, `middleware.py` |
+| 18 | Snapshots inmutables | `DetalleNotaEntrega`, `DocumentoCompra` |
+| 21 | No partir services.py | `services.py` header + tests C18 |
+| 22 | Backups excluidos git | `.gitignore` |

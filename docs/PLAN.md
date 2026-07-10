@@ -91,7 +91,7 @@ líneas), agregar índice de secciones, NO partir en submódulos.
 
 ## Reglas de calidad
 
-1. **Toda feature o bugfix debe pasar 152+ tests** antes de commit.
+1. **Toda feature o bugfix debe pasar 157+ tests** antes de commit.
 2. **Ningún commit toca `migrations/` sin identificarse** qué 
    migración → `manage.py makemigrations --name-ticket`.
 3. **`services.py` es la única vía para modificar stock**. 
@@ -108,11 +108,43 @@ líneas), agregar índice de secciones, NO partir en submódulos.
    middleware corta con 403 si no hay sesión válida; `@login_required` 
    redirige a /login/ con 302 si no hay usuario.
 
-## Próximas features (post-100%)
+## Matriz de tests (C1-C19)
 
-- Integración real con API BCV/Binance (Fase 3 dejó stub simulado).
-- Bitácora de auditoría por usuario (TRACE quién modificó cada movimiento).
-- Módulo de cuentas por cobrar/pagar con cierres manuales (Fase 4 
-  usa "todo PROCESADO ≡ pendiente"; no hay registro de pago).
-- Factura electrográfica (formato SENIAT pre-print).
-- Integración con WhatsApp Business API para social-selling.
+| Cód | Etapa | Cobertura | Tests |
+|---|---|---|---|
+| C1 | A4 | Reverso idempotente NotaEntrega | 1 |
+| C2 | A5 | `metodo_ganancia` (MARKUP/MARGIN) | 2 |
+| C3 | A6 | `base.html` getCookie + block extra_js | 2 |
+| C4 | A7 | `articulos_view` multi-tenant + CSRF | 2 |
+| C5 | A8 | `contactos` + respaldo multi-tenant | 2 |
+| C6 | A9 | `vista_crear_venta` sin @csrf_exempt | 2 |
+| C7 | A10 | `registrar_compra_proveedor` multi-tenant | 2 |
+| C8 | A11 | `procesar_venta` valida almacen por empresa | 2 |
+| C9 | A12 | `calcular_stock_combo` Decimal floor | 1 |
+| C10 | A13 | Compras usa `/catalogo/buscar/` | 2 |
+| C11 | A14 | Ventas ofrece imprimir nota | 1 |
+| C12 | A15 | Kardex manual endpoint | 2 |
+| C13 | A16 | `settings.py` hardening | 2 |
+| C14 | B-2 | TenantMiddleware 5 condiciones | 7 |
+| C15 | Fase 3 | Snapshot inmutable Moneda/TasaCambio | 5 |
+| C16 | Fase 4 | 8 reportes + vistas + exporters | 21 |
+| C17 | Fase 4 | Dashboard KPIs live | 4 |
+| C18 | Fase 5 | API surface services.py | 2 |
+| C19 | Fase 6 | backup_db VACUUM INTO | 3 |
+
+Otras suites sin código C: TestMovimientosBasicos, 
+TestRollbackAtomicidad (ADR-08), TestVentaExitosa, 
+TestCoberturaCritica (reversos notificados, correlativo por empresa).
+
+## Documentos relacionados
+
+- `docs/AUDITORIA_INICIAL.md` — hallazgos previos a la Fase A.
+- `docs/ARQUITECTURA.md` — diagrama, multi-tenant, regla sagrada 
+  kardex, snapshots, mapa de services, migraciones, tests.
+- `docs/ADR.md` — 16 ADRs formales (01-22 con saltos).
+- `docs/ROADMAP.md` — features post-100% (cuentas por cobrar/pagar, 
+  factura electrónica Seniat, bitácora de auditoría).
+- `docs/OPERACION.md` — guía de instalación detallada, módulos, 
+  troubleshooting y reglas operativas.
+- `CHANGELOG.md` (raíz) — versión + cambios notables por release.
+- `README.md` (raíz) — instalación rápida + features + reglas.
