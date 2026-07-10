@@ -607,7 +607,7 @@ def vista_movimientos(request):
     Renderiza la tabla histórica de MovimientoKardex con filtros avanzados.
     Aplica select_related para evitar el problema N+1 queries.
     """
-    from .models import MovimientoKardex, Almacen
+    from .models import MovimientoKardex, Almacen, Articulo
 
     movimientos = MovimientoKardex.objects.select_related('articulo', 'almacen', 'nota_entrega', 'documento_compra').all().order_by('-fecha_hora')
 
@@ -629,10 +629,12 @@ def vista_movimientos(request):
         movimientos = movimientos.filter(fecha_hora__date__lte=fecha_hasta)
 
     almacenes = Almacen.objects.filter(activo=True)
+    articulos = Articulo.objects.filter(activo=True).order_by('nombre')
 
     context = {
         'movimientos': movimientos,
         'almacenes': almacenes,
+        'articulos': articulos,
         'filtros': {
             'almacen_id': almacen_id or '',
             'sku': sku or '',
@@ -642,6 +644,109 @@ def vista_movimientos(request):
         }
     }
     return render(request, 'inventory/movimientos.html', context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def vista_registrar_asiento_manual(request):
+    """
+    Endpoint AJAX para registrar manualmente un movimiento en el Kardex.
+    Espera POST con JSON: {articulo_id, almacen_id, tipo, cantidad, concepto}.
+
+    Es usado por el boton 'Registrar Asiento' en movimientos.html.
+    Solo usuarios autenticados con sesion multi-tenant (TenantMiddleware).
+    """
+    from decimal import Decimal
+    import json as _json
+    from .models import Articulo, Almacen
+    from django.http import JsonResponse
+    from .managers import get_current_empresa
+
+    try:
+        data = _json.loads(request.body)
+        empresa_id = get_current_empresa()
+        if not empresa_id:
+            return JsonResponse(
+                {'ok': False, 'error': 'Empresa no detectada'},
+                status=403
+            )
+
+        # En este modelo Articulo.pk === sku (CharField PK), por lo que
+        # el frontend envia el SKU directamente como "articulo_id" por
+        # simplicidad. Resolvemos por sku directamente.
+        articulo_sku = data.get('articulo_id') or data.get('sku')
+        almacen_id = int(data.get('almacen_id', 0))
+        tipo = data.get('tipo', '').strip().upper()
+        cantidad = Decimal(str(data.get('cantidad', 0)))
+        # Detalle/motivo audit libre; concepto se setea segun ENTRADA/SALIDA
+        detalle = (data.get('detalle') or '').strip()
+
+        # Validaciones de integridad
+        if not articulo_sku or not almacen_id:
+            return JsonResponse(
+                {'ok': False, 'error': 'articulo_id y almacen_id son obligatorios'},
+                status=400
+            )
+        if tipo not in ('ENTRADA', 'SALIDA'):
+            return JsonResponse(
+                {'ok': False, 'error': f"Tipo invalido: '{tipo}'. Use 'ENTRADA' o 'SALIDA'."},
+                status=400
+            )
+        if cantidad <= 0:
+            return JsonResponse(
+                {'ok': False, 'error': 'La cantidad debe ser mayor a cero.'},
+                status=400
+            )
+        if not detalle:
+            return JsonResponse(
+                {'ok': False, 'error': 'El motivo/detalle es obligatorio para auditoria.'},
+                status=400
+            )
+
+        # articulos.pk en este modelo es CharField (sku). Por eso
+        # validamos por sku directo en lugar de int(pk).
+        try:
+            articulo = Articulo.objects.get(sku=articulo_sku, empresa_id=empresa_id, activo=True)
+        except Articulo.DoesNotExist:
+            return JsonResponse(
+                {'ok': False, 'error': f'El articulo "{articulo_sku}" no pertenece a la empresa activa.'},
+                status=404
+            )
+        try:
+            almacen = Almacen.objects.get(pk=almacen_id, empresa_id=empresa_id, activo=True)
+        except Almacen.DoesNotExist:
+            return JsonResponse(
+                {'ok': False, 'error': f'El almacen {almacen_id} no pertenece a la empresa activa.'},
+                status=404
+            )
+
+        concepto = 'AJUSTE_ENTRADA' if tipo == 'ENTRADA' else 'AJUSTE_SALIDA'
+        accion = concepto  # por claridad
+
+        # Invocar el servicio unico de inventario (Regla Sagrada del Kardex)
+        movimiento = svc.registrar_movimiento(
+            articulo=articulo,
+            almacen=almacen,
+            tipo=tipo,
+            cantidad=cantidad,
+            concepto=accion,
+            detalle_adicional=detalle,
+            usuario=str(request.user.username),
+        )
+
+        return JsonResponse({
+            'ok': True,
+            'movimiento_id': movimiento.pk,
+            'tipo': tipo,
+            'cantidad': str(cantidad),
+        })
+
+    except Exception as e:
+        logger.exception("Error registrando movimiento manual")
+        return JsonResponse(
+            {'ok': False, 'error': str(e)},
+            status=400
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. CONTACTOS Y COMPRAS (TICKET #9)

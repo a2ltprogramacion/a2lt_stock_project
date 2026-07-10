@@ -16,7 +16,10 @@
                                 / Artículo</label>
                             <select id="kardex-product"
                                 class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
-                                <!-- Populated dynamically from JS -->
+                                <option value="">Seleccione un articulo...</option>
+                                {% for a in articulos %}
+                                <option value="{{ a.pk }}" data-tipo="{{ a.tipo }}">{{ a.sku }} — {{ a.nombre }}</option>
+                                {% endfor %}
                             </select>
                         </div>
                         <div class="md:col-span-3">
@@ -195,6 +198,47 @@
 
     function clearKardexFilters() {
         window.location.href = '/movimientos/';
+    }
+
+    function registerManualMovement() {
+        const articuloId = document.getElementById('kardex-product').value;
+        const almacenId = document.getElementById('kardex-warehouse').value;
+        const tipo = document.getElementById('kardex-type').value;
+        const cantidad = parseFloat(document.getElementById('kardex-qty').value);
+        const concepto = document.getElementById('kardex-concept').value.trim();
+
+        if (!articuloId) { alert('Seleccione un articulo.'); return; }
+        if (!almacenId) { alert('Seleccione un almacen.'); return; }
+        if (!cantidad || cantidad <= 0) { alert('Cantidad invalida.'); return; }
+        if (!concepto) { alert('El motivo es obligatorio.'); return; }
+
+        let accionConcepto = (tipo === 'ENTRADA') ? 'AJUSTE_ENTRADA' : 'AJUSTE_SALIDA';
+
+        fetch('/movimientos/registrar/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                articulo_id: parseInt(articuloId),
+                almacen_id: parseInt(almacenId),
+                tipo: tipo,
+                cantidad: cantidad,
+                concepto: accionConcepto,
+                detalle: concepto
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                alert('Movimiento registrado correctamente.');
+                window.location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Desconocido'));
+            }
+        })
+        .catch(err => alert('Error de red: ' + err));
     }
 </script>
 {% endblock %}

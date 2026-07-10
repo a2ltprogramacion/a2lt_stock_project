@@ -20,6 +20,7 @@ urlpatterns = [
     path('compras/', views.compras_view, name='compras'),
     path('compras/registrar/', views.registrar_compra_api, name='registrar_compra_api'),
     path('movimientos/', views.vista_movimientos, name='movimientos'),
+    path('movimientos/registrar/', views.vista_registrar_asiento_manual, name='registrar_asiento_manual'),
     path('contactos/', views.contactos, name='contactos'),
     path('articulos/', views.articulos_view, name='articulos'),
     path('configuracion/', views.configuracion_view, name='configuracion'),
