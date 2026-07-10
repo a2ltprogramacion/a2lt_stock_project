@@ -41,3 +41,6 @@ uploads/
 # ─── Logs del sistema ───────────────────────────────────────────────────────
 logs/
 *.log
+
+# ─── Backups generados por backup_db ────────────────────────────────────────
+backups/

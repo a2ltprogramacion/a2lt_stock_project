@@ -5239,3 +5239,93 @@ class TestServicesAPISurface(TestCase):
                           msg=f"registrar_movimiento debe declarar '{expected}'")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 6 — TEST BACKUP VACUUM INTO (C19)
+# ─────────────────────────────────────────────────────────────────────────────
+
+import os
+import shutil
+import tempfile
+
+class TestBackupVacioInto(TestCase):
+    """
+    Tests C19: management command backup_db.
+      1. Genera un backup valido con VACUUM INTO.
+      2. El backup es un SQLite valido y legible.
+      3. Retention > N elimina backups viejos.
+      4. --check no genera archivo.
+    """
+
+    def setUp(self):
+        # Directorio temporal para backups
+        self.bk_dir = tempfile.mkdtemp(prefix='a2lt_backup_test_')
+
+    def tearDown(self):
+        # Limpieza
+        if os.path.isdir(self.bk_dir):
+            shutil.rmtree(self.bk_dir, ignore_errors=True)
+
+    def test_backup_db_genera_archivo_valido(self):
+        from django.core.management import call_command
+        from io import StringIO
+        import sqlite3
+
+        out = StringIO()
+        # call_command llama al command con argumentos en linea.
+        call_command('backup_db', '--dir', self.bk_dir, stdout=out)
+        # Debe haber al menos un archivo db_backup_*.sqlite3
+        archivos = [f for f in os.listdir(self.bk_dir)
+                    if f.startswith('db_backup_') and f.endswith('.sqlite3')]
+        self.assertGreaterEqual(len(archivos), 1, 'Debe generar un archivo backup')
+
+        # El archivo debe ser SQLite valido (legible)
+        backup_path = os.path.join(self.bk_dir, archivos[0])
+        conn = sqlite3.connect(backup_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT name FROM sqlite_master WHERE type="table";')
+            tablas = cursor.fetchall()
+            # Debe contener al menos algunas tablas del modelo
+            nombres = [t[0] for t in tablas]
+            self.assertIn('inventory_empresa', nombres,
+                          msg='El backup debe contener la tabla inventory_empresa')
+            self.assertIn('inventory_articulo', nombres,
+                          msg='El backup debe contener la tabla inventory_articulo')
+        finally:
+            conn.close()
+
+    def test_backup_db_check_dry_run(self):
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        # --check no debe escribir archivo
+        call_command('backup_db', '--dir', self.bk_dir, '--check', stdout=out)
+        archivos = os.listdir(self.bk_dir)
+        self.assertEqual(len(archivos), 0, 'dry-run no debe generar archivos')
+        # Debe imprimir (dry-run)
+        self.assertIn('dry-run', out.getvalue())
+
+    def test_backup_db_retention_elimina_viejos(self):
+        import time
+        from django.core.management import call_command
+        from io import StringIO
+        # Crear un backup 'viejo' a mano (mtime retrocedido)
+        old_path = os.path.join(self.bk_dir, 'db_backup_20000101_000000.sqlite3')
+        # VACUUM INTO crea un SQLite vacio (necesitamos un .sqlite3 valido)
+        import sqlite3
+        conn = sqlite3.connect(old_path)
+        conn.execute('CREATE TABLE x(a)')
+        conn.close()
+        # Set mtime a hace 30 dias
+        old_time = time.time() - 30 * 86400
+        os.utime(old_path, (old_time, old_time))
+
+        # Llamar backup con --retention 7 (debe borrar el viejo > 7 dias)
+        out = StringIO()
+        call_command('backup_db', '--dir', self.bk_dir,
+                     '--retention', '7', stdout=out)
+        # El archivo viejo debe haberse borrado
+        self.assertFalse(os.path.exists(old_path),
+                         msg='retention 7 dias debe borrar el backup de 30 dias')
+
+
