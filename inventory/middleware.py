@@ -1,5 +1,6 @@
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect
+from django.urls import reverse
 from django.contrib import messages
 from .managers import set_current_empresa, reset_current_empresa
 
@@ -26,7 +27,10 @@ class TenantMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
-        self.exempt_paths = ['/admin/', '/login/', '/static/', '/favicon.ico']
+        # Rutas exentas del middleware (no requieren sesion de tenant):
+        # '/', '/login/' (compatibilidad legacy), '/admin/', '/static/',
+        # '/favicon.ico'.
+        self.exempt_paths = ['/login/', '/admin/', '/static/', '/favicon.ico']
 
     def __call__(self, request):
         current_path = request.path
@@ -57,8 +61,11 @@ class TenantMiddleware:
         """
         Retorna:
           - None si la peticion esta autorizada (empresa cargada en sesion).
-          - HttpResponseRedirect a /login/?next=... si el usuario no esta
+          - HttpResponseRedirect a /?next=... si el usuario no esta
             autenticado (UX amigable; preserva el destino original).
+            La URL de login se resuelve via settings.LOGIN_URL (por
+            defecto desde el name 'login' que corresponde a la raiz
+            '' del app).
           - HttpResponseForbidden (403) en caso contrario (vector de
             seguridad real: usuario autenticado intentando acceder a
             tenant no permitido, empresa inactiva, etc.).
@@ -70,7 +77,7 @@ class TenantMiddleware:
         4. Empresa existe y activa.          [403]
         5. Empresa esta en perfil.empresas_permitidas. [403]
         """
-        # 1. autenticacion — sin login → redirect a /login/?next=<path>
+        # 1. autenticacion — sin login → redirect a /?next=<path>
         #    (mismo comportamiento que @login_required, para UX consistente).
         #    Pero UNICAMENTE para usuarios no autenticados; usuarios
         #    autenticados sin permiso siguen retornando 403 (vector real).
@@ -87,8 +94,18 @@ class TenantMiddleware:
                     # messages puede fallar si no hay backend de
                     # sesion configurado; no bloqueamos el redirect.
                     pass
+            # Resolver la URL de login via LOGIN_URL (settings.py)
+            # para evitar hardcodear rutas. La pantalla de login
+            # efectiva es la raiz '' del app (name='login').
+            try:
+                login_url = reverse('inventory:login')
+            except Exception:
+                # Fallback robusto si el URLconf no carga.
+                login_url = '/'
             next_url = request.path if request.path else '/'
-            return redirect(f'/login/?next={next_url}')
+            from django.utils.http import urlencode
+            qs = urlencode({'next': next_url})
+            return redirect(f'{login_url}?{qs}')
 
         # 2. perfil
         perfil = getattr(user, 'perfil', None)

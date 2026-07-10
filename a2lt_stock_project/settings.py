@@ -249,3 +249,11 @@ MANAGERS = ADMINS
 # 12. CSRF de API/cliente (canonico: same origin)
 # ─────────────────────────────────────────────────────────────────────────────
 CSRF_TRUSTED_ORIGINS = []  # configurar si hay subdominios dominio cruzada
+
+# URL canonica del login. Apunta al name 'login' (resuelto via
+# namespace 'inventory:login' por el URLconf). La pantalla efectiva
+# es la ruta raiz '' del app. Centralizarlo aqui evita que el
+# middleware del tenant hardcodee la ruta.
+LOGIN_URL = 'inventory:login'
+LOGIN_REDIRECT_URL = 'inventory:dashboard'
+LOGOUT_REDIRECT_URL = 'inventory:login'

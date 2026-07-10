@@ -4492,27 +4492,38 @@ class TestTenantMiddlewareAuthorization(TestCase):
     def test_sin_autenticacion_redirige_a_login(self):
         """
         Sin user.is_authenticated (caso anonimo), el middleware ahora
-        redirige a /login/?next=path (comportamiento UX consistente
-        con @login_required). Antes retornaba 403.
+        redirige a ?next=path (comportamiento UX consistente con
+        @login_required). Antes retornaba 403.
 
         Opcion B del cambio: un usuario NO autenticado debe ser
-        llevado a la pantalla de login, NO ver un 403 críptico.
+        llevado a la pantalla de login (la ruta raiz '' del app es
+        la pantalla de login efectiva; no existe /login/ como URL
+        separada), NO ver un 403 criptico.
         Los casos 2-5 (autenticado sin permiso) SI mantienen 403.
+
+        settings.LOGIN_URL = 'inventory:login' reversea a ''.
         """
         c = type(self.client)()
         resp = c.get('/ventas/')
-        # 302 (redirect) → /login/?next=/ventas/
+        # 302 (redirect) → raiz '/' con ?next=...
         self.assertEqual(
             resp.status_code, 302,
-            f"Sin login debe redirigir a /login/. got {resp.status_code}"
+            f"Sin login debe redirigir a login. got {resp.status_code}"
         )
         redirect_url = resp.get('Location', '')
-        self.assertIn('/login/', redirect_url,
-                      msg=f"Redirect debe apuntar a /login/. got {redirect_url}")
+        # El redirect debe preservar el destino via ?next=...
+        # (urlencode puede escapear / como %2F)
+        from urllib.parse import unquote
+        decoded = unquote(redirect_url)
         self.assertIn('next=', redirect_url,
                       msg=f"Redirect debe preservar el destino via ?next=. got {redirect_url}")
-        self.assertIn('/ventas/', redirect_url,
-                      msg=f"El destino original debe estar en next=. got {redirect_url}")
+        self.assertIn('/ventas/', decoded,
+                      msg=f"El destino original /ventas/ debe estar en next= (post-decode). got {decoded}")
+        # Y la raiz debe ser '/'
+        self.assertTrue(
+            redirect_url.startswith('/?next=') or redirect_url.startswith('http://testserver/?next='),
+            msg=f"Login URL debe ser la raiz. got {redirect_url}"
+        )
 
     def test_sin_autenticacion_inyecta_mensaje_warning(self):
         """
@@ -4597,11 +4608,13 @@ class TestTenantMiddlewareAuthorization(TestCase):
 
     def test_rutas_exentas_no_piden_sesion(self):
         """
-        Rutas exentas (/, /static/, /login/, /admin/) deben
-        responder sin sesion y sin error 403.
+        Rutas exentas (/, /static/, /admin/) deben responder sin
+        sesion y sin error 403. NOTA: ya no existe /login/ como
+        URL separada; la pantalla de login es la raiz '' del app,
+        que coincide con '/'.
         """
         c = type(self.client)()
-        for path in ['/', '/login/']:
+        for path in ['/', '/static/']:
             try:
                 resp = c.get(path)
             except Exception as e:
@@ -5102,20 +5115,23 @@ class TestVistasReportes(TestCase):
         self.assertEqual(r.status_code, 302)
 
     def test_vista_reportes_requiere_login(self):
-        """Sin login, el middleware (Opcion B) redirige a /login/?next=
-        en lugar de cortar con 403. UX consistente con @login_required.
+        """Sin login, el middleware (Opcion B) redirige a /?next=
+        (la raiz '/' es la pantalla de login efectiva) en lugar de
+        cortar con 403. UX consistente con @login_required.
         Verifica ademas que el destino se preserva en ?next=.
         """
+        from urllib.parse import unquote
         self.client.logout()
         r = self.client.get('/reportes/?foo=bar')
-        # 302 (redirect a /login/) — ya no es 403 gracias a Opcion B.
+        # 302 (redirect a /?next=...) — ya no es 403.
         self.assertEqual(r.status_code, 302,
-                         msg=f"Middleware debe redirigir a /login/ ahora (no 403). got {r.status_code}")
+                         msg=f"Middleware debe redirigir a /. got {r.status_code}")
         location = r.get('Location', '')
-        self.assertIn('/login/', location,
-                      msg=f"Redirect debe apuntar a /login/. got {location}")
         self.assertIn('next=', location,
                       msg=f"Redirect debe preservar destino en ?next=. got {location}")
+        decoded = unquote(location)
+        self.assertIn('/reportes/', decoded,
+                      msg=f"/reportes/ debe ser el destino next. got {decoded}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
