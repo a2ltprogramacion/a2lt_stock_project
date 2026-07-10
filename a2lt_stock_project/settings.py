@@ -160,10 +160,15 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True  # silencia W021 del check --deploy
     SECURE_HSTS_SECONDS = 31536000  # 1 anio
     X_FRAME_OPTIONS = 'DENY'
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    # On-premise over HTTP LAN: no forzar HTTPS redirect (delega a
+    # reverse-proxy si lo hubiere). Si se quiere HTTPS obligatorio,
+    # definir SECURE_SSL_REDIRECT=True via env var.
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
