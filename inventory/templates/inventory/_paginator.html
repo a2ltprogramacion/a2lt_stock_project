@@ -1,0 +1,72 @@
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 py-3">
+    <div class="text-xs text-gray-500 dark:text-zinc-400 font-mono">
+        Página <strong>{{ page_obj.number }}</strong> de <strong>{{ paginator.num_pages }}</strong>
+        · {{ paginator.count }} artículo{{ paginator.count|pluralize:"s" }}
+    </div>
+
+    <nav class="flex flex-wrap gap-1 items-center" aria-label="Paginación">
+        {% if page_obj.has_previous %}
+            <a href="?{% if categoria_actual %}categoria={{ categoria_actual }}&{% endif %}page_size={{ page_size }}&page={{ page_obj.previous_page_number }}"
+               class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300 hover:border-corporate-500 hover:text-corporate-600 transition">
+                <i class="ph ph-caret-left mr-0.5"></i> Anterior
+            </a>
+        {% else %}
+            <span class="px-3 py-1.5 rounded-md text-xs font-semibold bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed">
+                <i class="ph ph-caret-left mr-0.5"></i> Anterior
+            </span>
+        {% endif %}
+
+        {% if paginator.num_pages <= 7 %}
+            {% for n in page_range %}
+                {% if n == page_obj.number %}
+                    <span class="px-3 py-1.5 rounded-md text-xs font-bold bg-corporate-600 text-white">{{ n }}</span>
+                {% else %}
+                    <a href="?{% if categoria_actual %}categoria={{ categoria_actual }}&{% endif %}page_size={{ page_size }}&page={{ n }}"
+                       class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300 hover:border-corporate-500 hover:text-corporate-600 transition">{{ n }}</a>
+                {% endif %}
+            {% endfor %}
+        {% else %}
+            {% if page_obj.number > 2 %}
+                <a href="?{% if categoria_actual %}categoria={{ categoria_actual }}&{% endif %}page_size={{ page_size }}&page=1" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300">1</a>
+                {% if page_obj.number > 3 %}<span class="text-xs text-gray-400">...</span>{% endif %}
+            {% endif %}
+            {% for n in page_range %}
+                {% if n <= page_obj.number|add:1 and n >= page_obj.number|add:-1 %}
+                    {% if n == page_obj.number %}
+                        <span class="px-3 py-1.5 rounded-md text-xs font-bold bg-corporate-600 text-white">{{ n }}</span>
+                    {% else %}
+                        <a href="?{% if categoria_actual %}categoria={{ categoria_actual }}&{% endif %}page_size={{ page_size }}&page={{ n }}" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300">{{ n }}</a>
+                    {% endif %}
+                {% endif %}
+            {% endfor %}
+            {% if page_obj.number < paginator.num_pages|add:-1 %}
+                {% if page_obj.number < paginator.num_pages|add:-2 %}<span class="text-xs text-gray-400">...</span>{% endif %}
+                <a href="?{% if categoria_actual %}categoria={{ categoria_actual }}&{% endif %}page_size={{ page_size }}&page={{ paginator.num_pages }}" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300">{{ paginator.num_pages }}</a>
+            {% endif %}
+        {% endif %}
+
+        {% if page_obj.has_next %}
+            <a href="?{% if categoria_actual %}categoria={{ categoria_actual }}&{% endif %}page_size={{ page_size }}&page={{ page_obj.next_page_number }}"
+               class="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 text-gray-700 dark:text-zinc-300 hover:border-corporate-500 hover:text-corporate-600 transition">
+                Siguiente <i class="ph ph-caret-right ml-0.5"></i>
+            </a>
+        {% else %}
+            <span class="px-3 py-1.5 rounded-md text-xs font-semibold bg-gray-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 text-gray-400 dark:text-zinc-600 cursor-not-allowed">
+                Siguiente <i class="ph ph-caret-right ml-0.5"></i>
+            </span>
+        {% endif %}
+    </nav>
+
+    <form method="get" class="flex items-center gap-2 text-xs">
+        {% if categoria_actual %}<input type="hidden" name="categoria" value="{{ categoria_actual }}">{% endif %}
+        <label class="text-gray-500 dark:text-zinc-400 font-semibold">Mostrar:</label>
+        <select name="page_size" onchange="this.form.submit()"
+                class="bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-md px-2 py-1.5 font-mono text-gray-800 dark:text-zinc-200">
+            <option value="10"  {% if page_size == 10  %}selected{% endif %}>10</option>
+            <option value="25"  {% if page_size == 25  %}selected{% endif %}>25</option>
+            <option value="50"  {% if page_size == 50  %}selected{% endif %}>50</option>
+            <option value="75"  {% if page_size == 75  %}selected{% endif %}>75</option>
+            <option value="100" {% if page_size == 100 %}selected{% endif %}>100</option>
+        </select>
+    </form>
+</div>

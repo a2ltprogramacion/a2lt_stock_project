@@ -19,6 +19,17 @@ intermedios que interfieran con la verificación del rollback.
 import io
 from decimal import Decimal
 
+# Workaround: Django 5.1 + Python 3.14 rompen BaseContext.__copy__()
+# al llamar copy(super()) que falla con AttributeError en 'dicts'.
+# Monkey-patch para estabilizar la suite completa (158+ tests).
+from django.template.context import BaseContext
+
+def _safe_basecontext_copy(self):
+    duplicate = BaseContext.__new__(self.__class__)
+    duplicate.dicts = self.dicts[:]
+    return duplicate
+BaseContext.__copy__ = _safe_basecontext_copy
+
 from django.test import TestCase, TransactionTestCase
 
 from .models import (
@@ -5391,5 +5402,231 @@ class TestBackupVacioInto(TestCase):
         # El archivo viejo debe haberse borrado
         self.assertFalse(os.path.exists(old_path),
                          msg='retention 7 dias debe borrar el backup de 30 dias')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C20: Catálogo dinámico — Paginación server-side + filtros + UX
+# ─────────────────────────────────────────────────────────────────────────────
+# Cubre Commit G1: paginación server-side en vista `catalogo`.
+#   - Default page_size=25
+#   - Whitelist {10, 25, 50, 75, 100}, fuera -> 400
+#   - page < 1 -> 400
+#   - categoria inválida -> 400
+#   - Filtro categoria válido devuelve subset paginado
+#   - Controles de paginación presentes en HTML
+#   - 3 botones colapsados horizontales presentes (G2)
+#   - Estado desplegado con 4 textareas (G3)
+
+
+class TestCatalogoPaginacion(TestCase):
+    """
+    Valida la paginación server-side de la vista `catalogo` y los aspectos
+    UX de los commits G1 (paginacion), G2 (estados colapsado/desplegado) y
+    G3 (botones de copia individuales + textarea Descripción).
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        # Usa helper crear_empresa que crea Empresa y otras utilidades.
+        self.empresa = crear_empresa(nombre='CatalogoTest', rif='J-CT-001')
+
+        # ConfiguracionEmpresa se obtiene (no se crea) — el sistema la
+        # inicializa tras crear la Empresa.
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.00')
+        self.config.factor_cobertura = Decimal('1.1000')
+        self.config.save()
+
+        self.user = User.objects.create_user('catalogo_user',
+                                             password='test1234')
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+
+        # 12 articulos: 6 HOGAR + 4 HERRAMIENTAS + 2 SOLARES
+        cats = (['HOGAR'] * 6 + ['HERRAMIENTAS'] * 4 + ['SOLARES'] * 2)
+        for i, cat in enumerate(cats, start=1):
+            Articulo.objects.create(
+                empresa=self.empresa,
+                sku=f'SKU-{i:02d}',
+                nombre=f'Artículo Demo {i:02d}',
+                categoria=cat,
+                tipo='FISICO',
+                precio_divisa=Decimal('10.00'),
+                costo=Decimal('5.00'),
+                descripcion=f'Descripción del producto {i}',
+                social_quick=f'Respuesta redes del producto {i}',
+                social_cross=f'Mensaje cross del producto {i}',
+                ficha_tecnica=f'Ficha técnica del producto {i}',
+                activo=True,
+            )
+
+        self.client.login(username='catalogo_user', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+    # ── G1: Paginación server-side ────────────────────────────────────
+
+    def test_g1_default_page_size_25_devuelve_200(self):
+        """Sin query params -> page_size default = 25, page = 1, status 200."""
+        response = self.client.get(reverse('inventory:catalogo'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['page_size'], 25)
+        self.assertEqual(response.context['page_obj'].number, 1)
+
+    def test_g1_page_size_whitelist_10_25_50_75_100(self):
+        """Cada valor de la whitelist debe ser aceptado (status 200)."""
+        for size in (10, 25, 50, 75, 100):
+            response = self.client.get(
+                reverse('inventory:catalogo'), {'page_size': size})
+            self.assertEqual(response.status_code, 200,
+                             msg=f'page_size={size} debe ser válido (200)')
+            self.assertEqual(response.context['page_size'], size)
+
+    def test_g1_page_size_fuera_de_whitelist_devuelve_400(self):
+        """page_size no whitelisted (ej. 7, 200, abc) -> HttpResponseBadRequest."""
+        for invalid in (7, 200, 0, -1, 'abc'):
+            response = self.client.get(
+                reverse('inventory:catalogo'), {'page_size': invalid})
+            self.assertEqual(response.status_code, 400,
+                             msg=f'page_size={invalid!r} debe ser rechazado (400)')
+
+    def test_g1_page_menor_que_1_devuelve_400(self):
+        """page < 1 (0, -5, 'xyz') -> HttpResponseBadRequest."""
+        for invalid in (0, -5, 'xyz'):
+            response = self.client.get(
+                reverse('inventory:catalogo'), {'page': invalid})
+            self.assertEqual(response.status_code, 400,
+                             msg=f'page={invalid!r} debe ser rechazado (400)')
+
+    def test_g1_page_fuera_de_rango_devuelve_400(self):
+        """page > paginator.num_pages -> HttpResponseBadRequest (no EmptyPage 500)."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 10, 'page': 9999})
+        self.assertEqual(response.status_code, 400)
+
+    def test_g1_paginacion_page_2_devuelve_siguiente_pagina(self):
+        """Con page_size=10 y 12 articulos, page=2 devuelve 2 articulos."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 10, 'page': 2})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['page_obj'].number, 2)
+        self.assertEqual(len(response.context['articulos_con_precios']), 2)
+        self.assertEqual(response.context['paginator'].count, 12)
+
+    def test_g1_filtro_categoria_valido_filtra_subset(self):
+        """categoria=HOGAR devuelve solo 6 articulos (HOGAR)."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'categoria': 'HOGAR', 'page_size': 25})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['paginator'].count, 6)
+        self.assertEqual(response.context['categoria_actual'], 'HOGAR')
+
+    def test_g1_filtro_categoria_invalida_devuelve_400(self):
+        """categoria=INEXISTENTE -> HttpResponseBadRequest."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'categoria': 'INEXISTENTE'})
+        self.assertEqual(response.status_code, 400)
+
+    def test_g1_controles_paginacion_presentes_en_html(self):
+        """El HTML de respuesta debe incluir los controles (selector page_size)."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 10, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        # El selector de page_size siempre está presente (en _paginator.html)
+        self.assertContains(response, 'name="page_size"')
+
+    # ── G2: Estados colapsado/desplegado + layout horizontal ──────────
+
+    def test_g2_boton_resposta_redes_presente(self):
+        """El botón 'Respuesta Redes' debe estar en el HTML renderizado."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Respuesta Redes')
+
+    def test_g2_boton_remarketing_presente(self):
+        """El botón 'Remarketing' debe estar en el HTML renderizado."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Remarketing')
+
+    def test_g2_boton_ficha_tecnica_presente(self):
+        """El botón 'Ficha Técnica' debe estar en el HTML renderizado."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Ficha Técnica')
+
+    def test_g2_toggle_colapsado_desplegado_presente(self):
+        """El header clickable (toggle-detalle) y la flecha deben existir."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'toggle-detalle')
+        self.assertContains(response, 'toggle-arrow')
+
+    def test_g2_estado_colapsado_y_expandido_coexisten(self):
+        """Ambos estados (collapsed + expanded) deben renderizarse en HTML."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'detalle-collapsed')
+        self.assertContains(response, 'detalle-expanded')
+
+    # ── G3: 4 textareas en vista desplegada + botones de copia ────────
+
+    def test_g3_textarea_descripcion_presente(self):
+        """El textarea de Descripción (id desc-SKU) debe existir."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        # Descripción aparece como label y como textarea (id desc-)
+        self.assertContains(response, 'Descripción')
+        self.assertContains(response, 'desc-SKU-01')
+
+    def test_g3_boton_copiar_oferta_consolidada_presente(self):
+        """El botón 'Copiar Oferta Consolidada' debe estar visible en el HTML."""
+        response = self.client.get(
+            reverse('inventory:catalogo'),
+            {'page_size': 25, 'page': 1})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Copiar Oferta Consolidada')
+
+    def test_g3_paleta_corporate_definida_en_base_html(self):
+        """
+        Bypass test: valida que base.html define la paleta `corporate` en
+        tailwind.config. Sin esto, los botones con `bg-corporate-600` no
+        se renderizan (lo que causaba el bug en light mode).
+        """
+        import os
+        base_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'inventory', 'templates', 'inventory', 'base.html'
+        )
+        with open(base_path, encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn("corporate:", content,
+                      msg='base.html debe definir colors.corporate en '
+                          'tailwind.config para que los botones se vean '
+                          'tanto en light mode como dark mode.')
+        self.assertIn("'#4f46e5'", content,
+                      msg='corporate.600 (#4f46e5) debe estar definido en '
+                          'base.html tailwind.config.')
 
 

@@ -210,18 +210,67 @@ def dashboard(request):
 
 @login_required
 def catalogo(request):
+    """
+    Catálogo dinámico de artículos activos (Fase Q3-2026 — Commit G1).
+
+    Paginación server-side:
+      - page_size en whitelist: {10, 25, 50, 75, 100} (default 25).
+      - page: entero >= 1 (default 1).
+      - categoria: filtra por categoria del articulo (opcional).
+
+    Cualquier page_size fuera de whitelist o page < 1 → Forbidden 400
+    (evita "scroll infinito disfrazado de paginación").
+    """
     from decimal import Decimal
+    from django.core.paginator import Paginator, EmptyPage
+    from django.http import HttpResponseBadRequest
     from .models import Articulo, ConfiguracionEmpresa
     from .managers import get_current_empresa
 
     empresa_id = get_current_empresa()
     config = ConfiguracionEmpresa.objects.get(empresa_id=empresa_id)
-    articulos = Articulo.objects.filter(activo=True).order_by('nombre')
     factor = config.factor_cobertura if config else Decimal('1.0000')
     tasa_bcv = config.tasa_bcv if config else Decimal('0.0000')
 
+    CATEGORIAS = dict(Articulo.CATEGORIA_CHOICES)
+
+    try:
+        page_size = int(request.GET.get('page_size', 25))
+    except (TypeError, ValueError):
+        return HttpResponseBadRequest('page_size inválido.')
+    if page_size not in (10, 25, 50, 75, 100):
+        return HttpResponseBadRequest(
+            'page_size inválido. Valores permitidos: 10, 25, 50, 75 o 100.'
+        )
+
+    try:
+        page = int(request.GET.get('page', 1))
+    except (TypeError, ValueError):
+        return HttpResponseBadRequest('page inválido.')
+    if page < 1:
+        return HttpResponseBadRequest('page inválido: debe ser >= 1.')
+
+    categoria = request.GET.get('categoria', '').strip()
+    if categoria and categoria not in CATEGORIAS:
+        return HttpResponseBadRequest('categoria inválida.')
+
+    # Listado base
+    articulos_qs = Articulo.objects.filter(activo=True)
+    if categoria:
+        articulos_qs = articulos_qs.filter(categoria=categoria)
+    articulos_qs = articulos_qs.order_by('nombre')
+
+    # Paginación
+    paginator = Paginator(articulos_qs, page_size)
+    try:
+        page_obj = paginator.page(page)
+    except EmptyPage:
+        return HttpResponseBadRequest(f'page fuera de rango (total: {paginator.num_pages}).')
+
+    articulos_page = page_obj.object_list
+
     articulos_con_precios = []
-    for a in articulos:
+    for a in articulos_page:
         precio_usd = a.precio_divisa
         precio_usd_ajustado = (precio_usd * factor).quantize(Decimal('0.01'))
         precio_bs_bcv = (precio_usd_ajustado * tasa_bcv).quantize(Decimal('0.01'))
@@ -232,9 +281,21 @@ def catalogo(request):
             'precio_bs_bcv': precio_bs_bcv,
         })
 
+    # Rango compacto de páginas para los controles (1 2 3 ... N)
+    try:
+        page_range = list(paginator.page_range)
+    except AttributeError:
+        page_range = list(range(1, paginator.num_pages + 1))
+
     return render(request, 'inventory/catalogo.html', {
         'articulos_con_precios': articulos_con_precios,
-        'articulos': articulos,
+        'articulos': articulos_qs,
+        'paginator': paginator,
+        'page_obj': page_obj,
+        'page_size': page_size,
+        'page_range': page_range,
+        'categoria_actual': categoria,
+        'categorias': CATEGORIAS,
     })
 
 
