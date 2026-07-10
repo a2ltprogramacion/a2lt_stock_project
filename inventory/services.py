@@ -14,6 +14,24 @@ Funciones principales:
   - registrar_movimiento(...)  → Transacción atómica ENTRADA/SALIDA (Ticket #2)
   - calcular_stock_combo(...)  → Fórmula dinámica de stock de combo (Ticket #2)
   - procesar_salida_combo(...) → Desagregación atómica de componentes (Ticket #2)
+
+MAPA DE SECCIONES (Fase 5 — ref. estructural sin partición de archivo):
+  L356   CARGA MASIVA TOLERANTE A FALLOS Y RESOLUCIÓN DE COLISIONES
+  L1119  MÓDULO DE VENTAS Y EMISIÓN DE NOTAS DE ENTREGA
+  L1299  SINCRONIZACIÓN DE TASAS DE CAMBIO (API)
+  L1397  MOTOR DE REVERSO ATÓMICO DE LOTES DE CARGA MASIVA
+  L1516  MÓDULO DE MOVIMIENTOS Y AJUSTES MANUALES
+  L1623  CONTROL DE COSTOS Y COMPRAS
+  L1802  EXPORTACIÓN LÓGICA POR TENANT
+  L1865  MÓDULO DE DEVOLUCIONES Y CUARENTENA
+  L2013  MÓDULO DE CONTRAPARTIDAS Y REVERSOS (NOTAS Y COMPRAS)
+
+DECISIÓN ADR-21: mantener services.py como módulo único (2085+ líneas) y NO
+dividirlo en submódulos mientras todas las pruebas (152+) sigan en verde
+y no se identifique una razón funcional fuerte para partirlo. El riesgo de
+romper imports circulares (models↔services) supera el beneficio de
+legibilidad de un split en este punto. El índice de más arriba funciona
+como mapa de navegación.
 """
 
 import logging

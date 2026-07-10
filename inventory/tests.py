@@ -5182,3 +5182,60 @@ class TestDashboardLiveData(TestCase):
         self.assertContains(r, fecha_str)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 5 — TEST API SURFACE services.py (C18)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestServicesAPISurface(TestCase):
+    """
+    Tests C18: verificar que services.py expone todas las funciones
+    públicas esperadas con su firma minimamente compatible. Garantiza
+    que futuros refactors no eliminen la API accidentalmente.
+    """
+
+    EXPECTED_API = [
+        'registrar_movimiento',
+        'calcular_stock_combo',
+        'procesar_salida_combo',
+        'procesar_venta',
+        'registrar_compra_proveedor',
+        'procesar_carga_masiva',
+        'procesar_carga_masiva_excel',
+        'validar_formato_excel',
+        'resolver_colision',
+        'revertir_carga_masiva',
+        'reversar_nota_entrega',
+        'reversar_documento_compra',
+        'transferir_mercancia',
+        'ejecutar_ajuste_manual',
+        'sincronizar_tasa_cambio',
+        'exportar_datos_tenant',
+        'procesar_devolucion_venta',
+    ]
+
+    def test_api_surface_completa(self):
+        from . import services as svc
+        for name in self.EXPECTED_API:
+            self.assertTrue(
+                hasattr(svc, name),
+                msg=f"services.py debe exponer '{name}' (Fase 5 API surface)."
+            )
+            fn = getattr(svc, name)
+            self.assertTrue(
+                callable(fn),
+                msg=f"services.{name} debe ser callable."
+            )
+
+    def test_registrar_movimiento_firma(self):
+        """registrar_movimiento debe aceptar (articulo, almacen, tipo,
+        cantidad, concepto) como argumentos posicionales minimos."""
+        import inspect
+        from .services import registrar_movimiento
+        sig = inspect.signature(registrar_movimiento)
+        params = list(sig.parameters.keys())
+        # Debe tener por lo menos 5 param con estos nombres (en orden)
+        for expected in ['articulo', 'almacen', 'tipo', 'cantidad', 'concepto']:
+            self.assertIn(expected, params,
+                          msg=f"registrar_movimiento debe declarar '{expected}'")
+
+
