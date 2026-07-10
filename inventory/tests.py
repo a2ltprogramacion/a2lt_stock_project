@@ -3625,3 +3625,123 @@ class TestComprasNoValidaStockDeVentas(TestCase):
                 f"filtra por stock y vuelve a bloquear compras. Got results: {result_skus}"
             )
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C11: ventas.html ofrece imprimir nota tras registrar venta
+# ─────────────────────────────────────────────────────────────────────────────
+# Bug original: ventas.html:620 hacia alert+reload. Tras registrar una
+# venta no ofrecia imprimir la nota. El usuario tenia que buscar el
+# endpoint /ventas/<id>/imprimir/ manualmente.
+# Fix A14: tras data.ok, ofrecer window.open('/ventas/${notaId}/imprimir/')
+# pre-armado con confirm().
+#
+# Tests:
+# 1. estructural: ventas.html contiene ambas referencias al URL de
+#    imprimir y al objeto confirm con la pregunta correcta.
+# 2. funcional: vista_imprimir_nota responde 200 para una nota valida
+#    de la empresa activa y devuelve HTML imprimible.
+
+class TestVentasOfferPrintURL(TestCase):
+    """
+    Garantiza que el flujo de ventas ofrece imprimir la Nota de Entrega
+    tras confirmar una venta (window.open con nota_id del response).
+    """
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa
+        from django.contrib.auth.models import User
+
+        self.empresa = crear_empresa(nombre='VentaT', rif='J-VT-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen VentaT')
+        self.articulo = crear_articulo_fisico(
+            self.empresa, sku='VENDIBLE-001', nombre='Articulo Vendible'
+        )
+
+        # Cliente generico (signal de Empresa al crear la empresa)
+        from inventory.models import Contacto
+        seed_inventario(self.articulo, self.almacen, cantidad=50)
+        self.user_logged = User.objects.create_user('ventat', password='pw1234')
+
+    def test_ventas_html_ofrece_imprimir_nota_con_window_open(self):
+        """
+        Criterio estructural: ventas.html debe hacer:
+        1. window.open() hacia /ventas/<id>/imprimir/
+        2. confirm() con la pregunta 'Desea imprimir'
+        """
+        from pathlib import Path
+        ventas_path = Path('inventory/templates/inventory/ventas.html')
+        with open(ventas_path, encoding='utf-8') as f:
+            html = f.read()
+
+        codigo = '\n'.join(
+            l for l in html.split('\n') if not l.strip().startswith('//')
+        )
+
+        self.assertIn(
+            'window.open(printUrl',
+            codigo,
+            msg=(
+                "ventas.html debe llamar window.open(printUrl, '_blank') "
+                "tras registrar una venta para abrir el modal de impresion."
+            )
+        )
+        self.assertIn(
+            "/imprimir/",
+            codigo,
+            msg=(
+                "ventas.html debe construir la URL /ventas/<notaId>/imprimir/ "
+                "como destino de window.open()."
+            )
+        )
+        self.assertIn(
+            "Desea imprimir la Nota de Entrega",
+            codigo,
+            msg=(
+                "ventas.html debe ofrecer al usuario la opcion explicita de "
+                "imprimir la Nota de Entrega (pregunta en confirm)."
+            )
+        )
+
+    def test_vista_imprimir_nota_responde_200(self):
+        """
+        Criterio funcional: existe el endpoint /ventas/<nota_id>/imprimir/
+        y devuelve 200 para una nota valida. Esta vista se invoca desde
+        el window.open de processSale, asi que debe estar disponible.
+        """
+        from inventory.services import procesar_venta
+        from django.test import Client
+
+        # Crear una venta real
+        nota = procesar_venta(
+            empresa_id=self.empresa.id,
+            cliente_id=None,
+            lista_items=[{
+                'articulo_sku': 'VENDIBLE-001', 'cantidad': 1,
+                'precio_unitario_usd': '10.00', 'seriales': []
+            }],
+            almacen_id=self.almacen.id,
+            usuario='Test'
+        )
+
+        # Cliente HTTP autenticado
+        client = Client()
+        client.login(username='ventat', password='pw1234')
+        session = client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+        response = client.get(f'/ventas/{nota.pk}/imprimir/')
+        self.assertEqual(
+            response.status_code, 200,
+            msg=(
+                f"/ventas/{nota.pk}/imprimir/ debe devolver 200 con HTML "
+                f"imprimible. Got {response.status_code}"
+            )
+        )
+        # Sanity: la respuesta contiene datos de la nota
+        self.assertIn(
+            b'A2LT Stock', response.content,
+            msg="La respuesta debe ser HTML renderizado (con header A2LT Stock)."
+        )

@@ -617,7 +617,12 @@
         .then(r => r.json())
         .then(data => {
             if(data.ok) {
-                alert(`Venta registrada con éxito. Nota Interna: ${data.correlativo}`);
+                const notaId = data.nota_id;
+                const correlativo = data.correlativo;
+                const printUrl = `/ventas/${notaId}/imprimir/`;
+                if (confirm(`Venta registrada con éxito. Nota Interna: ${correlativo}\n\n¿Desea imprimir la Nota de Entrega ahora?`)) {
+                    window.open(printUrl, '_blank');
+                }
                 window.location.reload();
             } else {
                 alert(`Error: ${data.error}`);
