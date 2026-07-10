@@ -9,7 +9,7 @@
                     <span
                         class="text-xs bg-white dark:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 shadow-sm">
                         Última sincronización: <strong class="text-slate-850 dark:text-slate-200 font-mono"
-                            id="sync-time-lbl">Hoy</strong>
+                            id="sync-time-lbl">{{ ultima_sync|default:"Sin sync" }}</strong>
                     </span>
                 </div>
 
@@ -40,8 +40,8 @@
                                 class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Valor
                                 Inventario VES</span>
                             <h3 class="text-lg font-extrabold text-indigo-600 dark:text-indigo-400 font-mono"
-                                id="dash-val-ves">{{ volumen_bs|default:"0.00" }} Bs</h3>
-                            <span class="text-[9px] text-slate-500 dark:text-slate-400">Tasa BCV del día</span>
+                                id="dash-val-ves">{{ valoracion_ves|default:"0.00" }} Bs</h3>
+                            <span class="text-[9px] text-slate-500 dark:text-slate-400">Tasa BCV del día (inventario × tasa)</span>
                         </div>
                     </div>
                     <!-- Naranja para Advertir niveles de Reposición Críticos -->
@@ -53,7 +53,7 @@
                             <span
                                 class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Stock
                                 Crítico (Bajo Mínimo)</span>
-                            <h3 class="text-lg font-extrabold text-orange-500 font-mono" id="dash-critical-count">{{ alertas.count }}</h3>
+                            <h3 class="text-lg font-extrabold text-orange-500 font-mono" id="dash-critical-count">{{ alertas_count|default:"0" }}</h3>
                             <span class="text-[9px] text-orange-600 dark:text-orange-400">Artículos requieren
                                 reposición</span>
                         </div>
@@ -66,11 +66,10 @@
                         <div>
                             <span
                                 class="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Notas
-                                de Entrega Emitidas</span>
+                                de Entrega del Mes</span>
                             <h3 class="text-lg font-extrabold text-purple-600 dark:text-purple-400 font-mono"
-                                id="dash-sales-count">{{ volumen_usd|default:"0.00" }}</h3>
-                            <span class="text-[9px] text-purple-600 dark:text-purple-400">Operaciones en la
-                                sesión</span>
+                                id="dash-sales-count">{{ notas_mes|default:"0" }}</h3>
+                            <span class="text-[9px] text-purple-600 dark:text-purple-400">Operaciones activas · {{ volumen_usd|default:"0.00" }} USD</span>
                         </div>
                     </div>
                 </div>
@@ -122,8 +121,20 @@
                         </h3>
                         <p class="text-[10px] text-slate-500 dark:text-slate-400 leading-normal">Calculado en tiempo
                             real según la disponibilidad dinámica de componentes físicos individuales.</p>
-                        <div id="dashboard-combos-container" class="space-y-3">
-                            <!-- Dynamic content of virtual combos -->
+                        <div id="dashboard-combos-container" class="space-y-2">
+                            {% for combo in combos %}
+                            <div class="flex justify-between items-center px-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800">
+                                <div>
+                                    <span class="text-[11px] font-bold text-slate-700 dark:text-slate-200">{{ combo.nombre }}</span>
+                                    <span class="text-[9px] text-slate-400 ml-2 font-mono">{{ combo.sku }}</span>
+                                </div>
+                                <span class="text-xs font-mono font-bold {% if combo.stock > 0 %}text-emerald-600{% else %}text-rose-500{% endif %}">
+                                    {{ combo.stock }} u.
+                                </span>
+                            </div>
+                            {% empty %}
+                            <p class="text-[11px] text-slate-500 dark:text-slate-400 text-center py-4">No hay combos virtuales definidos.</p>
+                            {% endfor %}
                         </div>
                     </div>
                 </div>

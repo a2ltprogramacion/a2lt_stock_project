@@ -114,43 +114,97 @@ def dashboard(request):
     from django.db.models import Sum, F
     from django.utils import timezone
     from decimal import Decimal
-    from .models import InventarioAlmacen, DetalleNotaEntrega
+    from .models import (
+        InventarioAlmacen, DetalleNotaEntrega, NotaEntrega,
+        ConfiguracionEmpresa, Articulo, RecetaCombo,
+    )
     from .managers import get_current_empresa
 
     empresa_id = get_current_empresa()
+    now = timezone.now()
 
-    # METRICA 1 (Valoración del Inventario)
-    # Sum(InventarioAlmacen.cantidad_disponible * Articulo.costo)
+    # METRICA 1 (Valoración del Inventario en USD)
     valoracion = InventarioAlmacen.objects.aggregate(
         valor_total=Sum(F('cantidad_disponible') * F('articulo__costo'))
     )['valor_total'] or Decimal('0.00')
 
-    # METRICA 2 (Volumen de Ventas)
-    now = timezone.now()
+    # METRICA 2 (Valoración del Inventario en VES — Tasa BCV actual)
+    config = ConfiguracionEmpresa.objects.filter(empresa_id=empresa_id).first()
+    tasa_bcv = config.tasa_bcv if config else Decimal('0.00')
+    valoracion_ves = (valoracion * tasa_bcv).quantize(Decimal('0.01'))
+
+    # METRICA 3 (Volumen de Ventas del mes en curso, USD y Bs)
     ventas_mes = DetalleNotaEntrega.objects.filter(
         nota_entrega__fecha__year=now.year,
         nota_entrega__fecha__month=now.month,
-        nota_entrega__empresa_id=empresa_id
+        nota_entrega__empresa_id=empresa_id,
+        nota_entrega__estado='PROCESADO',
     ).aggregate(
         volumen_usd=Sum(F('precio_unitario_usd') * F('cantidad')),
         volumen_bs=Sum(F('precio_unitario_bs') * F('cantidad'))
     )
-    
     volumen_usd = ventas_mes['volumen_usd'] or Decimal('0.00')
     volumen_bs = ventas_mes['volumen_bs'] or Decimal('0.00')
 
-    # Motor de Alertas Preventivas de Punto de Reorden
-    # Incluye artículos con stock_minimo > 0 que cayeron en o por debajo del mínimo
-    alertas = InventarioAlmacen.objects.select_related('articulo', 'almacen').filter(
+    # METRICA 4 (Cantidad de Notas de Entrega PROCESADO del mes)
+    notas_mes = NotaEntrega.objects.filter(
+        fecha__year=now.year,
+        fecha__month=now.month,
+        estado='PROCESADO',
+    ).count()
+
+    # METRICA 5 (Cantidad de alertas críticas de stock)
+    # Artículos con stock_minimo > 0 y cantidad_disponible <= stock_minimo
+    alertas_qs = InventarioAlmacen.objects.select_related(
+        'articulo', 'almacen'
+    ).filter(
         cantidad_disponible__lte=F('stock_minimo'),
         stock_minimo__gt=0
     ).order_by('cantidad_disponible')
+    alertas_count = alertas_qs.count()
+
+    # METRICA 6 (Disponibilidad de Combos Virtuales — cálculo en tiempo real)
+    # Para cada combo, calcular Stock_Combo en su primer almacén activo.
+    from .models import Almacen
+    from . import services as _svc
+    combos_data = []
+    combos_qs = Articulo.objects.filter(tipo='COMBO', activo=True)
+    almacenes_qs = Almacen.objects.filter(activo=True)
+    for combo in combos_qs[:10]:  # limitar a 10 mas visibles
+        # Tomar el primer almacen activo (si hay varios, el combo por simplicidad)
+        stock_max = 0
+        for alm in almacenes_qs:
+            try:
+                s = _svc.calcular_stock_combo(combo, alm)
+            except Exception:
+                s = 0
+            if s and s > stock_max:
+                stock_max = s
+        combos_data.append({
+            'sku': combo.sku,
+            'nombre': combo.nombre,
+            'stock': stock_max,
+        })
+
+    # Última sincronización real (timestamp de la última AuditoriaTasa)
+    from .models import AuditoriaTasa
+    ultima_sync = AuditoriaTasa.objects.order_by('-fecha_hora').first()
+    ultima_sync_str = (
+        ultima_sync.fecha_hora.strftime('%Y-%m-%d %H:%M')
+        if ultima_sync else 'Sin sync'
+    )
 
     context = {
         'valoracion_total': valoracion,
+        'valoracion_ves': valoracion_ves,
         'volumen_usd': volumen_usd,
         'volumen_bs': volumen_bs,
-        'alertas': alertas,
+        'alertas': alertas_qs,
+        'alertas_count': alertas_count,
+        'notas_mes': notas_mes,
+        'combos': combos_data,
+        'ultima_sync': ultima_sync_str,
+        'now': now,
     }
     return render(request, 'inventory/dashboard.html', context)
 

@@ -5069,3 +5069,116 @@ class TestVistasReportes(TestCase):
         # 403 del TenantMiddleware (sin sesion valida) o 302 de @login_required
         self.assertIn(r.status_code, (302, 403))
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 4 — TESTS DASHBOARD KPIs LIVE DATA (C17)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDashboardLiveData(TestCase):
+    """
+    Tests C17: dashboard_view entrega KPIs reales (no hardcodeados).
+      1. Valoracion VES usa tasa BCV * costo de inventario.
+      2. Notas del Mes = conteo (no volumen_usd).
+      3. Combos virtuales poblados server-side (no vacios).
+      4. ultima_sync toma de AuditoriaTasa (no 'Hoy' hardcodeado).
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from .managers import set_current_empresa
+
+        self.empresa = crear_empresa(nombre='Dash Corp', rif='J-DASH-001')
+        set_current_empresa(self.empresa.pk)
+
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.00')
+        self.config.factor_cobertura = Decimal('1.05')
+        self.config.tasa_mercado = Decimal('42.00')
+        self.config.save()
+
+        # Registrar una AuditoriaTasa (ultima sincronizacion)
+        from .models import AuditoriaTasa
+        self.aud = AuditoriaTasa.objects.create(
+            empresa=self.empresa,
+            tasa_bcv=Decimal('40.00'),
+            tasa_mercado=Decimal('42.00'),
+            factor_cobertura=Decimal('1.05'),
+            fuente='MANUAL',
+        )
+
+        self.almacen = crear_almacen(self.empresa, 'Dash Almacén')
+        # Artículo físico con stock
+        self.art = Articulo.objects.create(
+            empresa=self.empresa, sku='DASH-1', nombre='Art Dash',
+            tipo='FISICO', categoria='OTROS',
+            costo=Decimal('10.00'), precio_divisa=Decimal('20.00')
+        )
+        svc.registrar_movimiento(self.art, self.almacen, 'ENTRADA', Decimal('5'), 'Inicial')
+        # Costo total: 5 * 10 = 50 USD
+
+        # Un combo
+        self.combo = Articulo.objects.create(
+            empresa=self.empresa, sku='COMBO-D', nombre='Combo Dash',
+            tipo='COMBO', categoria='OTROS',
+            costo=Decimal('0.00'), precio_divisa=Decimal('30.00')
+        )
+        RecetaCombo.objects.create(
+            combo=self.combo, componente=self.art, cantidad_requerida=Decimal('1')
+        )
+
+        # Venta (crea nota PROCESADO)
+        items = [{'articulo_sku': 'DASH-1', 'cantidad': '1', 'precio_unitario_usd': '20.00'}]
+        self.cliente = Contacto.objects.create(
+            empresa=self.empresa, nombre='Cliente Dash', tipo='CLIENTE',
+            identificacion='V-DASH-1'
+        )
+        self.nota = svc.procesar_venta(self.cliente.pk, items, self.almacen.pk, usuario='dash')
+
+        # Usuario
+        self.user = User.objects.create_user('dashuser', password='pw12345')
+        self.user.perfil.empresas_permitidas.add(self.empresa)
+        self.user.perfil.empresa_activa = self.empresa
+        self.user.perfil.save()
+        self.client.login(username='dashuser', password='pw12345')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.pk
+        session.save()
+
+    def test_dashboard_valoracion_ves_es_valor_inventario_x_tasa(self):
+        """valoracion_ves debe ser valoracion_total (40) * tasa_bcv (40) = 1600.
+        Tras la venta de 1u queda 4 stock * 10 costo = 40 USD,
+        40 * 40 (tasa_bcv) = 1600 Bs."""
+        r = self.client.get('/dashboard/')
+        self.assertEqual(r.status_code, 200)
+        # El valor 1600 debe aparecer (con o sin separador de miles)
+        self.assertContains(r, '1600')
+
+    def test_dashboard_notas_mes_es_conteo_no_usd(self):
+        """notas_mes debe ser 1 (conteo), no el monto en USD."""
+        r = self.client.get('/dashboard/')
+        # La etiqueta ahora dice 'de Entrega del Mes' (no 'Emitidas')
+        self.assertContains(r, 'de Entrega del Mes')
+        # El numero 1 debe aparecer como conteo (no 20 que seria el monto USD)
+        # Buscamos el span con id=dash-sales-count tenga contenido '1'
+        self.assertContains(r, 'id="dash-sales-count">1<')
+
+    def test_dashboard_combos_poblados(self):
+        """El panel de combos debe contener el combo COMBO-D con su stock."""
+        r = self.client.get('/dashboard/')
+        self.assertContains(r, 'Combo Dash')
+        # Stock combo = floor(4 / 1) = 4 (queda 4 tras la venta de 1 unidad de DASH-1)
+        self.assertContains(r, '4 u.')
+
+    def test_dashboard_ultima_sync_real(self):
+        """ultima_sync debe mostrar la fecha de la AuditoriaTasa, no 'Hoy'."""
+        r = self.client.get('/dashboard/')
+        # La tarjeta debe contener un aaaa-mm-dd HH:MM
+        self.assertContains(r, str(self.aud.fecha_hora.year))
+        # Y NO debe contener 'Hoy' como texto de sync
+        # (la frase 'Hoy' aparece solo si ultima_sync es None)
+        # Verificamos que la cadena de sync contenga la fecha de la auditoria
+        from datetime import datetime
+        fecha_str = self.aud.fecha_hora.strftime('%Y-%m-%d')
+        self.assertContains(r, fecha_str)
+
+
