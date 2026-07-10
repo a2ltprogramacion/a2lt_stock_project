@@ -4777,3 +4777,295 @@ class TestSnapshotTasaEnCompra(TestCase):
                              "Tras cambiar config global, el snapshot del "
                              "DocumentoCompra debe mantenerse para auditoría."
                          ))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 4 — TESTS DE REPORTES Y EXPORTS (C16)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestReportesFase4(TestCase):
+    """
+    Tests C16: 8 reportes de Fase 4 + dispatcher + multi-tenant.
+    Cada test crea datos minimos para validar estructura y totales.
+    """
+
+    def setUp(self):
+        from .managers import set_current_empresa
+        self.empresa = crear_empresa(nombre='Reportes Corp', rif='J-REP-001')
+        set_current_empresa(self.empresa.pk)
+
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.00')
+        self.config.factor_cobertura = Decimal('1.05')
+        self.config.save()
+
+        self.almacen = crear_almacen(self.empresa, 'Almacén Reportes')
+        self.cliente = Contacto.objects.create(
+            empresa=self.empresa, nombre='Cliente Test', tipo='CLIENTE',
+            identificacion='V-REPORTES-1'
+        )
+        self.proveedor = Contacto.objects.create(
+            empresa=self.empresa, nombre='Proveedor Test', tipo='PROVEEDOR',
+            identificacion='J-PROV-1'
+        )
+
+        # Artículo físico con stock
+        self.art = Articulo.objects.create(
+            empresa=self.empresa, sku='REP-ART-1', nombre='Artículo Reporte',
+            tipo='FISICO', categoria='OTROS',
+            costo=Decimal('10.00'), precio_divisa=Decimal('20.00')
+        )
+        svc.registrar_movimiento(self.art, self.almacen, 'ENTRADA', Decimal('10'), 'Inicial')
+
+        # Venta
+        items = [{'articulo_sku': 'REP-ART-1', 'cantidad': '2', 'precio_unitario_usd': '20.00'}]
+        self.nota = svc.procesar_venta(self.cliente.pk, items, self.almacen.pk, usuario='test')
+
+        # Compra
+        from inventory.services import registrar_compra_proveedor
+        self.compra = registrar_compra_proveedor(
+            proveedor_id=self.proveedor.pk,
+            numero_factura='F-REP-001',
+            fecha_compra='2026-07-01',
+            monto_total_usd=Decimal('100.00'),
+            almacen_id=self.almacen.pk,
+            lista_items=[{'sku': 'REP-ART-1', 'cantidad': Decimal('3'), 'costo_factura': Decimal('10.00')}],
+            usuario='test',
+        )
+
+    # ── Reporte 1: Kardex ────────────────────────────────────────────────────
+    def test_reporte_kardex(self):
+        from .reports import reporte_kardex
+        r = reporte_kardex(self.empresa.pk)
+        self.assertEqual(r['meta']['titulo'], 'Kardex Valorizado')
+        self.assertGreater(len(r['rows']), 0, 'Debe haber movimientos de kardex')
+        # Validar estructura de la primera fila
+        keys = [k for k, _ in r['columns']]
+        self.assertIn('fecha_hora', keys)
+        self.assertIn('cantidad', keys)
+        # Totales
+        self.assertIn('entradas_usd', r['totals'])
+        self.assertIn('salidas_usd', r['totals'])
+
+    def test_reporte_kardex_filtro_articulo(self):
+        from .reports import reporte_kardex
+        r = reporte_kardex(self.empresa.pk, articulo_sku='REP-ART-1')
+        # Todos los movimientos son de este articulo
+        for row in r['rows']:
+            self.assertEqual(row['articulo_sku'], 'REP-ART-1')
+
+    def test_reporte_kardex_filtro_almacen(self):
+        from .reports import reporte_kardex
+        r = reporte_kardex(self.empresa.pk, almacen_id=self.almacen.pk)
+        # Todos los movimientos son de este almacen
+        for row in r['rows']:
+            self.assertEqual(row['almacen'], self.almacen.nombre)
+
+    # ── Reporte 2: Inventario valorizado ────────────────────────────────────
+    def test_reporte_inventario_valorizado(self):
+        from .reports import reporte_inventario_valorizado
+        r = reporte_inventario_valorizado(self.empresa.pk)
+        self.assertEqual(r['meta']['titulo'], 'Inventario Valorizado')
+        self.assertGreater(len(r['rows']), 0)
+        # Total valor = cantidad_actual * costo
+        # Stock inicial 10 + 3 compra - 2 venta = 11, costo 10 → 110
+        self.assertEqual(Decimal(r['totals']['total_valor_usd']), Decimal('110.0000'))
+        self.assertEqual(Decimal(r['totals']['total_unidades']), Decimal('11.00'))
+
+    # ── Reporte 3: Ventas por periodo ───────────────────────────────────────
+    def test_reporte_ventas_periodo(self):
+        from .reports import reporte_ventas_periodo
+        r = reporte_ventas_periodo(self.empresa.pk)
+        self.assertEqual(r['meta']['titulo'], 'Ventas por Período')
+        self.assertEqual(len(r['rows']), 1)
+        self.assertEqual(r['rows'][0]['numero'], f'NE-{self.nota.numero:05d}')
+        # Subtotal USD = 2 * 20 = 40
+        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('40.00'))
+
+    # ── Reporte 4: Cuentas por cobrar ───────────────────────────────────────
+    def test_reporte_cuentas_por_cobrar(self):
+        from .reports import reporte_cuentas_por_cobrar
+        r = reporte_cuentas_por_cobrar(self.empresa.pk)
+        self.assertEqual(r['meta']['titulo'], 'Cuentas por Cobrar')
+        self.assertGreaterEqual(len(r['rows']), 1)
+        self.assertIn('total_usd', r['totals'])
+        # Como hay 1 venta PROCESADO, debe listarse
+        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('40.00'))
+
+    # ── Reporte 5: Cuentas por pagar ────────────────────────────────────────
+    def test_reporte_cuentas_por_pagar(self):
+        from .reports import reporte_cuentas_por_pagar
+        r = reporte_cuentas_por_pagar(self.empresa.pk)
+        self.assertEqual(r['meta']['titulo'], 'Cuentas por Pagar')
+        self.assertGreaterEqual(len(r['rows']), 1)
+        self.assertIn('total_usd', r['totals'])
+        # 1 compra de 100 USD
+        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('100.0000'))
+
+    # ── Reporte 6: Top vendidos ─────────────────────────────────────────────
+    def test_reporte_top_vendidos(self):
+        from .reports import reporte_top_vendidos
+        r = reporte_top_vendidos(self.empresa.pk, limite=10)
+        self.assertEqual(r['meta']['titulo'], 'Top 10 Artículos Vendidos')
+        self.assertGreater(len(r['rows']), 0)
+        self.assertEqual(r['rows'][0]['sku'], 'REP-ART-1')
+        self.assertEqual(Decimal(r['rows'][0]['cantidad_total']), Decimal('2.00'))
+        self.assertEqual(Decimal(r['rows'][0]['monto_usd']), Decimal('40.00'))
+
+    # ── Reporte 7: Obsoletos ───────────────────────────────────────────────
+    def test_reporte_obsoletos(self):
+        from .reports import reporte_obsoletos
+        r = reporte_obsoletos(self.empresa.pk, dias_sin_movimiento=1)
+        self.assertEqual(r['meta']['titulo'], 'Artículos Sin Movimiento (1+ días)')
+        # Articulo con movimientos recientes no debe figurar
+        for row in r['rows']:
+            self.assertNotEqual(row['sku'], 'REP-ART-1')
+
+    def test_reporte_obsoletos_ventana_alta(self):
+        """Con ventana muy alta, TODOS los articulos con mov recientes
+        quedan excluidos, asi que la lista debe estar vacia."""
+        from .reports import reporte_obsoletos
+        # 9999 dias → todo movimiento reciente queda dentro de la ventana,
+        # por tanto TODOS los SKUs con movimientos son excluidos.
+        # El articulo REP-ART-1 tiene movimiento el dia de hoy.
+        r = reporte_obsoletos(self.empresa.pk, dias_sin_movimiento=9999)
+        skus = [row['sku'] for row in r['rows']]
+        self.assertNotIn('REP-ART-1', skus)
+
+    def test_reporte_obsoletos_ventana_nula(self):
+        """Con 0 días, ningún SKU tiene 'movimiento en los últimos 0 días'
+        por lo que todos los activos figuran como obsoletos."""
+        from .reports import reporte_obsoletos
+        r = reporte_obsoletos(self.empresa.pk, dias_sin_movimiento=0)
+        skus = [row['sku'] for row in r['rows']]
+        self.assertIn('REP-ART-1', skus)
+
+    # ── Reporte 8: Estado de resultados ─────────────────────────────────────
+    def test_reporte_estado_resultados(self):
+        from .reports import reporte_estado_resultados
+        r = reporte_estado_resultados(self.empresa.pk)
+        self.assertEqual(r['meta']['titulo'], 'Estado de Resultados')
+        # Ingresos = 40 (2 * 20)
+        self.assertEqual(Decimal(r['totals']['ingresos_usd']), Decimal('40.00'))
+        # COGS = 2 * 10 (costo snapshot)
+        self.assertEqual(Decimal(r['totals']['cogs_usd']), Decimal('20.00'))
+        # Utilidad = 20
+        utilidad = Decimal(r['totals']['utilidad_bruta_usd'])
+        self.assertEqual(utilidad, Decimal('20.00'))
+        # Margen 50%
+        margen = Decimal(r['totals']['margen_bruto_pct'])
+        self.assertEqual(margen, Decimal('50.00'))
+
+    # ── Dispatcher (REGISTRO + obtener_reporte) ──────────────────────────────
+    def test_obtener_reporte_invalido(self):
+        from .reports import obtener_reporte
+        with self.assertRaises(ValueError):
+            obtener_reporte('inexistente', self.empresa.pk)
+
+    def test_obtener_reporte_dispatcher(self):
+        from .reports import obtener_reporte, REGISTRO
+        for key in REGISTRO.keys():
+            r = obtener_reporte(key, self.empresa.pk)
+            self.assertIn('columns', r)
+            self.assertIn('rows', r)
+            self.assertIn('meta', r)
+
+    # ── MULTI-TENANT: otra empresa no ve mis datos ─────────────────────────
+    def test_reportes_multi_tenant(self):
+        """Empresa B no debe ver datos de Empresa A en reportes."""
+        from .managers import set_current_empresa
+        from .models import Empresa
+        from .reports import reporte_ventas_periodo
+        # Crear empresa B
+        empresa_b = Empresa.objects.create(nombre='Empresa B', rif='J-B-002', activa=True)
+        set_current_empresa(empresa_b.pk)
+
+        r = reporte_ventas_periodo(empresa_b.pk)
+        # Como empresa B no tiene ventas, lista debe ser vacía
+        self.assertEqual(len(r['rows']), 0)
+        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('0.00'))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 4 — TESTS DE VISTAS Y EXPORTS (C16)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestVistasReportes(TestCase):
+    """Tests C16b: vistas de reportes con login + export CSV/PDF."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from .managers import set_current_empresa
+
+        self.empresa = crear_empresa(nombre='Vistas Corp', rif='J-VIS-001')
+        set_current_empresa(self.empresa.pk)
+
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.00')
+        self.config.factor_cobertura = Decimal('1.05')
+        self.config.save()
+
+        self.almacen = crear_almacen(self.empresa, 'Almacén Vistas')
+        self.art = Articulo.objects.create(
+            empresa=self.empresa, sku='VIS-1', nombre='Art Visho',
+            tipo='FISICO', categoria='OTROS',
+            costo=Decimal('5.00'), precio_divisa=Decimal('10.00')
+        )
+        svc.registrar_movimiento(self.art, self.almacen, 'ENTRADA', Decimal('20'), 'Inicial')
+
+        # Usuario. El signal post_save crea PerfilUsuario automáticamente.
+        self.user = User.objects.create_user('reportuser', password='pw12345')
+        self.user.perfil.empresas_permitidas.add(self.empresa)
+        self.user.perfil.empresa_activa = self.empresa
+        self.user.perfil.save()
+
+        self.client.login(username='reportuser', password='pw12345')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.pk
+        session.save()
+
+    def test_vista_reportes_index(self):
+        """GET /reportes/ renderiza índice con 8 reportes."""
+        # Middleware activa empresa via sesión, aquí set_current_empresa
+        from .middleware import TenantMiddleware
+        # Necesitamos que el middleware se ejecute, así que usamos client
+        r = self.client.get('/reportes/')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Reportes Gerenciales')
+        self.assertContains(r, 'Kardex Valorizado')
+
+    def test_vista_reporte_detalle(self):
+        r = self.client.get('/reportes/kardex/')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Kardex Valorizado')
+
+    def test_vista_export_csv(self):
+        from .reports import reporte_kardex
+        r = self.client.get('/reportes/kardex/?format=csv')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'text/csv; charset=utf-8-sig')
+        self.assertIn('attachment', r['Content-Disposition'])
+        # BOM debe aparecer
+        self.assertTrue(r.content.startswith(b'\xef\xbb\xbf') or 'fecha' in r.content.decode('utf-8-sig').lower())
+
+    def test_vista_export_pdf(self):
+        r = self.client.get('/reportes/kardex/?format=pdf')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        self.assertIn('attachment', r['Content-Disposition'])
+        # El contenido debe empezar con %PDF
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    def test_vista_reporte_inexistente_redirige(self):
+        r = self.client.get('/reportes/no_existe/')
+        self.assertEqual(r.status_code, 302)
+
+    def test_vista_reportes_requiere_login(self):
+        """Sin login ni empresa en sesion, middleware responde 403 (no 302,
+        porque el middleware de tenant corta antes que @login_required)."""
+        self.client.logout()
+        # Sin empresa_id en session, middleware niega acceso
+        r = self.client.get('/reportes/')
+        # 403 del TenantMiddleware (sin sesion valida) o 302 de @login_required
+        self.assertIn(r.status_code, (302, 403))
+

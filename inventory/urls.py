@@ -46,4 +46,8 @@ urlpatterns = [
 
     # ── Ticket #13: Exportación ───────────────────────────────────────────────
     path('respaldo/', views.vista_exportar_respaldo, name='exportar_respaldo'),
+
+    # ── Fase 4: Reportes ───────────────────────────────────────────────────────
+    path('reportes/', views.vista_reportes, name='reportes'),
+    path('reportes/<str:nombre>/', views.vista_reporte_detalle, name='reporte_detalle'),
 ]

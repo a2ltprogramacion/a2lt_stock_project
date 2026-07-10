@@ -1189,18 +1189,132 @@ def api_reversar_venta(request):
 def api_reversar_compra(request):
     import json
     from . import services as svc
-    
+
     try:
         data = json.loads(request.body)
         compra_id = data.get('id')
         motivo = data.get('motivo')
         empresa_id = request.session.get('empresa_id')
-        
+
         if not compra_id or not motivo:
             return JsonResponse({'ok': False, 'error': 'ID y motivo son obligatorios.'}, status=400)
-            
+
         resultado = svc.reversar_documento_compra(empresa_id, compra_id, motivo)
         return JsonResponse(resultado)
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 4 — REPORTES Y EXPORTS (Kardex, Inventario, Ventas, CxC, CxP, etc.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@login_required
+def vista_reportes(request):
+    """
+    Página índice de reportes: lista los 8 reportes disponibles con
+    enlaces a sus vistas detalle + export CSV/PDF.
+    """
+    from .reports import REGISTRO
+    reportes = [
+        {'key': k, 'label': v[0]} for k, v in REGISTRO.items()
+    ]
+    return render(request, 'inventory/reportes/index.html', {
+        'reportes': reportes
+    })
+
+
+@login_required
+def vista_reporte_detalle(request, nombre):
+    """
+    Vista unificada de cada reporte. Acepta query params:
+      - articulo_sku, almacen_id, desde, hasta, limite, dias_sin_movimiento
+    Y parámetro `?format=csv` o `?format=pdf` para exportar.
+    """
+    from .managers import get_current_empresa
+    from .reports import obtener_reporte, REGISTRO
+    from .exporters import export_csv, export_pdf
+    from .models import Articulo, Almacen
+
+    empresa_id = get_current_empresa()
+    if empresa_id is None:
+        empresa_id = request.session.get('empresa_id')
+    if empresa_id is None:
+        return redirect('inventory:dashboard')
+
+    if nombre not in REGISTRO:
+        messages.error(request, f'Reporte "{nombre}" no existe.')
+        return redirect('inventory:reportes')
+
+    # Parámetros por reporte
+    params = {}
+    articulo_sku = request.GET.get('articulo_sku')
+    almacen_id = request.GET.get('almacen_id')
+    desde = request.GET.get('desde')
+    hasta = request.GET.get('hasta')
+    limite = request.GET.get('limite')
+    dias_sin = request.GET.get('dias_sin_movimiento')
+
+    if articulo_sku:
+        params['articulo_sku'] = articulo_sku
+    if almacen_id:
+        params['almacen_id'] = almacen_id
+    if desde:
+        params['desde'] = desde
+    if hasta:
+        params['hasta'] = hasta
+    if limite:
+        try:
+            params['limite'] = int(limite)
+        except ValueError:
+            pass
+    if dias_sin:
+        try:
+            params['dias_sin_movimiento'] = int(dias_sin)
+        except ValueError:
+            pass
+
+    try:
+        resultado = obtener_reporte(nombre, empresa_id, **params)
+    except Exception as e:
+        messages.error(request, f'Error generando reporte: {e}')
+        return redirect('inventory:reportes')
+
+    fmt = request.GET.get('format', '').lower()
+    if fmt == 'csv':
+        return export_csv(resultado, filename=f'{nombre}.csv')
+    if fmt == 'pdf':
+        return export_pdf(resultado, filename=f'{nombre}.pdf')
+
+    # Helpers para el template (catalogos para los <select>)
+    articulos = Articulo.objects.filter(tipo='FISICO', activo=True).order_by('nombre')
+    almacenes = Almacen.objects.filter(activo=True).order_by('nombre')
+
+    # Filas aplanadas para facil iteracion en template: lista de listas
+    # (column_keys + valores en mismo orden que columns)
+    column_keys = [k for k, _ in resultado['columns']]
+    flat_rows = [[row.get(k, '') for k in column_keys] for row in resultado['rows']]
+
+    context = {
+        'resultado': resultado,
+        'nombre': nombre,
+        'label': REGISTRO[nombre][0],
+        'columns': resultado['columns'],
+        'rows': resultado['rows'],
+        'flat_rows': flat_rows,
+        'column_keys': column_keys,
+        'totals': resultado.get('totals', {}),
+        'meta': resultado.get('meta', {}),
+        'articulos': articulos,
+        'almacenes': almacenes,
+        'filtros': {
+            'articulo_sku': articulo_sku or '',
+            'almacen_id': almacen_id or '',
+            'desde': desde or '',
+            'hasta': hasta or '',
+            'limite': limite or '',
+            'dias_sin_movimiento': dias_sin or '',
+        },
+    }
+    return render(request, 'inventory/reportes/detalle.html', context)
 

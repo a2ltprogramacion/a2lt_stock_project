@@ -1,0 +1,117 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section class="tab-content space-y-5">
+    <div class="flex flex-wrap justify-between items-center gap-3">
+        <div>
+            <a href="{% url 'inventory:reportes' %}" class="text-[11px] text-slate-500 hover:text-indigo-600 flex items-center gap-1 mb-1">
+                <i class="fa-solid fa-arrow-left"></i> Volver a Reportes
+            </a>
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white">{{ label }}</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">{% for k, v in meta.items %}{% if k != 'titulo' %}<span class="mr-3">{{ k }}: <strong class="font-mono">{{ v }}</strong></span>{% endif %}{% endfor %}</p>
+        </div>
+        <div class="flex gap-2">
+            <a href="{% url 'inventory:reporte_detalle' nombre %}?{{ request.GET.urlencode }}&format=csv"
+               class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm">
+                <i class="fa-solid fa-file-csv"></i> CSV
+            </a>
+            <a href="{% url 'inventory:reporte_detalle' nombre %}?{{ request.GET.urlencode }}&format=pdf"
+               class="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm">
+                <i class="fa-solid fa-file-pdf"></i> PDF
+            </a>
+            <button onclick="window.print()" class="bg-slate-600 hover:bg-slate-500 text-white text-xs font-bold px-3 py-2 rounded-lg transition flex items-center gap-1.5 shadow-sm">
+                <i class="fa-solid fa-print"></i> Imprimir
+            </button>
+        </div>
+    </div>
+
+    <!-- FILTROS -->
+    <form method="get" class="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <h3 class="text-[11px] font-bold uppercase text-slate-500 mb-2">Filtros</h3>
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+            {% if nombre == 'kardex' or nombre == 'inventario' %}
+            <select name="almacen_id" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100">
+                <option value="">Todos los almacenes</option>
+                {% for a in almacenes %}
+                <option value="{{ a.id }}" {% if filtros.almacen_id == a.id|stringformat:"s" %}selected{% endif %}>{{ a.nombre }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+            {% if nombre == 'kardex' %}
+            <select name="articulo_sku" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100">
+                <option value="">Todos los artículos</option>
+                {% for a in articulos %}
+                <option value="{{ a.sku }}" {% if filtros.articulo_sku == a.sku %}selected{% endif %}>{{ a.sku }} — {{ a.nombre }}</option>
+                {% endfor %}
+            </select>
+            {% endif %}
+            {% if nombre == 'kardex' or nombre == 'ventas' or nombre == 'top_vendidos' or nombre == 'estado_resultados' %}
+            <input type="date" name="desde" value="{{ filtros.desde }}" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100" placeholder="Desde">
+            <input type="date" name="hasta" value="{{ filtros.hasta }}" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100" placeholder="Hasta">
+            {% endif %}
+            {% if nombre == 'top_vendidos' %}
+            <input type="number" name="limite" value="{{ filtros.limite }}" min="1" max="200" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100" placeholder="Top N">
+            {% endif %}
+            {% if nombre == 'obsoletos' %}
+            <input type="number" name="dias_sin_movimiento" value="{{ filtros.dias_sin_movimiento|default:'90' }}" min="1" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100" placeholder="Días sin mov.">
+            {% endif %}
+            <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 py-1.5 rounded transition">
+                <i class="fa-solid fa-filter"></i> Aplicar
+            </button>
+        </div>
+    </form>
+
+    <!-- TABLA -->
+    <div class="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-indigo-600 dark:bg-indigo-700 text-white">
+                    <tr>
+                        {% for key, label in columns %}
+                        <th class="px-3 py-3 font-bold uppercase tracking-wider text-[10px] whitespace-nowrap">{{ label }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-300">
+                    {% for row in flat_rows %}
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition">
+                        {% for cell in row %}
+                        <td class="px-3 py-2 whitespace-nowrap">{{ cell }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="{{ columns|length }}" class="py-8 text-center text-slate-500">No hay datos para los filtros aplicados.</td></tr>
+                    {% endfor %}
+                </tbody>
+                {% if totals %}
+                <tfoot class="bg-emerald-50 dark:bg-emerald-900/20 font-bold text-emerald-700 dark:text-emerald-400 border-t-2 border-emerald-500">
+                    <tr>
+                        <td colspan="{{ columns|length }}" class="px-3 py-3 text-right space-x-3">
+                            {% for k, v in totals.items %}
+                            <span class="text-[11px]">{{ k|title }}: <span class="font-mono">{{ v }}</span></span>
+                            {% endfor %}
+                        </td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+
+    <p class="text-[10px] text-slate-400 text-center">
+        Generado por A2LT Stock · {{ meta.generado_en }} · Empresa: {{ meta.empresa_nombre }}
+    </p>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Helper: filter template tag get_item
+document.addEventListener('DOMContentLoaded', () => {
+    // Soporte básico para print automático si ?print=1
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autoprint') === '1') {
+        window.print();
+    }
+});
+</script>
+{% endblock %}

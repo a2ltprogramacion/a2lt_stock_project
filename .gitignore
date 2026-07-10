@@ -37,3 +37,7 @@ htmlcov/
 # ─── Archivos de Carga Masiva (subidos por usuarios) ────────────────────────
 media/
 uploads/
+
+# ─── Logs del sistema ───────────────────────────────────────────────────────
+logs/
+*.log
