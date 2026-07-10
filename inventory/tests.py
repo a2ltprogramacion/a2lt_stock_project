@@ -3243,3 +3243,152 @@ class TestRegistrarCompraProveedorMultiTenant(TransactionTestCase):
                 "multi-tenant el bug original asignaba empresa=proveedor.empresa)."
             )
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C8: procesar_venta valida almacen por empresa
+# ─────────────────────────────────────────────────────────────────────────────
+# Bug original: services.py:1161 usaba
+#   config = ConfiguracionEmpresa.objects.get(
+#       empresa_id=Almacen.global_objects.get(pk=almacen_id).empresa_id
+#   )
+# Sin filtro por empresa activa en Almacen.global_objects . Si el
+# almacen era de OTRA empresa, la ConfiguracionEmpresa se buscaba para
+# esa OTRA empresa (tasa de cambio incorrecta), o si la OTRA empresa
+# no tenia config, lanzaba DoesNotExist.
+#
+# Tambien linea 1169: Almacen.objects.get(pk=almacen_id) sin filtro
+# por empresa (dependia del EmpresaManager para filtrar via ContextVar).
+#
+# Tests:
+#   1. test_rechaza_almacen_de_otra_empresa: pasar almacen_id de OTRA
+#      empresa debe lanzar ValueError mencionando 'almacen'.
+#   2. test_configuracion_empresa_es_del_contexto: el escenario valida
+#      que si dos empresas tienen tasas distintas, la venta usa la tasa
+#      de la empresa activa (no la del almacen ajeno).
+
+
+class TestProcesarVentaAlmacenMultiTenant(TransactionTestCase):
+    """
+    Garantiza que procesar_venta busca el almacen SOLO en la empresa del
+    contexto y aplica la ConfiguracionEmpresa de ESA empresa.
+    """
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa, Empresa
+        from .managers import set_current_empresa
+
+        # Empresa victima (donde opera el usuario)
+        self.empresa_victima = crear_empresa(nombre='Victima', rif='J-VC-001')
+        self.config_victima = ConfiguracionEmpresa.objects.get(empresa=self.empresa_victima)
+        self.config_victima.tasa_bcv = Decimal('40.0000')
+        self.config_victima.factor_cobertura = Decimal('1.20')
+        self.config_victima.save()
+        self.almacen_victima = crear_almacen(self.empresa_victima, nombre='Almacen Victima')
+
+        # Articulo de la victima
+        self.articulo_victima = crear_articulo_fisico(
+            self.empresa_victima, sku='VIC-001', nombre='Articulo Victima'
+        )
+        self.cliente_victima = Contacto.objects.create(
+            empresa=self.empresa_victima, identificacion='V-CLI-001',
+            tipo='CLIENTE', nombre='Cliente Victima'
+        )
+        # Seed inventario para que la venta tenga stock disponible
+        seed_inventario(self.articulo_victima, self.almacen_victima, cantidad=10)
+
+        # Empresa atacante con tasas muy distintas (sentinels)
+        self.empresa_atacante = Empresa.objects.create(nombre='Atacante', rif='J-AK-001', activa=True)
+        set_current_empresa(self.empresa_atacante.pk)  # reset para crear
+        self.config_atacante = ConfiguracionEmpresa.objects.get(empresa=self.empresa_atacante)
+        self.config_atacante.tasa_bcv = Decimal('99.0000')
+        self.config_atacante.factor_cobertura = Decimal('5.00')
+        self.config_atacante.save()
+        self.almacen_atacante = crear_almacen(self.empresa_atacante, nombre='Almacen Atacante')
+
+        # Setup contra Santander para todos
+        set_current_empresa(self.empresa_victima.pk)
+
+    def test_almacen_de_otra_empresa_es_rechazado(self):
+        """
+        Criterio: pasar almacen_id de OTRA empresa debe lanzar ValueError
+        mencionando 'almacen'. El bug original aceptaba el almacen ajeno
+        y buscaba la config para ESA empresa (tasa de cambio incorrecta).
+        """
+        from inventory.services import procesar_venta
+
+        with self.assertRaises(ValueError) as ctx:
+            procesar_venta(
+                empresa_id=self.empresa_victima.pk,
+                cliente_id=None,
+                lista_items=[{
+                    'articulo_sku': 'VIC-001', 'cantidad': 1,
+                    'precio_unitario_usd': '10.00',
+                    'seriales': []
+                }],
+                almacen_id=self.almacen_atacante.pk,  # ALMACEN DE OTRA EMPRESA
+                usuario='Test'
+            )
+        self.assertIn(
+            'almacen', str(ctx.exception).lower(),
+            msg="El error debe mencionar 'almacen' (no pertence a la empresa)."
+        )
+
+    def test_venta_usa_configuracion_de_la_empresa_activa(self):
+        """
+        Criterio funcional: si la venta se ejecuta con la empresa activa
+        victima (tasa 40, factor 1.20), las Notas/Documentos resultantes
+        deben reflejar ESA tasa, no la del atacante (99, factor 5).
+        """
+        from inventory.services import procesar_venta
+
+        # Asegurar ContextVar victima
+        from inventory.managers import set_current_empresa
+        set_current_empresa(self.empresa_victima.pk)
+
+        nota = procesar_venta(
+            empresa_id=self.empresa_victima.pk,
+            cliente_id=self.cliente_victima.pk,
+            lista_items=[{
+                'articulo_sku': 'VIC-001', 'cantidad': 1,
+                'precio_unitario_usd': '10.00',
+                'seriales': []
+            }],
+            almacen_id=self.almacen_victima.pk,
+            usuario='Test'
+        )
+
+        # La NotaEntrega debe tener tasa_bcv_aplicada = 40 (de la victima)
+        self.assertEqual(
+            nota.tasa_bcv_aplicada, Decimal('40.0000'),
+            msg=(
+                f"La venta debe usar la tasa de la empresa activa (40.0000), "
+                f"NO la tasa del almacen o ContextVar atacante. Got: "
+                f"{nota.tasa_bcv_aplicada}"
+            )
+        )
+        self.assertEqual(
+            nota.factor_cobertura_aplicado, Decimal('1.2000'),
+            msg=(
+                f"La venta debe usar el factor_cobertura de la victima (1.2000). "
+                f"Got: {nota.factor_cobertura_aplicado}"
+            )
+        )
+
+    def test_falla_si_almacen_no_existe(self):
+        """
+        Criterio: almacen_id que NO existe debe lanzar ValueError, no explotar.
+        """
+        from inventory.services import procesar_venta
+        with self.assertRaises(ValueError):
+            procesar_venta(
+                empresa_id=self.empresa_victima.pk,
+                cliente_id=None,
+                lista_items=[{
+                    'articulo_sku': 'VIC-001', 'cantidad': 1,
+                    'precio_unitario_usd': '10.00',
+                    'seriales': []
+                }],
+                almacen_id=999999,  # No existe
+                usuario='Test'
+            )

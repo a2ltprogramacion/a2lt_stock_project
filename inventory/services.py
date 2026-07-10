@@ -1157,16 +1157,27 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
     if empresa_id_int != ctx_int:
         raise ValueError("El contexto de la empresa ha cambiado en otra pestaña. Petición abortada por seguridad contable.")
 
+    # Validacion multi-tenant: el almacen debe pertenecer a la empresa activa.
+    # Ademas capturamos el almacen global para tener su empresa_id y asi
+    # resolver ConfiguracionEmpresa con el tenant correcto del contexto
+    # (que debe coincidir forzosamente con el almacen).
+    try:
+        almacen = Almacen.global_objects.get(pk=almacen_id, empresa_id=empresa_id_int)
+    except Almacen.DoesNotExist:
+        raise ValueError(
+            f"El almacen {almacen_id} no pertenece a la empresa activa "
+            f"o no existe."
+        )
+
     # 1. Configuración Cambiaria (Blindaje y prevención de ZeroDivisionError)
-    config = ConfiguracionEmpresa.objects.get(empresa_id=Almacen.global_objects.get(pk=almacen_id).empresa_id)
+    config = ConfiguracionEmpresa.objects.get(empresa_id=almacen.empresa_id)
     if config.tasa_bcv <= 0:
         raise ValueError("Error de Configuración: La Tasa BCV debe ser mayor a 0 para facturar.")
-    
+
     tasa_aplicada = config.tasa_bcv
     factor_aplicado = config.factor_cobertura
 
-    # 2. Resolución del Almacén y Cliente
-    almacen = Almacen.objects.get(pk=almacen_id)
+    # 2. Resolución del Cliente (el almacen ya esta validado arriba)
     
     if cliente_id:
         cliente = Contacto.objects.get(pk=cliente_id)
