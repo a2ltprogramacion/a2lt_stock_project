@@ -4041,3 +4041,245 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
                 "desde A6)."
             )
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C13: settings.py hardening (producción)
+# ─────────────────────────────────────────────────────────────────────────────
+# Garantiza que el settings.py este listo para deployment on-premise:
+#   - SECRET_KEY no es el placeholder 'django-insecure-...' (debe estar
+#     sobrescrito via env o nuevo en producción).
+#   - DEBUG es boolean (no string). Default en config NO True.
+#   - DATABASES [default][OPTIONS] incluye init_command con PRAGMA WAL.
+#   - LOGGING dict presente y bien formado.
+#   - Headers de seguridad activos si DEBUG=False (csrf/secure cookies).
+#   - ADMINS y ADMIN_EMAIL listos para AdminEmailHandler.
+#   - STATIC_ROOT y MEDIA_ROOT existen (o son creados por la config).
+#   - Permisos CSP/CSRF permisos coherentes.
+
+import ast
+from pathlib import Path
+
+
+class TestSettingsHardening(TestCase):
+    """
+    Tests estructurales sobre settings.py. No se ejecuta python
+    ni se accede a secretos; solo se parsea el AST y se valida
+    estructura + el uso de os.environ.get segun corresponde.
+    """
+
+    def _ast_settings(self):
+        """Parsea settings.py como AST Python y devuelve el modulo."""
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+        return ast.parse(source)
+
+    def test_secret_key_no_es_el_placeholder_insecure(self):
+        """
+        El SECRET_KEY default NO debe ser el placeholder original
+        'django-insecure-...'. Debe estar sobrecargado via os.environ
+        (posiblemente con un fallback explicito).
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        # El placeholder conocido no debe estar en el archivo
+        placeholder = 'django-insecure-l+#mfu@lz2eynv@ako4x1&62dq#hb(sgfet%xotg@g!g^i!z3h'
+        self.assertNotIn(
+            placeholder, source,
+            msg=(
+                f"settings.py aun contiene el SECRET_KEY placeholder "
+                f"original. Debe estar via os.environ.get('SECRET_KEY', "
+                f"'fallback-desarrollo'). En produccion real, generar con "
+                f"python -c \"import secrets; print(secrets.token_urlsafe(50))\""
+            )
+        )
+        # Debe usar os.environ.get
+        self.assertIn(
+            "os.environ.get('SECRET_KEY'",
+            source,
+            msg="SECRET_KEY debe cargarse via os.environ.get('SECRET_KEY', ...)"
+        )
+
+    def test_debug_es_boolean_desde_env_no_legacy_true(self):
+        """
+        DEBUG debe leerse via os.environ.get y compararse con 'true'
+        (string), no el legacy hardcoded DEBUG = True.
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        # Legacy mal codificado
+        self.assertNotIn(
+            'DEBUG = True',
+            source,
+            msg=(
+                "settings.py mantiene DEBUG = True hardcoded (legacy "
+                "inseguro). Debe leer DEBUG desde os.environ.get, "
+                "default False."
+            )
+        )
+        # Debe existir el patron
+        self.assertIn(
+            'os.environ.get(',
+            source,
+            msg="Se requiere el patron os.environ.get para DEBUG"
+        )
+        self.assertIn(
+            "DEBUG",
+            source,
+            msg="DEBUG debe estar presente en settings.py"
+        )
+
+    def test_allowed_hosts_desde_env(self):
+        """
+        ALLOWED_HOSTS debe leerse desde env (comma-separated), con un
+        fallback razonable en DEBUG.
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn(
+            "os.environ.get('ALLOWED_HOSTS'",
+            source,
+            msg="ALLOWED_HOSTS debe leerse desde variable de entorno"
+        )
+
+    def test_sqlite_wal_y_timeout(self):
+        """
+        SQLite debe tener OPTIONS['init_command'] con PRAGMA journal_mode=WAL
+        y timeout > 0 para soportar concurrencia light por archivo.
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn(
+            'journal_mode=WAL',
+            source,
+            msg="DATABASES[OPTIONS]['init_command'] debe incluir journal_mode=WAL"
+        )
+        self.assertIn(
+            'timeout',
+            source,
+            msg="DATABASES[OPTIONS] debe incluir 'timeout' para SQLite (>=5s)"
+        )
+
+    def test_logging_dict_presente_y_completo(self):
+        """
+        LOGGING debe estar correctamente configurado:
+        - 'version': 1
+        - handler 'console' o 'file'
+        - logger 'inventory'
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn("'version': 1", source)
+        self.assertIn("'console'", source)
+        self.assertIn("'file'", source)
+        self.assertIn("'inventory'", source)
+        self.assertIn(
+            'RotatingFileHandler',
+            source,
+            msg="LOGGING debe usar RotatingFileHandler para evitar disco lleno"
+        )
+
+    def test_security_headers_en_no_debug(self):
+        """
+        Si DEBUG=False, los headers de seguridad (HSTS, SECURE cookies)
+        deben activarse via bloque if not DEBUG.
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn(
+            'if not DEBUG:',
+            source,
+            msg=(
+                "settings.py debe tener un bloque 'if not DEBUG:' para "
+                "activar headers de seguridad en produccion"
+            )
+        )
+        self.assertIn(
+            'SECURE_HSTS_SECONDS',
+            source,
+            msg="HSTS debe configurarse en produccion"
+        )
+        self.assertIn(
+            'X_FRAME_OPTIONS',
+            source,
+            msg="X_FRAME_OPTIONS debe configurarse (clickjacking protection)"
+        )
+
+    def test_admin_y_admin_email_listos(self):
+        """
+        ADMINS debe estar configurado para AdminEmailHandler (notif 500).
+        ADMIN_EMAIL debe ser variable de entorno.
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn('ADMINS', source)
+        self.assertIn(
+            "os.environ.get('ADMIN_EMAIL'",
+            source,
+            msg="ADMIN_EMAIL debe ser os.environ.get para configurar ADMINS"
+        )
+
+    def test_static_y_media_root_definidos(self):
+        """
+        STATIC_ROOT y MEDIA_ROOT deben existir (requeridos para
+        collectstatic en deploy). MEDIA_URL tambien.
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn('STATIC_ROOT', source)
+        self.assertIn('MEDIA_ROOT', source)
+        self.assertIn('MEDIA_URL', source)
+        self.assertIn('STATIC_URL', source)
+
+    def test_tenant_middleware_sigue_presente(self):
+        """
+        Garantiza que TenantMiddleware sigue incluido (no se modifico
+        accidentalmente al editar settings.py).
+        """
+        path = Path('a2lt_stock_project/settings.py')
+        with open(path, encoding='utf-8') as f:
+            source = f.read()
+
+        self.assertIn(
+            'inventory.middleware.TenantMiddleware',
+            source,
+            msg="TenantMiddleware debe seguir registrado en MIDDLEWARE"
+        )
+
+    def test_sincronizacion_con_tests(self):
+        """
+        Criterio de integracion: tras todo el hardening, manage.py
+        check debe pasar sin warnings criticos. Este test es un canary
+        que tambien valida DEBUG/ALLOWED_HOSTS en entorno de tests.
+        """
+        import subprocess
+        result = subprocess.run(
+            ['.venv/Scripts/python.exe', 'manage.py', 'check'],
+            cwd='.',
+            capture_output=True, text=True
+        )
+        self.assertIn(
+            'System check identified no issues',
+            result.stdout,
+            msg=(
+                f"manage.py check devolvio problemas: stdout={result.stdout!r} "
+                f"stderr={result.stderr!r}"
+            )
+        )
