@@ -365,16 +365,26 @@
         
         if(!sku || qty <= 0) return;
 
-        // Validar contra backend
-        const response = await fetch(`/ventas/validar_stock/${sku}/${almacenId}/`);
-        if(!response.ok) {
-            alert('Error o stock insuficiente según base de datos.');
+        // Validar que el SKU existe en el catalogo (sin validar stock,
+        // porque esto es COMPRA: el objetivo ES ingresar stock).
+        // Antes llamaba a /ventas/validar_stock/ (endpoint de VENTAS),
+        // bloqueando cualquier compra de articulos sin stock existente.
+        try {
+            const response = await fetch(`/catalogo/buscar/?q=${encodeURIComponent(sku)}`);
+            if (!response.ok) {
+                throw new Error('No se pudo buscar el SKU.');
+            }
+            const data = await response.json();
+            const existe = (data.results || []).some(a => a.sku === sku);
+            if (!existe) {
+                if (confirm(`El SKU ${sku} no existe en el catalogo. Desea crearlo primero en el modulo Articulos?`)) {
+                    window.open('/articulos/', '_blank');
+                }
+                return;
+            }
+        } catch (err) {
+            alert('Error al buscar en el catalogo: ' + err.message);
             return;
-        }
-        const data = await response.json();
-        if(data.stock_disponible < qty) {
-             alert('Stock insuficiente. Disponible: ' + data.stock_disponible);
-             return;
         }
 
         const existingItem = draftNoteItems.find(item => item.sku === sku && item.almacen === almacenId);

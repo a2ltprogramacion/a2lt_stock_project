@@ -3493,3 +3493,135 @@ class TestCalcularStockComboDecimal(TestCase):
             calcular_stock_combo(combo, self.almacen), 2,
             msg="El cuello de botella es comp2 (9//4 = 2)."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C10: addItemToPurchase NO llama a /ventas/validar_stock/
+# ─────────────────────────────────────────────────────────────────────────────
+# Bug original: compras.html:369 llamaba a
+#   fetch(`/ventas/validar_stock/${sku}/${almacenId}/`)
+# en addItemToPurchase(). El endpoint validar_stock es de VENTAS:
+# rechaza cualquier SKU sin stock existente. Eso bloqueaba el flujo
+# PRINCIPAL de compras (donde el objetivo es INGRESAR stock — usualmente
+# para articulos nuevos que aun NO tienen stock).
+#
+# Fix: compras ahora valida via /catalogo/buscar/?q=SKU que solo confirma
+# que el SKU existe en el catalogo (no exige stock previo).
+#
+# Test: estructural via lectura del archivo compras.html (excluyendo
+# comentarios) + funcional via GET /catalogo/buscar/?q=EXISTENTE
+# validando la respuesta JSON.
+
+from pathlib import Path
+
+
+class TestComprasNoValidaStockDeVentas(TestCase):
+    """
+    Garantiza que el boton addItemToPurchase de compras usa el endpoint
+    /catalogo/buscar/ en lugar de /ventas/validar_stock/.
+    """
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa
+        from django.contrib.auth.models import User
+
+        # Empresa + usuario con sesion multi-tenant
+        self.empresa = crear_empresa(nombre='ComprasT', rif='J-CT-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.save()
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen CT')
+        self.articulo = crear_articulo_fisico(
+            self.empresa, sku='COMPRABLE-001', nombre='Articulo Comprable'
+        )
+
+    def test_compras_html_no_llama_validar_stock_en_instruccion(self):
+        """
+        Criterio estructural: el codigo JavaScript de compras.html
+        (excluyendo comentarios) NO debe hacer fetch a /ventas/validar_stock/.
+        Aislamos las lineas de comentario para que la docstring del fix
+        no genere falso positivo.
+        """
+        compras_path = Path('inventory/templates/inventory/compras.html')
+        with open(compras_path, encoding='utf-8') as f:
+            html = f.read()
+
+        # Quitar lineas de comentario del JS
+        codigo_sin_comentarios = []
+        for linea in html.split('\n'):
+            stripped = linea.strip()
+            # Comentario JS: // ...
+            if stripped.startswith('//'):
+                continue
+            codigo_sin_comentarios.append(linea)
+        codigo = '\n'.join(codigo_sin_comentarios)
+
+        self.assertNotIn(
+            'ventas/validar_stock',
+            codigo,
+            msg=(
+                "compras.html (lineas de codigo, ignorando comentarios) hace "
+                "fetch a /ventas/validar_stock/. Esto bloquea cualquier compra "
+                "de articulos sin stock existente (vacio el carrito de compra). "
+                "Debe usar /catalogo/buscar/ como hace tras el fix A13."
+            )
+        )
+
+    def test_compras_html_usa_endpoint_catalogo_buscar(self):
+        """
+        Criterio: el JS de compras.html DEBE hacer fetch a /catalogo/buscar/.
+        """
+        compras_path = Path('inventory/templates/inventory/compras.html')
+        with open(compras_path, encoding='utf-8') as f:
+            html = f.read()
+
+        self.assertIn(
+            '/catalogo/buscar/',
+            html,
+            msg=(
+                "compras.html debe invocar /catalogo/buscar/ para validar "
+                "que el SKU existe. Tras A13 este es el endpoint correcto."
+            )
+        )
+
+    def test_endpoint_catalogo_buscar_no_exige_stock_previo(self):
+        """
+        Comprobacion funcional via directo GET al endpoint: el SKU
+        buscable debe devolver results aunque el articulo NO tenga
+        stock (es decir, que /catalogo/buscar/ no exige que el articulo
+        tenga entradas en InventarioAlmacen).
+        """
+        import django.test
+        from django.test import Client
+        from inventory.models import Empresa, ConfiguracionEmpresa
+        from django.contrib.auth.models import User
+
+        # Setup multi-tenant: empresa de ataque VS empresa del usuario
+        user = User.objects.create_user('comprast', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+
+        client = Client()
+        client.login(username='comprast', password='pw1234')
+        session = client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+        # Articulo sin inventario (state natural de un articulo recien creado
+        # que aun no ha pasado por compra inicial). El articulo ya existe via
+        # setUp pero seed_inventario NO se llamo.
+        response = client.get(
+            f'/catalogo/buscar/?q={self.articulo.sku}'
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        result_skus = [r['sku'] for r in data.get('results', [])]
+        self.assertIn(
+            self.articulo.sku, result_skus,
+            msg=(
+                f"El SKU {self.articulo.sku} sin stock en InventarioAlmacen "
+                f"debe aparecer en /catalogo/buscar/. Si no aparece, el endpoint "
+                f"filtra por stock y vuelve a bloquear compras. Got results: {result_skus}"
+            )
+        )
