@@ -3061,3 +3061,185 @@ class TestVistaCrearVentaCSRF(TestCase):
                 "de ventas quedaria roto tras quitar @csrf_exempt."
             )
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C7: registrar_compra_proveedor multi-tenant (no empresa=proveedor.empresa)
+# ─────────────────────────────────────────────────────────────────────────────
+# Bug original: services.py:1659 usaba empresa=proveedor.empresa, lo que
+# creaba el DocumentoCompra en la empresa del proveedor, no en la activa.
+# Aunque la validacion perimetral hacia empresa_id_int == ctx_int (linea
+# 1644), el filtro se aplicaba al Get mas NO al create — quedando una fuga
+# multi-tenant entre laderas de la misma funcion.
+#
+# Tres bugs adicionales que A10 corrige:
+#   1. Almacen.objects.get(pk=almacen_id) sin filtro por empresa → podria
+#      ser de otro tenant.
+#   2. Contacto.objects.get(pk=proveedor_id, ...) sin filtro por empresa.
+#   3. Articulo.objects.get(sku=sku) sin filtro por empresa.
+#
+# Test: 4 sub-tests (1 por cada bug + 1 funcional positivo).
+
+
+class TestRegistrarCompraProveedorMultiTenant(TransactionTestCase):
+    """
+    Garantiza que registrar_compra_proveedor no se fuga entre tenants y que
+    valida que almacen/proveedor/articulo pertenezcan a la empresa activa.
+    """
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa, Empresa
+        from .managers import set_current_empresa
+
+        # Empresa victima (donde opera el usuario)
+        self.empresa_victima = crear_empresa(nombre='Victima', rif='J-VIC-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa_victima)
+        self.config.margen_global = Decimal('30.00')
+        self.config.save()
+        self.almacen_victima = crear_almacen(self.empresa_victima, nombre='Almacen Victima')
+
+        # Articulo de la victima
+        self.articulo_victima = crear_articulo_fisico(
+            self.empresa_victima, sku='VIC-001', nombre='Articulo Victima'
+        )
+
+        # Empresa atacante (donde el usuario NO deberia tener acceso)
+        self.empresa_atacante = Empresa.objects.create(nombre='Atacante', rif='J-ATK-001', activa=True)
+        set_current_empresa(self.empresa_victima.pk)  # volver a victima para setear el contexto
+        self.almacen_atacante = crear_almacen(self.empresa_atacante, nombre='Almacen Atacante')
+        self.articulo_atacante = crear_articulo_fisico(
+            self.empresa_atacante, sku='ATK-001', nombre='Articulo Atacante'
+        )
+        self.proveedor_atacante = Contacto.objects.create(
+            empresa=self.empresa_atacante,
+            identificacion='J-ATK-PROV-001', tipo='PROVEEDOR',
+            nombre='Proveedor Atacante', rif='J-ATK-PROV-001',
+            nombre_asesor='Asesor Test'
+        )
+
+        # Setear ContextVar a victima
+        from inventory.managers import set_current_empresa as _set
+        _set(self.empresa_victima.pk)
+
+    def test_rechaza_almacen_de_otra_empresa(self):
+        """
+        Criterio: pasar almacen_id de OTRA empresa debe lanzar ValueError,
+        no crear DocumentoCompra con almacen ajeno.
+        """
+        from inventory.services import registrar_compra_proveedor
+        from inventory.models import ConfiguracionEmpresa
+        # Crear un proveedor válido en la víctima (sino, el código lo detecta ahí)
+        prov_victima = Contacto.objects.create(
+            empresa=self.empresa_victima,
+            identificacion='J-VIC-PROV-001', tipo='PROVEEDOR',
+            nombre='Proveedor Victima', rif='J-VIC-PROV-001',
+            nombre_asesor='Asesor Victima'
+        )
+        with self.assertRaises(ValueError) as ctx:
+            registrar_compra_proveedor(
+                empresa_id=self.empresa_victima.pk,
+                proveedor_id=prov_victima.pk,
+                numero_factura='F-ATK',
+                fecha_compra='2026-06-25',
+                monto_total_usd=Decimal('100.00'),
+                almacen_id=self.almacen_atacante.pk,  # ALMACEN DE OTRA EMPRESA
+                lista_items=[{'sku': 'VIC-001', 'cantidad': Decimal('5'),
+                             'costo_factura': Decimal('10.00')}],
+                usuario='Test'
+            )
+        self.assertIn(
+            'almacen', str(ctx.exception).lower(),
+            msg="El error debe mencionar que el almacen no pertenece a la empresa."
+        )
+
+    def test_rechaza_proveedor_de_otra_empresa(self):
+        """
+        Criterio: pasar proveedor_id de OTRA empresa debe lanzar ValueError,
+        no permitir fuga multi-tenant.
+        """
+        from inventory.services import registrar_compra_proveedor
+        with self.assertRaises(ValueError) as ctx:
+            registrar_compra_proveedor(
+                empresa_id=self.empresa_victima.pk,
+                proveedor_id=self.proveedor_atacante.pk,  # PROVEEDOR DE OTRA EMPRESA
+                numero_factura='F-ATK',
+                fecha_compra='2026-06-25',
+                monto_total_usd=Decimal('100.00'),
+                almacen_id=self.almacen_victima.pk,
+                lista_items=[{'sku': 'VIC-001', 'cantidad': Decimal('5'),
+                             'costo_factura': Decimal('10.00')}],
+                usuario='Test'
+            )
+        self.assertIn(
+            'proveedor', str(ctx.exception).lower(),
+            msg="El error debe mencionar que el proveedor no pertenece a la empresa."
+        )
+
+    def test_rechaza_articulo_de_otra_empresa(self):
+        """
+        Criterio: pasar sku de OTRA empresa debe lanzar ValueError,
+        no actualizar precio de un articulo ajeno.
+        """
+        from inventory.services import registrar_compra_proveedor
+        prov_victima = Contacto.objects.create(
+            empresa=self.empresa_victima,
+            identificacion='J-VIC-PROV-002', tipo='PROVEEDOR',
+            nombre='Proveedor Victima 2', rif='J-VIC-PROV-002',
+            nombre_asesor='Asesor Victima'
+        )
+        with self.assertRaises(ValueError) as ctx:
+            registrar_compra_proveedor(
+                empresa_id=self.empresa_victima.pk,
+                proveedor_id=prov_victima.pk,
+                numero_factura='F-ATK',
+                fecha_compra='2026-06-25',
+                monto_total_usd=Decimal('100.00'),
+                almacen_id=self.almacen_victima.pk,
+                lista_items=[{'sku': 'ATK-001',  # ARTICULO DE OTRA EMPRESA
+                              'cantidad': Decimal('5'),
+                              'costo_factura': Decimal('10.00')}],
+                usuario='Test'
+            )
+        self.assertIn(
+            'articulo', str(ctx.exception).lower(),
+            msg="El error debe mencionar que el articulo no pertenece a la empresa."
+        )
+
+    def test_documentocompra_se_crea_en_empresa_del_contexto(self):
+        """
+        Criterio funcional: cuando los datos SI pertenecen a la empresa
+        activa, el DocumentoCompra se crea en esa empresa (NO en la empresa
+        del proveedor). Regresion clave del bug original.
+        """
+        from inventory.services import registrar_compra_proveedor
+        from inventory.models import DocumentoCompra
+
+        prov_victima = Contacto.objects.create(
+            empresa=self.empresa_victima,
+            identificacion='J-VIC-PROV-003', tipo='PROVEEDOR',
+            nombre='Proveedor OK', rif='J-VIC-PROV-003',
+            nombre_asesor='Asesor OK'
+        )
+
+        resultado = registrar_compra_proveedor(
+            empresa_id=self.empresa_victima.pk,
+            proveedor_id=prov_victima.pk,
+            numero_factura='F-OK',
+            fecha_compra='2026-06-25',
+            monto_total_usd=Decimal('100.00'),
+            almacen_id=self.almacen_victima.pk,
+            lista_items=[{'sku': 'VIC-001',
+                          'cantidad': Decimal('5'),
+                          'costo_factura': Decimal('10.00')}],
+            usuario='Test'
+        )
+
+        doc = DocumentoCompra.objects.get(pk=resultado['documento_id'])
+        self.assertEqual(
+            doc.empresa_id, self.empresa_victima.pk,
+            msg=(
+                "El documento debe crearse en la empresa del contexto (Victima), "
+                "NO en la empresa del proveedor (que en este test es la misma, pero en "
+                "multi-tenant el bug original asignaba empresa=proveedor.empresa)."
+            )
+        )

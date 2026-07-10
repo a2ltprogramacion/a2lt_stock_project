@@ -1652,11 +1652,26 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
         raise ValueError("La lista de artículos no puede estar vacía.")
 
     with transaction.atomic():
-        almacen = Almacen.objects.get(pk=almacen_id)
-        proveedor = Contacto.objects.get(pk=proveedor_id, tipo='PROVEEDOR')
+        # Validacion multi-tenant del almacen: debe pertenecer a la empresa activa.
+        try:
+            almacen = Almacen.objects.get(pk=almacen_id, empresa_id=empresa_id_int)
+        except Almacen.DoesNotExist:
+            raise ValueError(f"El almacen {almacen_id} no pertenece a la empresa activa.")
+
+        # Validacion multi-tenant del proveedor: debe pertenecer a la empresa activa.
+        # Ademas validamos tipo='PROVEEDOR' para evitar pasar un cliente por error.
+        try:
+            proveedor = Contacto.objects.get(
+                pk=proveedor_id, tipo='PROVEEDOR', empresa_id=empresa_id_int
+            )
+        except Contacto.DoesNotExist:
+            raise ValueError(
+                f"El proveedor {proveedor_id} no pertenece a la empresa activa "
+                f"o no existe."
+            )
 
         documento = DocumentoCompra.objects.create(
-            empresa=proveedor.empresa,
+            empresa_id=empresa_id_int,
             proveedor=proveedor,
             numero_factura=numero_factura,
             fecha_compra=fecha_compra,
@@ -1674,7 +1689,14 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
             if costo_factura < 0:
                 raise ValueError(f"El costo para {sku} no puede ser negativo.")
 
-            articulo = Articulo.objects.select_for_update().get(sku=sku)
+            # Validacion multi-tenant del articulo: debe pertenecer a la empresa activa.
+            # Validacion multi-tenant del articulo: debe pertenecer a la empresa activa.
+            try:
+                articulo = Articulo.objects.select_for_update().get(
+                    sku=sku, empresa_id=empresa_id_int
+                )
+            except Articulo.DoesNotExist:
+                raise ValueError(f"El articulo {sku} no pertence a la empresa activa.")
 
             # 1. Actualización de Costo Base
             articulo.costo = costo_factura
