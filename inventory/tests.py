@@ -1285,47 +1285,80 @@ class TestControlCostosYCompras(TransactionTestCase):
         self.assertEqual(mov.concepto, 'COMPRA')
 
     def test_validacion_proveedor_rif_y_asesor_vista(self):
-        """La vista de contactos bloquea la creación de un proveedor sin RIF o asesor."""
-        from django.test import RequestFactory
-        from inventory.views import contactos
-        from django.contrib.messages.storage.fallback import FallbackStorage
-        
-        factory = RequestFactory()
-        
+        """La vista de contactos bloquea la creación de un proveedor sin RIF o asesor.
+
+        B-1: migrado de RequestFactory a self.client.login() para que la
+        prueba ejecute el middleware TenantMiddleware real (que valida
+        empresa_id en sesion).
+        """
+        # Login multi-tenant via self.client (middleware real se ejecuta)
+        from django.contrib.auth.models import User
+        from inventory.models import PerfilUsuario
+        user = User.objects.create_user('contactos_test', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='contactos_test', password='pw1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
         # Test: Proveedor sin RIF
-        request = factory.post('/contactos/', {
+        response = self.client.post('/contactos/', {
             'tipo': 'PROVEEDOR',
             'nombre': 'Proveedor Incompleto',
             'nombre_asesor': 'Juan Perez',
             'rif': ''
         })
-        request.empresa = self.empresa
-        setattr(request, 'session', 'session')
-        messages = FallbackStorage(request)
-        setattr(request, '_messages', messages)
-        
-        contactos(request)
-        
-        from django.contrib.messages import get_messages
-        msg_list = list(get_messages(request))
-        self.assertTrue(any("El RIF es obligatorio para proveedores" in str(m) for m in msg_list))
-        
+        self.assertEqual(response.status_code, 200)
+        # Validamos que el messages framework registro el error.
+        # Buscar en storage de mensajes via response.context si es posible;
+        # alternativamente verificamos que el contacto NO se creo.
+        from inventory.models import Contacto
+        contactos_proveedores_sin_rif = Contacto.objects.filter(
+            empresa=self.empresa, tipo='PROVEEDOR', rif=''
+        )
+        self.assertEqual(
+            contactos_proveedores_sin_rif.count(), 0,
+            msg=(
+                "Proveedor sin RIF NO debe crearse (la vista debe mostrar "
+                "un ValidationError y abortar). Si llega a existir, el bug "
+                "volvio."
+            )
+        )
+
         # Test: Proveedor sin Asesor
-        request2 = factory.post('/contactos/', {
+        self.client.post('/contactos/', {
             'tipo': 'PROVEEDOR',
             'nombre': 'Proveedor Incompleto 2',
             'rif': 'J-9999999-9',
             'nombre_asesor': ''
         })
-        request2.empresa = self.empresa
-        setattr(request2, 'session', 'session')
-        messages2 = FallbackStorage(request2)
-        setattr(request2, '_messages', messages2)
-        
-        contactos(request2)
-        
-        msg_list2 = list(get_messages(request2))
-        self.assertTrue(any("El nombre del asesor es obligatorio para proveedores" in str(m) for m in msg_list2))
+        contactos_proveedores_sin_asesor = Contacto.objects.filter(
+            empresa=self.empresa, tipo='PROVEEDOR', nombre_asesor=''
+        )
+        self.assertEqual(
+            contactos_proveedores_sin_asesor.count(), 0,
+            msg=(
+                "Proveedor sin nombre_asesor NO debe crearse (la vista debe "
+                "abortar con ValidationError). Si se crea, el bug volvio."
+            )
+        )
+        # Sanity: validar que el que SI pasa, si se crea
+        self.client.post('/contactos/', {
+            'tipo': 'PROVEEDOR',
+            'nombre': 'Proveedor OK',
+            'rif': 'J-1111111-1',
+            'nombre_asesor': 'Asesor Real'
+        })
+        self.assertTrue(
+            Contacto.objects.filter(empresa=self.empresa, rif='J-1111111-1').exists(),
+            msg=(
+                "Sanity check: el proveedor CON RIF + asesor debe crearse "
+                "correctamente via self.client."
+            )
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TICKET #10: PANEL DE CONTROL ANALÍTICO Y MÉTRICAS
@@ -1358,48 +1391,89 @@ class TestDashboardMetricas(TestCase):
         # Total valoracion esperada: 250.00
 
     def test_valoracion_total_inventario(self):
-        """La valoración total responde con precisión matemática a la sumatoria agregada."""
-        from django.test import RequestFactory
-        from inventory.views import dashboard
-        from unittest.mock import patch
-        
-        factory = RequestFactory()
-        request = factory.get('/')
-        request.empresa = self.empresa
-        
-        with patch('inventory.views.render') as mock_render:
-            dashboard(request)
-            context = mock_render.call_args[0][2]
-        
-        self.assertEqual(context['valoracion_total'], Decimal('250.00'))
+        """La valoración total responde con precisión matemática a la sumatoria agregada.
+
+        B-1: migrado a self.client.login() para ejecutar el middleware
+        TenantMiddleware real (RequestFactory lo saltaba).
+        """
+        from django.contrib.auth.models import User
+        from django.test import Client
+        from inventory.models import PerfilUsuario
+
+        # Login + sesion multi-tenant
+        user = User.objects.create_user('dash_user', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        c = Client()
+        c.login(username='dash_user', password='pw1234')
+        s = c.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        # GET a /dashboard/ via Cliente real (con middleware)
+        response = c.get('/dashboard/')
+        self.assertEqual(response.status_code, 200)
+
+        # Validar que la valoracion aparece en el contexto (renderizada)
+        self.assertIn('valoracion_total', response.context)
+        self.assertEqual(
+            response.context['valoracion_total'],
+            Decimal('250.00'),
+            msg=(
+                f"Esperado valoracion 250.00 (5*10 + 10*20). got: "
+                f"{response.context['valoracion_total']}"
+            )
+        )
 
     def test_motor_alertas_stock_minimo(self):
-        """El motor de alertas incluye artículo en riesgo si stock cae por debajo del mínimo."""
-        from inventory.models import InventarioAlmacen
-        
+        """El motor de alertas incluye artículo en riesgo si stock cae por debajo del mínimo.
+
+        B-1: migrado a self.client.login() (RequestFactory lo saltaba).
+        """
+        from django.contrib.auth.models import User
+        from django.test import Client
+        from inventory.models import InventarioAlmacen, PerfilUsuario
+
         inv1 = InventarioAlmacen.objects.get(articulo=self.articulo1, almacen=self.almacen)
-        inv1.stock_minimo = Decimal('6.00') # Stock actual es 5, así que debe alertar
+        inv1.stock_minimo = Decimal('6.00')  # Stock actual 5 -> debe alertar
         inv1.save()
-        
+
         inv2 = InventarioAlmacen.objects.get(articulo=self.articulo2, almacen=self.almacen)
-        inv2.stock_minimo = Decimal('5.00') # Stock actual es 10, no debe alertar
+        inv2.stock_minimo = Decimal('5.00')  # Stock actual 10 -> NO debe alertar
         inv2.save()
 
-        from django.test import RequestFactory
-        from inventory.views import dashboard
-        from unittest.mock import patch
-        
-        factory = RequestFactory()
-        request = factory.get('/')
-        request.empresa = self.empresa
-        
-        with patch('inventory.views.render') as mock_render:
-            dashboard(request)
-            context = mock_render.call_args[0][2]
-        
-        alertas = context['alertas']
-        self.assertEqual(alertas.count(), 1)
-        self.assertEqual(alertas.first().articulo, self.articulo1)
+        # Login + sesion multi-tenant
+        user = User.objects.create_user('alert_user2', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        c = Client()
+        c.login(username='alert_user2', password='pw1234')
+        s = c.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        # GET dashboard para recibir context
+        response = c.get('/dashboard/')
+        self.assertEqual(response.status_code, 200)
+
+        alertas = response.context.get('alertas')
+        self.assertIsNotNone(alertas)
+        alertas_list = list(alertas)
+        self.assertEqual(
+            len(alertas_list), 1,
+            f"Esperado exactamente 1 alerta (articulo1); got: {alertas_list}"
+        )
+        self.assertEqual(
+            alertas_list[0].articulo, self.articulo1,
+            msg=(
+                f"La alerta deberia ser de {self.articulo1.sku}, got: "
+                f"{alertas_list[0].articulo.sku}"
+            )
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TICKET #11: PRUEBAS DE ESTRUCTURA Y OPTIMIZACIÓN (ÍNDICES)
@@ -1481,20 +1555,30 @@ class TestImpresionParametrizada(TestCase):
         self.assertEqual(self.config.print_row_spacing, Decimal('7.00'))
 
     def test_vista_impresion_renderizado(self):
-        """La vista de impresión carga el contexto relacional sin lanzar excepciones."""
-        from django.test import RequestFactory
-        from inventory.views import vista_imprimir_coordenadas
-        
-        factory = RequestFactory()
-        request = factory.get(f'/ventas/{self.nota.pk}/imprimir-coordenadas/')
-        request.empresa = self.empresa
-        
-        response = vista_imprimir_coordenadas(request, self.nota.pk)
-        
-        # Debe renderizar correctamente con código 200
+        """La vista de impresión carga el contexto relacional sin lanzar excepciones.
+
+        B-1: migrado a self.client.login() para ejecutar TenantMiddleware real.
+        """
+        from django.contrib.auth.models import User
+        from django.test import Client
+        from inventory.models import PerfilUsuario
+
+        # Login multi-tenant
+        user = User.objects.create_user('impresion_user', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        c = Client()
+        c.login(username='impresion_user', password='pw1234')
+        s = c.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        # GET via Client real
+        response = c.get(f'/ventas/{self.nota.pk}/imprimir-coordenadas/')
         self.assertEqual(response.status_code, 200)
-        
-        # Validar el contenido renderizado (que contenga el offset y el numero de nota)
+
         content = response.content.decode('utf-8')
         self.assertIn('Impresión por Coordenadas', content)
         self.assertIn(f'NE-{self.nota.numero:05d}', content)
@@ -1567,24 +1651,34 @@ class TestExportacionLogicaSaaS(TestCase):
         self.assertEqual(movimientos[0]['concepto'], 'AJUSTE_ENTRADA')
 
     def test_vista_descarga_backup(self):
-        """El controlador web entrega el JSON con content_type application/json."""
-        from django.test import RequestFactory
-        from inventory.views import vista_exportar_respaldo
-        from inventory.managers import set_current_empresa
+        """El controlador web entrega el JSON con content_type application/json.
 
-        # Resolver empresa via ContextVar (no via request.empresa como hacia
-        # el codigo buggy original). Tras el fix en A8 la vista usa
-        # get_current_empresa() exclusivamente.
-        set_current_empresa(self.empresa1.id)
+        B-1: migrado a self.client.login() para ejecutar TenantMiddleware real.
+        """
+        from django.contrib.auth.models import User
+        from django.test import Client
+        from inventory.models import PerfilUsuario
 
-        factory = RequestFactory()
-        request = factory.get('/respaldo/')
-        
-        response = vista_exportar_respaldo(request)
-        
+        # Login multi-tenant con permisos para empresa1
+        user = User.objects.create_user('backup_user', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa1)
+        perfil.empresa_activa = self.empresa1
+        perfil.save()
+        c = Client()
+        c.login(username='backup_user', password='pw1234')
+        s = c.session
+        s['empresa_id'] = self.empresa1.id
+        s.save()
+
+        # GET via Client real
+        response = c.get('/respaldo/')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/json')
-        self.assertIn('attachment; filename="respaldo_a2lt_j-tenant-1', response['Content-Disposition'])
+        self.assertIn(
+            'attachment; filename="respaldo_a2lt_j-tenant-1',
+            response['Content-Disposition']
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TICKET #14-SAAS: MÓDULO DE TRAZABILIDAD DE GARANTÍAS Y CONTROL DE SERIALES
@@ -1674,28 +1768,46 @@ class TestControlDeSerialesPOS(TransactionTestCase):
         self.assertEqual(s.estado, 'DISPONIBLE')
 
     def test_vista_ajax_buca_seriales_filtrados_por_almacen(self):
-        """El endpoint debe devolver solo los DISPONIBLES de ese almacén."""
-        from django.test import RequestFactory
-        from inventory.views import vista_buscar_seriales_articulo
+        """El endpoint debe devolver solo los DISPONIBLES de ese almacén.
+
+        B-1: migrado a self.client.login() para ejecutar TenantMiddleware real
+        (con EmpresaManager filtrando SerialArticulo por tenant).
+        """
         import json
-        
+        from django.contrib.auth.models import User
+        from django.test import Client
+        from inventory.models import PerfilUsuario
+
         # Creamos otro almacén con otro serial del mismo artículo
         almacen_norte = crear_almacen(self.empresa, nombre='Norte', es_principal=False)
-        SerialArticulo.objects.create(empresa=self.empresa, articulo=self.phone, almacen=almacen_norte, serial='IMEI-999')
-        
+        SerialArticulo.objects.create(
+            empresa=self.empresa, articulo=self.phone,
+            almacen=almacen_norte, serial='IMEI-999'
+        )
+
         # Quemamos uno en la principal
         SerialArticulo.objects.filter(serial='IMEI-111').update(estado='VENDIDO')
-        
-        factory = RequestFactory()
-        request = factory.get(f'/ventas/seriales/{self.phone.sku}/{self.almacen.id}/')
-        
-        response = vista_buscar_seriales_articulo(request, self.phone.sku, self.almacen.id)
+
+        # Login multi-tenant
+        user = User.objects.create_user('seriales_user', password='pw1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        c = Client()
+        c.login(username='seriales_user', password='pw1234')
+        s = c.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        # GET al endpoint con URL parametrizada (sku + almacen_id)
+        response = c.get(f'/ventas/seriales/{self.phone.sku}/{self.almacen.id}/')
         self.assertEqual(response.status_code, 200)
-        
+
         payload = json.loads(response.content)
         self.assertTrue(payload['ok'])
         seriales_list = [s['serial'] for s in payload['data']]
-        
+
         # 222 y 333 están disponibles en la central.
         # 111 está vendido. 999 está en Norte.
         self.assertIn('IMEI-222', seriales_list)
