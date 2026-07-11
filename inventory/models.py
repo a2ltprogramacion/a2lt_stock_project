@@ -1235,10 +1235,8 @@ class NotaEntrega(models.Model):
 
     @property
     def total_iva_bs(self):
-        """IVA total en Bs. del documento (si iva_check=True)."""
+        """IVA total en Bs. del documento (suma de iva_bs de cada detalle)."""
         from decimal import Decimal
-        if not self.iva_check:
-            return Decimal('0')
         return sum(d.iva_bs for d in self.detalles.all())
 
     @property

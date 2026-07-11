@@ -1141,24 +1141,26 @@ def resolver_colision(
 def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='',
                     observaciones='', empresa_id=None,
                     tipo_documento='NOTA_ENTREGA', numero_factura='',
-                    iva_check=False, descuento_global=Decimal('0')) -> NotaEntrega:
+                    descuento_global=Decimal('0')) -> NotaEntrega:
     """
     Procesa una venta generando una Nota de Entrega o Factura con inmutabilidad de precios.
 
-    Parámetros nuevos (Fase N2):
+    Parámetros (Fase N2):
       - tipo_documento: 'NOTA_ENTREGA' (default) o 'FACTURA'.
       - numero_factura: string manual. También si tipo_documento=FACTURA. Único por empresa.
-      - iva_check: bool. Si True, se calcula y persiste iva_total en la cabecera.
       - descuento_global: Decimal. % descuento global sobre el documento.
+
+    IVA: Se calcula siempre de forma individual por artículo (iva_porcentaje snapshot).
+    No existe un switch global de IVA — cada item declara su propio impuesto.
 
     Flujo atómico:
     1. Valida blindaje multi-pestaña (empresa_id del payload vs contexto activo).
     2. Lee el snapshot cambiario de ConfiguracionEmpresa (tasa_bcv + factor + tasa_mercado).
     3. Valida existencias para los artículos físicos (los combos se validan vía sus componentes).
     4. Registra la salida en el Kárdex para cada artículo físico o componentes de combo.
-    5. Crea la NotaEntrega (con tipo_documento, numero_factura, iva_check, descuento_global,
+    5. Crea la NotaEntrega (con tipo_documento, numero_factura, descuento_global,
        tasa_mercado_aplicada snapshot) y sus Detalles (4 precios snapshot + IVA snapshot).
-    6. Si iva_check=True, calcula iva_total = Σ iva_bs de cada detalle y lo persiste.
+    6. Calcula iva_total = Σ iva_bs de cada detalle y lo persiste.
     """
     from .managers import get_current_empresa
     from decimal import Decimal
@@ -1263,7 +1265,6 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         observaciones=observaciones,
         tipo_documento=tipo_documento,
         numero_factura=numero_factura,
-        iva_check=iva_check,
         descuento_global=descuento_global,
     )
 
@@ -1370,16 +1371,14 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
             
             SerialArticulo.objects.bulk_update(seriales_db, ['estado', 'detalle_nota'])
 
-    # N2: Cálculo de iva_total si iva_check=True (snapshot imponible)
-    if iva_check:
-        iva_total_calc = Decimal('0')
-        for det in nota_entrega.detalles.all():
-            iva_total_calc += det.iva_bs
-        nota_entrega.iva_total = iva_total_calc.quantize(Decimal('0.0001'))
-        nota_entrega.save(update_fields=['iva_total'])
-    else:
-        nota_entrega.iva_total = Decimal('0')
-        nota_entrega.save(update_fields=['iva_total'])
+    # N2: Cálculo de iva_total (siempre, desde snapshot individual de cada detalle)
+    iva_total_calc = Decimal('0')
+    for det in nota_entrega.detalles.all():
+        iva_total_calc += det.iva_bs
+    nota_entrega.iva_total = iva_total_calc.quantize(Decimal('0.0001'))
+    # iva_check refleja si el documento lleva IVA (algún item con iva_porcentaje > 0)
+    nota_entrega.iva_check = iva_total_calc > 0
+    nota_entrega.save(update_fields=['iva_total', 'iva_check'])
 
     # El objeto en memoria ya tiene el valor correcto de iva_total
     logger.info(

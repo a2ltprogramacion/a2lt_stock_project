@@ -3851,27 +3851,27 @@ class TestVentasOfferPrintURL(TestCase):
         )
 
         self.assertIn(
-            'window.open(printUrl',
+            'window.location.href = detailUrl',
             codigo,
             msg=(
-                "ventas.html debe llamar window.open(printUrl, '_blank') "
-                "tras registrar una venta para abrir el modal de impresion."
+                "ventas.html debe redirigir a la vista de detalle del documento "
+                "tras registrar una venta."
             )
         )
         self.assertIn(
-            "/imprimir/",
+            "/ventas/",
             codigo,
             msg=(
-                "ventas.html debe construir la URL /ventas/<notaId>/imprimir/ "
-                "como destino de window.open()."
+                "ventas.html debe construir la URL /ventas/<notaId>/ "
+                "como destino de la redirección."
             )
         )
         self.assertIn(
-            "Desea imprimir la Nota de Entrega",
+            "Desea ver el documento ahora",
             codigo,
             msg=(
                 "ventas.html debe ofrecer al usuario la opcion explicita de "
-                "imprimir la Nota de Entrega (pregunta en confirm)."
+                "ver el documento tras registrar la venta (pregunta en confirm)."
             )
         )
 
@@ -5835,14 +5835,36 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         self.assertEqual(det.subtotal_usd, Decimal('900.00'))  # 1000 * 0.90
         self.assertEqual(det.subtotal_bs, Decimal('9900.00'))  # 11000 * 0.90
 
-    def test_n2_iva_check_false_no_calcula_iva_total(self):
-        """Si iva_check=False, iva_total debe ser 0 (el campo no se calcula automáticamente)."""
-        from inventory.models import NotaEntrega, Almacen
-        alm = crear_almacen(self.empresa, 'Almacén N2f')
-        nota = NotaEntrega.objects.create(
-            empresa=self.empresa, almacen=alm, iva_check=False,
+    def test_n2_iva_check_refleja_iva_porcentaje_del_articulo(self):
+        """iva_check=True si al menos un artículo tiene iva_porcentaje>0, verificado via procesar_venta."""
+        from inventory.services import procesar_venta, registrar_movimiento
+        alm = crear_almacen(self.empresa, 'Almacén N2IVA')
+        # Artículo sin IVA → iva_check=False, iva_total=0
+        art_sin_iva = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-IVA-SIN', nombre='Sin IVA', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('5'), precio_divisa=Decimal('10'),
+            iva_porcentaje=Decimal('0.00'),
         )
-        self.assertEqual(nota.iva_total, Decimal('0.0000'))
+        registrar_movimiento(art_sin_iva, alm, 'ENTRADA', Decimal('1000'), 'Stock Test')
+        nota_sin_iva = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-IVA-SIN', 'cantidad': 1, 'precio_base': 100.0}],
+            almacen_id=alm.pk,
+        )
+        self.assertFalse(nota_sin_iva.iva_check)
+        self.assertEqual(nota_sin_iva.iva_total, Decimal('0.0000'))
+        # Artículo con IVA → iva_check=True, iva_total>0
+        art_con_iva = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-IVA-CON', nombre='Con IVA', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('5'), precio_divisa=Decimal('10'),
+            iva_porcentaje=Decimal('16.00'),
+        )
+        registrar_movimiento(art_con_iva, alm, 'ENTRADA', Decimal('1000'), 'Stock Test')
+        nota_con_iva = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-IVA-CON', 'cantidad': 1, 'precio_base': 100.0}],
+            almacen_id=alm.pk,
+        )
+        self.assertTrue(nota_con_iva.iva_check)
+        self.assertGreater(nota_con_iva.iva_total, Decimal('0'))
 
     def test_n2_propiedad_total_iva_bs_con_iva_check_true(self):
         """Con iva_check=True, total_iva_bs suma los iva_bs de cada detalle."""
@@ -5923,24 +5945,26 @@ class TestProcesarVentaN2(TestCase):
                 numero_factura='F-N2-002',
             )
 
-    def test_n2_procesar_venta_iva_check_true_calcula_iva_total(self):
-        """Con iva_check=True, la nota debe tener iva_total > 0."""
+    def test_n2_procesar_venta_articulo_con_iva_calcula_iva_total(self):
+        """Si el artículo tiene iva_porcentaje>0, iva_total debe ser > 0 e iva_check=True."""
         from inventory.services import procesar_venta
+        self.art.iva_porcentaje = Decimal('16.00')
+        self.art.save()
         nota = procesar_venta(
             lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 100.0}],
             almacen_id=self.alm.pk,
-            iva_check=True,
         )
         self.assertTrue(nota.iva_check)
         self.assertGreater(nota.iva_total, Decimal('0'))
 
-    def test_n2_procesar_venta_iva_check_false_iva_total_cero(self):
-        """Con iva_check=False, iva_total debe ser 0."""
+    def test_n2_procesar_venta_articulo_sin_iva_check_false(self):
+        """Si ningún artículo tiene iva_porcentaje>0, iva_check debe ser False."""
         from inventory.services import procesar_venta
+        self.art.iva_porcentaje = Decimal('0.00')
+        self.art.save()
         nota = procesar_venta(
             lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 100.0}],
             almacen_id=self.alm.pk,
-            iva_check=False,
         )
         self.assertFalse(nota.iva_check)
         self.assertEqual(nota.iva_total, Decimal('0.0000'))
@@ -5993,5 +6017,196 @@ class TestProcesarVentaN2(TestCase):
         self.assertGreater(det.precio_ajustado_bcv, Decimal('0'))
         self.assertIsInstance(det.iva_porcentaje, Decimal)
         self.assertEqual(det.descuento_aplicado, Decimal('0.00'))
+
+
+class TestNotaEntregaFaseN3(TestCase):
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.user = User.objects.create_user('testn3', 'n3@test.com', 'test123')
+        self.empresa = crear_empresa(nombre='FaseN3 Corp', rif='J-N3-001')
+        self.alm = crear_almacen(self.empresa, 'Almacen N3')
+
+    def test_n3_ventas_template_tiene_radio_tipo_documento(self):
+        from pathlib import Path
+        content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertIn('name="doc-type"', content)
+        self.assertIn('value="NOTA_ENTREGA"', content)
+        self.assertIn('value="FACTURA"', content)
+
+    def test_n3_ventas_template_sin_contenedor_iva_check(self):
+        from pathlib import Path
+        content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertNotIn('id="iva-check-container"', content)
+
+    def test_n3_ventas_template_tiene_descuento_global_input(self):
+        from pathlib import Path
+        content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertIn('id="note-discount-percent"', content)
+
+    def test_n3_articulo_sin_iva_iva_total_cero(self):
+        from inventory.services import procesar_venta, registrar_movimiento
+        art = crear_articulo_fisico(self.empresa, sku='N3-FAC-01', nombre='Art Fac')
+        art.iva_porcentaje = Decimal('0.00')
+        art.save()
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N3-FAC-01', 'cantidad': 1, 'precio_base': 100}],
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA',
+            numero_factura='FA-N3-001',
+        )
+        self.assertEqual(nota.tipo_documento, 'FACTURA')
+        self.assertEqual(nota.iva_total, Decimal('0.0000'))
+        self.assertFalse(nota.iva_check)
+
+
+class TestInterlockFacturaN4(TestCase):
+
+    def setUp(self):
+        from inventory.services import registrar_movimiento
+        self.empresa = crear_empresa(nombre='FaseN4 Corp', rif='J-N4-001')
+        self.alm = crear_almacen(self.empresa, 'Almacén N4')
+        self.art = crear_articulo_fisico(self.empresa, sku='N4-INT-01', nombre='Art Interlock')
+        registrar_movimiento(self.art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+
+    def test_n4_template_confirm_button_tiene_id(self):
+        from pathlib import Path
+        content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertIn('id="confirm-sale-btn"', content)
+
+    def test_n4_template_invoice_ref_oninput_handler(self):
+        from pathlib import Path
+        content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertIn('oninput="enableConfirmIfFacturaReady()"', content)
+
+    def test_n4_factura_sin_numero_factura_falla(self):
+        from inventory.services import procesar_venta
+        with self.assertRaisesMessage(ValueError, 'numero_factura es obligatorio'):
+            procesar_venta(
+                lista_items=[{'articulo_sku': 'N4-INT-01', 'cantidad': 1, 'precio_base': 10}],
+                almacen_id=self.alm.pk,
+                tipo_documento='FACTURA',
+            )
+
+    def test_n4_nota_entrega_permite_sin_numero_factura(self):
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N4-INT-01', 'cantidad': 1, 'precio_base': 10}],
+            almacen_id=self.alm.pk,
+            tipo_documento='NOTA_ENTREGA',
+        )
+        self.assertEqual(nota.tipo_documento, 'NOTA_ENTREGA')
+        self.assertEqual(nota.numero_factura, '')
+
+    def test_n4_factura_con_numero_ok(self):
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N4-INT-01', 'cantidad': 1, 'precio_base': 10}],
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA',
+            numero_factura='F-N4-001',
+        )
+        self.assertEqual(nota.tipo_documento, 'FACTURA')
+        self.assertEqual(nota.numero_factura, 'F-N4-001')
+
+
+class TestNotaEntregaFaseN5(TestCase):
+
+    def setUp(self):
+        from inventory.services import registrar_movimiento
+        self.empresa = crear_empresa(nombre='FaseN5 Corp', rif='J-N5-001')
+        self.alm = crear_almacen(self.empresa, 'Almacén N5')
+        self.art = crear_articulo_fisico(self.empresa, sku='N5-PDF-01', nombre='Art PDF')
+        registrar_movimiento(self.art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+
+    def test_n5_template_detalle_nota_existe(self):
+        from pathlib import Path
+        content = Path('inventory/templates/inventory/nota_detalle.html').read_text(encoding='utf-8')
+        self.assertIn('id="tab-ventas"', content)
+        self.assertIn('Imprimir PDF', content)
+        self.assertIn('Interno:', content)
+        self.assertIn('IVA%', content)
+
+    def test_n5_pdf_genera_bytes_pdf(self):
+        """Test que la función generar_pdf_nota genera bytes PDF válidos."""
+        from inventory.views import generar_pdf_nota
+        from django.http import HttpRequest
+        from django.contrib.auth.models import User
+
+        # Crear una nota vía servicio
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N5-PDF-01', 'cantidad': 2, 'precio_base': 50}],
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA',
+            numero_factura='FA-N5-005',
+        )
+
+        # Simular request
+        request = HttpRequest()
+        request.method = 'GET'
+        request.user = User.objects.create_user('testpdf', 'pdf@test.com', 'test123')
+        
+        # Llamar la vista directamente (sin middleware)
+        response = generar_pdf_nota(request, nota.pk)
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        content = response.content
+        self.assertTrue(content.startswith(b'%PDF'))
+        # Verificar que es un PDF válido con contenido
+        self.assertGreater(len(content), 1000)
+
+    def test_n5_pdf_nota_entrega_tambien_funciona(self):
+        """Test que el PDF funciona para Nota de Entrega también."""
+        from inventory.views import generar_pdf_nota
+        from django.http import HttpRequest
+        from django.contrib.auth.models import User
+        from inventory.services import procesar_venta
+
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N5-PDF-01', 'cantidad': 1, 'precio_base': 100}],
+            almacen_id=self.alm.pk,
+            tipo_documento='NOTA_ENTREGA',
+        )
+
+        request = HttpRequest()
+        request.method = 'GET'
+        request.user = User.objects.create_user('testpdf2', 'pdf2@test.com', 'test123')
+        
+        response = generar_pdf_nota(request, nota.pk)
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        content = response.content
+        self.assertTrue(content.startswith(b'%PDF'))
+        self.assertGreater(len(content), 1000)
+        self.assertIn(str(nota.numero).encode(), content)
+
+    def test_n5_vista_detalle_nota_usa_template_correcto(self):
+        """Test que la vista usa el template correcto."""
+        from inventory.views import vista_detalle_nota
+        from django.http import HttpRequest
+        from django.contrib.auth.models import User
+        from inventory.services import procesar_venta
+
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N5-PDF-01', 'cantidad': 1, 'precio_base': 100}],
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA',
+            numero_factura='FA-N5-006',
+        )
+
+        request = HttpRequest()
+        request.method = 'GET'
+        request.user = User.objects.create_user('testdet', 'det@test.com', 'test123')
+        
+        # Llamar vista directamente
+        response = vista_detalle_nota(request, nota.pk)
+        
+        self.assertEqual(response.status_code, 200)
+        # Verificar que el contenido incluye elementos del template
+        self.assertIn(b'Imprimir PDF', response.content)
 
 

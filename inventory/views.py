@@ -11,7 +11,8 @@ Retornan JSON para compatibilidad con AJAX/fetch desde el frontend.
 import json
 import logging
 
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
+from decimal import Decimal
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
@@ -645,7 +646,8 @@ def api_validar_stock(request, sku, almacen_id):
 
 
 import json
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
+from decimal import Decimal
 
 @login_required
 @require_http_methods(["POST"])
@@ -676,14 +678,14 @@ def vista_crear_venta(request):
             observaciones=observaciones,
             tipo_documento=data.get('tipo_documento', 'NOTA_ENTREGA'),
             numero_factura=data.get('numero_factura', ''),
-            iva_check=data.get('iva_check', False),
             descuento_global=Decimal(str(data.get('descuento_global', '0'))),
         )
 
         return JsonResponse({
             'ok': True,
             'nota_id': nota.pk,
-            'correlativo': nota.numero
+            'correlativo': nota.numero,
+            'tipo_documento': nota.tipo_documento
         })
     except ValueError as e:
         # Error de negocio (ej. falta de stock) -> Rollback automático en procesar_venta
@@ -713,6 +715,151 @@ def vista_imprimir_nota(request, nota_id):
         'total_bs': total_bs
     }
     return render(request, 'inventory/nota_entrega_print.html', context)
+
+
+@login_required
+@require_http_methods(["GET"])
+def vista_detalle_nota(request, nota_id):
+    """Muestra el detalle de una Nota de Entrega o Factura con botón de impresión."""
+    from .models import NotaEntrega, ConfiguracionEmpresa
+    nota = get_object_or_404(NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa'), pk=nota_id)
+    detalles = nota.detalles.select_related('articulo').all()
+    config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
+
+    # Pre-calcular totales de línea para el template
+    detalles_con_totales = []
+    total_usd = Decimal('0')
+    total_bs = Decimal('0')
+    total_iva_usd = Decimal('0')
+    total_iva_bs = Decimal('0')
+    for d in detalles:
+        line_usd = d.cantidad * d.precio_base
+        line_bs = d.cantidad * d.precio_ajustado_bcv
+        total_usd += line_usd
+        total_bs += line_bs
+        total_iva_usd += d.iva_usd
+        total_iva_bs += d.iva_bs
+        d.line_usd = line_usd
+        d.line_bs = line_bs
+        detalles_con_totales.append(d)
+
+    context = {
+        'nota': nota,
+        'detalles': detalles_con_totales,
+        'config': config,
+        'total_usd': total_usd,
+        'total_bs': total_bs,
+        'total_iva_usd': total_iva_usd,
+        'total_iva_bs': total_iva_bs,
+        'print_url': f'/ventas/{nota_id}/pdf/',
+    }
+    return render(request, 'inventory/nota_detalle.html', context)
+
+
+@login_required
+@require_http_methods(["GET"])
+def generar_pdf_nota(request, nota_id):
+    """Genera un PDF A4 de la Nota de Entrega o Factura usando ReportLab."""
+    from .models import NotaEntrega, ConfiguracionEmpresa
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm, mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+
+    nota = get_object_or_404(NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa'), pk=nota_id)
+    detalles = nota.detalles.select_related('articulo').all()
+    config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
+
+    response = HttpResponse(content_type='application/pdf')
+    doc_type_str = 'NOTA DE ENTREGA' if nota.tipo_documento == 'NOTA_ENTREGA' else 'FACTURA'
+    filename = f'{doc_type_str.replace(" ", "_")}_{nota.numero}.pdf'
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+
+    doc = SimpleDocTemplate(
+        response, pagesize=A4,
+        rightMargin=1.5*cm, leftMargin=1.5*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, spaceAfter=4, alignment=TA_CENTER)
+    normal_style = styles['Normal']
+    right_style = ParagraphStyle('RightAlign', parent=normal_style, alignment=TA_RIGHT)
+    header_style = ParagraphStyle('Header', parent=normal_style, fontSize=9, textColor=colors.grey, alignment=TA_CENTER)
+
+    story.append(Paragraph(nota.empresa.nombre, title_style))
+    story.append(Paragraph(f"RIF: {nota.empresa.rif or 'N/A'}", header_style))
+    story.append(Spacer(1, 3*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
+    story.append(Spacer(1, 3*mm))
+
+    doc_title = f"{doc_type_str} {'N° ' + nota.numero_factura if nota.numero_factura else ''}"
+    story.append(Paragraph(doc_title, ParagraphStyle('DocType', parent=styles['Heading2'], fontSize=12, alignment=TA_CENTER)))
+    story.append(Paragraph(f"Interno: {nota.numero} | Fecha: {nota.fecha.strftime('%d/%m/%Y %H:%M')}", header_style))
+    story.append(Spacer(1, 5*mm))
+
+    story.append(Paragraph(f"Cliente: {nota.cliente.nombre}  |  ID: {nota.cliente.identificacion or 'N/A'}", normal_style))
+    story.append(Paragraph(f"Almacén: {nota.almacen.nombre}", normal_style))
+    story.append(Spacer(1, 4*mm))
+
+    table_data = [['SKU', 'Artículo', 'Alm.', 'Cant.', 'P.Base $', 'Total $', 'IVA%', 'IVA $', 'Total IVA Bs']]
+    for d in detalles:
+        table_data.append([
+            d.articulo.sku,
+            d.articulo.nombre[:28],
+            nota.almacen.nombre[:10],
+            str(d.cantidad),
+            f'{d.precio_base:.2f}',
+            f'{(d.cantidad * d.precio_base):.2f}',
+            f'{d.iva_porcentaje:.2f}',
+            f'{d.iva_usd:.2f}',
+            f'{d.iva_bs:.2f}',
+        ])
+
+    col_widths = [2*cm, 5*cm, 1.8*cm, 1.3*cm, 1.8*cm, 1.8*cm, 1.3*cm, 1.5*cm, 2*cm]
+    t = Table(table_data, colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (1, 1), (1, -1), 'LEFT'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 6*mm))
+
+    subtotal_usd = sum(d.cantidad * d.precio_base for d in detalles)
+    total_iva_usd = sum(d.iva_usd for d in detalles)
+    total_iva_bs = sum(d.iva_bs for d in detalles)
+    total_bs = subtotal_usd * nota.tasa_bcv_aplicada + total_iva_bs
+
+    story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
+    story.append(Paragraph(f"Total IVA USD: ${total_iva_usd:.2f}", right_style))
+    story.append(Paragraph(f"Total IVA Bs: {total_iva_bs:.2f} Bs", right_style))
+    story.append(Spacer(1, 2*mm))
+    story.append(HRFlowable(width="40%", thickness=0.5, color=colors.black))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(f"TOTAL USD: ${subtotal_usd + total_iva_usd:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
+    story.append(Paragraph(f"TOTAL Bs: {total_bs:.2f} Bs", ParagraphStyle('TotalBs', parent=styles['Heading3'], fontSize=10, alignment=TA_RIGHT)))
+    story.append(Spacer(1, 5*mm))
+
+    story.append(Paragraph(f"Tasa BCV: {nota.tasa_bcv_aplicada:.4f}  |  Factor: {nota.factor_cobertura_aplicado:.4f}  |  Tasa Mercado: {nota.tasa_mercado_aplicada:.4f}", header_style))
+    if nota.observaciones:
+        story.append(Spacer(1, 3*mm))
+        story.append(Paragraph(f"Obs: {nota.observaciones}", ParagraphStyle('Obs', parent=normal_style, fontSize=8, textColor=colors.grey)))
+
+    doc.build(story)
+    return response
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -795,7 +942,7 @@ def vista_registrar_asiento_manual(request):
     from decimal import Decimal
     import json as _json
     from .models import Articulo, Almacen
-    from django.http import JsonResponse
+    from django.http import HttpResponse, JsonResponse
     from .managers import get_current_empresa
 
     try:
@@ -1067,7 +1214,7 @@ def articulos_view(request):
 
     Requiere @login_required + CSRF token en el fetch (articulos.html).
     """
-    from django.http import JsonResponse
+    from django.http import HttpResponse, JsonResponse
     from decimal import Decimal
     from .models import Articulo
     from .managers import get_current_empresa
@@ -1210,7 +1357,8 @@ def compras_view(request):
     return render(request, 'inventory/compras.html', context)
 
 import json
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
+from decimal import Decimal
 from django.views.decorators.http import require_POST
 from decimal import Decimal
 from .services import registrar_compra_proveedor

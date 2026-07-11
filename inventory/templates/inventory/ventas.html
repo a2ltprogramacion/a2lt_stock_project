@@ -175,6 +175,7 @@
                                 <div id="invoice-ref-container" class="hidden">
                                     <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N° Factura Física</label>
                                     <input id="note-invoice-ref" type="text" placeholder="Ej. F-00213"
+                                        oninput="enableConfirmIfFacturaReady()"
                                         class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
                                 </div>
 
@@ -182,14 +183,6 @@
                                     <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N° Nota Interna</label>
                                     <input id="note-correlative-lbl" type="text" readonly
                                         class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-850 rounded-xl p-2 text-xs text-slate-500 dark:text-slate-400 font-mono text-center font-bold">
-                                </div>
-
-                                <div id="iva-check-container" class="hidden">
-                                    <label class="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" id="note-iva-check" onchange="recalculateNoteTotal()"
-                                            class="accent-indigo-600 w-4 h-4">
-                                        <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Aplicar IVA (16%)</span>
-                                    </label>
                                 </div>
 
                                 <div>
@@ -265,7 +258,7 @@
                                 <div id="seriales-sections"></div>
                             </div>
 
-                            <button onclick="processSale()"
+                            <button onclick="processSale()" id="confirm-sale-btn"
                                 class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
                                 <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Venta
                             </button>
@@ -287,17 +280,34 @@
 
     function onDocTypeChange(value) {
         const invoiceContainer = document.getElementById('invoice-ref-container');
-        const ivaContainer = document.getElementById('iva-check-container');
-        const ivaCheckbox = document.getElementById('note-iva-check');
+        const confirmBtn = document.getElementById('confirm-sale-btn');
         if (value === 'FACTURA') {
             invoiceContainer.classList.remove('hidden');
-            ivaContainer.classList.remove('hidden');
+            if (!document.getElementById('note-invoice-ref').value.trim()) {
+                confirmBtn.disabled = true;
+                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
         } else {
             invoiceContainer.classList.add('hidden');
-            ivaContainer.classList.add('hidden');
-            if (ivaCheckbox) ivaCheckbox.checked = false;
+            document.getElementById('note-invoice-ref').value = '';
+            confirmBtn.disabled = false;
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         }
         recalculateNoteTotal();
+    }
+
+    function enableConfirmIfFacturaReady() {
+        const docType = document.querySelector('input[name="doc-type"]:checked').value;
+        const confirmBtn = document.getElementById('confirm-sale-btn');
+        if (docType === 'FACTURA') {
+            const hasRef = document.getElementById('note-invoice-ref').value.trim().length > 0;
+            confirmBtn.disabled = !hasRef;
+            if (!hasRef) {
+                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
     }
 
     function showClientDropdown() {
@@ -541,17 +551,14 @@
         const descuentoGlobal = subtotal * (descuentoGlobalPercent / 100);
         const subtotalAfterDiscount = subtotal - descuentoGlobal;
 
-        // IVA (si está_checked y tipo=FACTURA)
-        const ivaChecked = document.getElementById('note-iva-check') && document.getElementById('note-iva-check').checked;
+        // IVA (siempre se calcula individual por articulo)
         let ivaUSD = 0;
-        if (ivaChecked) {
-            draftNoteItems.forEach(item => {
-                const itemTotal = item.precio * item.qty;
-                const itemDiscounted = itemTotal * (1 - descuentoGlobalPercent / 100);
-                const itemIvaPct = item.iva_porcentaje || 0;
-                ivaUSD += itemDiscounted * (itemIvaPct / 100);
-            });
-        }
+        draftNoteItems.forEach(item => {
+            const itemTotal = item.precio * item.qty;
+            const itemDiscounted = itemTotal * (1 - descuentoGlobalPercent / 100);
+            const itemIvaPct = item.iva_porcentaje || 0;
+            ivaUSD += itemDiscounted * (itemIvaPct / 100);
+        });
 
         const totalUSD = subtotalAfterDiscount;
         const totalBCVUSD = totalUSD * exactFactor;
@@ -563,10 +570,10 @@
         document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
         document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
 
-        // IVA row visibility
+        // IVA row visibility (solo si hay IVA calculado)
         const ivaRow = document.getElementById('iva-row');
         const ivaAmountEl = document.getElementById('note-iva-amount');
-        if (ivaChecked && ivaUSD > 0) {
+        if (ivaUSD > 0) {
             ivaRow.classList.remove('hidden');
             ivaAmountEl.innerText = `${totalIVA_BS.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
         } else {
@@ -685,7 +692,6 @@
             observaciones: observaciones,
             tipo_documento: document.querySelector('input[name="doc-type"]:checked').value,
             numero_factura: document.getElementById('note-invoice-ref').value.trim(),
-            iva_check: document.getElementById('note-iva-check') && document.getElementById('note-iva-check').checked,
             descuento_global: parseFloat(document.getElementById('note-discount-percent').value) || 0,
             items: draftNoteItems.map(i => ({
                 sku: i.sku,
@@ -710,11 +716,12 @@
             if(data.ok) {
                 const notaId = data.nota_id;
                 const correlativo = data.correlativo;
-                const printUrl = `/ventas/${notaId}/imprimir/`;
-                if (confirm(`Venta registrada con éxito. Nota Interna: ${correlativo}\n\n¿Desea imprimir la Nota de Entrega ahora?`)) {
-                    window.open(printUrl, '_blank');
+                const detailUrl = `/ventas/${notaId}/`;
+                if (confirm(`Venta registrada con éxito. ${data.tipo_documento || 'Documento'} Interno: ${correlativo}\n\n¿Desea ver el documento ahora?`)) {
+                    window.location.href = detailUrl;
+                } else {
+                    window.location.reload();
                 }
-                window.location.reload();
             } else {
                 alert(`Error: ${data.error}`);
             }

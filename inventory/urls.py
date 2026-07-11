@@ -38,6 +38,8 @@ urlpatterns = [
     path('ventas/validar_stock/<str:sku>/<int:almacen_id>/', views.api_validar_stock, name='validar_stock'),
     path('ventas/crear/', views.vista_crear_venta, name='crear_venta'),
     path('ventas/seriales/<str:articulo_sku>/<int:almacen_id>/', views.vista_buscar_seriales_articulo, name='buscar_seriales'),
+    path('ventas/<int:nota_id>/pdf/', views.generar_pdf_nota, name='pdf_nota'),
+    path('ventas/<int:nota_id>/', views.vista_detalle_nota, name='detalle_nota'),
     path('ventas/<int:nota_id>/imprimir/', views.vista_imprimir_nota, name='imprimir_nota'),
     path('ventas/<int:nota_id>/imprimir-coordenadas/', views.vista_imprimir_coordenadas, name='imprimir_coordenadas'),
 
