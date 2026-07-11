@@ -1109,20 +1109,20 @@ class NotaEntrega(models.Model):
     tasa_bcv_aplicada = models.DecimalField(
         max_digits=12,
         decimal_places=4,
-        default=0.0000,
+        default=Decimal('0.0000'),
         verbose_name='Tasa BCV al Momento de la Venta',
         help_text='Snapshot de la tasa BCV aplicada en el momento exacto de la venta.',
     )
     factor_cobertura_aplicado = models.DecimalField(
         max_digits=8,
         decimal_places=4,
-        default=1.0000,
+        default=Decimal('1.0000'),
         verbose_name='Factor de Cobertura Aplicado',
     )
     tasa_mercado_aplicada = models.DecimalField(
         max_digits=12,
         decimal_places=4,
-        default=0.0000,
+        default=Decimal('0.0000'),
         verbose_name='Tasa Mercado al Momento de la Venta (Snapshot)',
     )
     iva_check = models.BooleanField(
@@ -1133,14 +1133,14 @@ class NotaEntrega(models.Model):
     iva_total = models.DecimalField(
         max_digits=14,
         decimal_places=4,
-        default=0.0000,
+        default=Decimal('0.0000'),
         verbose_name='IVA Total (Snapshot)',
         help_text='Snapshot del IVA totalizado al momento de la venta.',
     )
     descuento_global = models.DecimalField(
         max_digits=5,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name='Descuento Global del Documento (%)',
     )
     observaciones = models.TextField(
@@ -1208,6 +1208,44 @@ class NotaEntrega(models.Model):
                 prefijo = 'NE'
             self.numero_nota = f'{prefijo}-{self.numero:08d}'
         super().save(*args, **kwargs)
+
+    @property
+    def subtotal_usd(self):
+        """Suma de subtotales USD (precio_base × cantidad, con descuento individual)."""
+        from decimal import Decimal
+        return sum(d.subtotal_usd for d in self.detalles.all())
+
+    @property
+    def subtotal_ajustado_usd(self):
+        """Suma de subtotales USD ajustados (× factor_cobertura)."""
+        from decimal import Decimal
+        return sum(d.subtotal_ajustado_usd for d in self.detalles.all())
+
+    @property
+    def subtotal_bs_bcv(self):
+        """Suma de subtotales Bs. BCV (sin factor)."""
+        from decimal import Decimal
+        return sum(d.subtotal_bs_bcv for d in self.detalles.all())
+
+    @property
+    def subtotal_bs(self):
+        """Suma de subtotales Bs. ajustados (con factor)."""
+        from decimal import Decimal
+        return sum(d.subtotal_bs for d in self.detalles.all())
+
+    @property
+    def total_iva_bs(self):
+        """IVA total en Bs. del documento (si iva_check=True)."""
+        from decimal import Decimal
+        if not self.iva_check:
+            return Decimal('0')
+        return sum(d.iva_bs for d in self.detalles.all())
+
+    @property
+    def total_documento_bs(self):
+        """Total documento = subtotal_bs + IVA BS (si aplica)."""
+        from decimal import Decimal
+        return self.subtotal_bs + self.total_iva_bs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1293,7 +1331,7 @@ class DetalleNotaEntrega(models.Model):
     iva_porcentaje = models.DecimalField(
         max_digits=5,
         decimal_places=2,
-        default=0.00,
+        default=Decimal('0.00'),
         verbose_name='IVA del Artículo (%) (Snapshot)',
         help_text='Snapshot del IVA tomado de la ficha del artículo al facturar.',
     )

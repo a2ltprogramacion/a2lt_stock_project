@@ -620,6 +620,7 @@ def api_buscar_articulos(request):
             'precio': str(precio_ajustado),
             'tipo': a.tipo,
             'usa_serial': a.usa_serial,
+            'iva_porcentaje': float(a.iva_porcentaje),
         })
     return JsonResponse({'results': results})
 
@@ -665,15 +666,20 @@ def vista_crear_venta(request):
             if 'sku' in item and 'articulo_sku' not in item:
                 item['articulo_sku'] = item.pop('sku')
 
+        from decimal import Decimal
         nota = svc.procesar_venta(
             empresa_id=empresa_id,
             cliente_id=cliente_id,
             lista_items=lista_items,
             almacen_id=almacen_id,
             usuario=request.user.username if request.user.is_authenticated else 'API',
-            observaciones=observaciones
+            observaciones=observaciones,
+            tipo_documento=data.get('tipo_documento', 'NOTA_ENTREGA'),
+            numero_factura=data.get('numero_factura', ''),
+            iva_check=data.get('iva_check', False),
+            descuento_global=Decimal(str(data.get('descuento_global', '0'))),
         )
-        
+
         return JsonResponse({
             'ok': True,
             'nota_id': nota.pk,

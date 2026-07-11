@@ -1138,18 +1138,30 @@ def resolver_colision(
 # ═══════════════════════════════════════════════════════════════════════
 
 @transaction.atomic
-def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='', observaciones='', empresa_id=None) -> NotaEntrega:
+def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='',
+                    observaciones='', empresa_id=None,
+                    tipo_documento='NOTA_ENTREGA', numero_factura='',
+                    iva_check=False, descuento_global=Decimal('0')) -> NotaEntrega:
     """
-    Procesa una venta generando una Nota de Entrega con inmutabilidad de precios.
-    
+    Procesa una venta generando una Nota de Entrega o Factura con inmutabilidad de precios.
+
+    Parámetros nuevos (Fase N2):
+      - tipo_documento: 'NOTA_ENTREGA' (default) o 'FACTURA'.
+      - numero_factura: string manual. También si tipo_documento=FACTURA. Único por empresa.
+      - iva_check: bool. Si True, se calcula y persiste iva_total en la cabecera.
+      - descuento_global: Decimal. % descuento global sobre el documento.
+
     Flujo atómico:
     1. Valida blindaje multi-pestaña (empresa_id del payload vs contexto activo).
-    2. Lee el snapshot cambiario de ConfiguracionEmpresa.
+    2. Lee el snapshot cambiario de ConfiguracionEmpresa (tasa_bcv + factor + tasa_mercado).
     3. Valida existencias para los artículos físicos (los combos se validan vía sus componentes).
     4. Registra la salida en el Kárdex para cada artículo físico o componentes de combo.
-    5. Crea la NotaEntrega y sus Detalles.
+    5. Crea la NotaEntrega (con tipo_documento, numero_factura, iva_check, descuento_global,
+       tasa_mercado_aplicada snapshot) y sus Detalles (4 precios snapshot + IVA snapshot).
+    6. Si iva_check=True, calcula iva_total = Σ iva_bs de cada detalle y lo persiste.
     """
     from .managers import get_current_empresa
+    from decimal import Decimal
     # Validación perimetral Multi-Tenant contra contaminación de sesión cruzada
     _ctx_empresa = get_current_empresa()
 
@@ -1190,6 +1202,42 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
 
     tasa_aplicada = config.tasa_bcv
     factor_aplicado = config.factor_cobertura
+    tasa_mercado_aplicada = config.tasa_mercado
+
+    # N2: Validación de tipo_documento y numero_factura
+    if tipo_documento not in ('NOTA_ENTREGA', 'FACTURA'):
+        raise ValueError(
+            f"Tipo de documento inválido: '{tipo_documento}'. "
+            "Debe ser 'NOTA_ENTREGA' o 'FACTURA'."
+        )
+    if tipo_documento == 'FACTURA':
+        if not numero_factura or not str(numero_factura).strip():
+            raise ValueError(
+                "Seguridad Contable: numero_factura es obligatorio cuando "
+                "tipo_documento='FACTURA'."
+            )
+        numero_factura = str(numero_factura).strip()
+        # Validar unicidad previa (la constraint DB también protege, pero damos
+        # un mensaje claro antes de llegar al IntegrityError).
+        if NotaEntrega.global_objects.filter(
+            empresa_id=almacen.empresa_id,
+            numero_factura=numero_factura,
+        ).exists():
+            raise ValueError(
+                f"El número de factura '{numero_factura}' ya existe "
+                "para esta empresa. No se pueden duplicar facturas."
+            )
+    else:
+        # NOTA_ENTREGA: número_factura debe ir vacío.
+        numero_factura = ''
+
+    # N2: Validación descuento_global (0-100)
+    try:
+        descuento_global = Decimal(str(descuento_global))
+    except (ValueError, TypeError):
+        raise ValueError("descuento_global debe ser un número decimal entre 0 y 100.")
+    if not (Decimal('0') <= descuento_global <= Decimal('100')):
+        raise ValueError("descuento_global debe estar entre 0 y 100.")
 
     # 2. Resolución del Cliente (el almacen ya esta validado arriba)
     
@@ -1204,22 +1252,25 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
             defaults={'identificacion': 'V-00000000'}
         )
 
-    # 3. Creación de la Cabecera (Nota de Entrega)
+    # 3. Creación de la Cabecera (Nota de Entrega o Factura)
     nota_entrega = NotaEntrega.objects.create(
         empresa=almacen.empresa,
         cliente=cliente,
         almacen=almacen,
         tasa_bcv_aplicada=tasa_aplicada,
         factor_cobertura_aplicado=factor_aplicado,
-        observaciones=observaciones
+        tasa_mercado_aplicada=tasa_mercado_aplicada,
+        observaciones=observaciones,
+        tipo_documento=tipo_documento,
+        numero_factura=numero_factura,
+        iva_check=iva_check,
+        descuento_global=descuento_global,
     )
 
     # Concepto estandarizado para el Kárdex (C-05)
     concepto_kardex = 'VENTA'
 
     # 4. Procesamiento de Ítems
-    from decimal import Decimal
-
     for item in lista_items:
         articulo = Articulo.objects.get(sku=item['articulo_sku'])
         cantidad = Decimal(str(item['cantidad']))
@@ -1319,9 +1370,21 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
             
             SerialArticulo.objects.bulk_update(seriales_db, ['estado', 'detalle_nota'])
 
+    # N2: Cálculo de iva_total si iva_check=True (snapshot imponible)
+    if iva_check:
+        iva_total_calc = Decimal('0')
+        for det in nota_entrega.detalles.all():
+            iva_total_calc += det.iva_bs
+        nota_entrega.iva_total = iva_total_calc.quantize(Decimal('0.0001'))
+        nota_entrega.save(update_fields=['iva_total'])
+    else:
+        nota_entrega.iva_total = Decimal('0')
+        nota_entrega.save(update_fields=['iva_total'])
+
+    # El objeto en memoria ya tiene el valor correcto de iva_total
     logger.info(
-        "Venta procesada exitosamente. Nota %s | %s ítems | Tasa: %s",
-        nota_entrega.numero, len(lista_items), tasa_aplicada
+        "Venta procesada exitosamente. Nota %s | %s ítems | Tasa: %s | Tipo: %s",
+        nota_entrega.numero, len(lista_items), tasa_aplicada, tipo_documento
     )
 
     return nota_entrega

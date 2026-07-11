@@ -5744,3 +5744,254 @@ class TestModelosNotaEntregaFaseN1(TestCase):
         self.assertEqual(det.iva_usd, Decimal('3.52'))  # 22 * 0.16 = 3.52
 
 
+class TestModelosNotaEntregaFaseN2(TestCase):
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='FaseN2 Corp', rif='J-N2-001')
+
+    def test_n2_nota_entrega_tiene_propiedades_subtotal_y_total(self):
+        """NotaEntrega debe tener propiedades subtotal_usd, subtotal_bs, total_iva_bs, total_documento_bs."""
+        from inventory.models import NotaEntrega, Almacen
+        alm = crear_almacen(self.empresa, 'Almacén N2a')
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        self.assertTrue(hasattr(nota, 'subtotal_usd'))
+        self.assertTrue(hasattr(nota, 'subtotal_ajustado_usd'))
+        self.assertTrue(hasattr(nota, 'subtotal_bs_bcv'))
+        self.assertTrue(hasattr(nota, 'subtotal_bs'))
+        self.assertTrue(hasattr(nota, 'total_iva_bs'))
+        self.assertTrue(hasattr(nota, 'total_documento_bs'))
+
+    def test_n2_subtotal_nota_sin_detalles_es_cero(self):
+        """subtotal_usd de una nota sin detalles debe ser Decimal('0')."""
+        from inventory.models import NotaEntrega, Almacen
+        alm = crear_almacen(self.empresa, 'Almacén N2b')
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        self.assertEqual(nota.subtotal_usd, Decimal('0'))
+        self.assertEqual(nota.total_iva_bs, Decimal('0'))
+        self.assertEqual(nota.total_documento_bs, Decimal('0'))
+
+    def test_n2_subtotal_nota_suma_detalles_correctamente(self):
+        """subtotal_usd de nota con 2 detalles debe ser la suma de sus subtotales."""
+        from inventory.models import NotaEntrega, DetalleNotaEntrega, Almacen, Articulo
+        alm = crear_almacen(self.empresa, 'Almacén N2c')
+        art1 = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-01', nombre='Art 1', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('5'), precio_divisa=Decimal('10'),
+        )
+        art2 = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-02', nombre='Art 2', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('5'), precio_divisa=Decimal('20'),
+        )
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        DetalleNotaEntrega.objects.create(
+            nota_entrega=nota, articulo=art1, almacen=alm,
+            cantidad=Decimal('1'), precio_base=Decimal('10.00'),
+            precio_ajustado=Decimal('11.00'), precio_directo_bcv=Decimal('100.00'),
+            precio_ajustado_bcv=Decimal('110.00'), iva_porcentaje=Decimal('16.00'),
+        )
+        DetalleNotaEntrega.objects.create(
+            nota_entrega=nota, articulo=art2, almacen=alm,
+            cantidad=Decimal('2'), precio_base=Decimal('20.00'),
+            precio_ajustado=Decimal('22.00'), precio_directo_bcv=Decimal('200.00'),
+            precio_ajustado_bcv=Decimal('220.00'), iva_porcentaje=Decimal('16.00'),
+        )
+        self.assertEqual(nota.subtotal_usd, Decimal('50.00'))  # 1*10 + 2*20
+        self.assertEqual(nota.subtotal_bs, Decimal('550.00'))  # 1*110 + 2*220
+
+    def test_n2_descuento_aplicado_float_corregido_a_decimal(self):
+        """descuento_aplicado default debe ser Decimal('0.00'), no float 0.0."""
+        from inventory.models import DetalleNotaEntrega, NotaEntrega, Almacen, Articulo
+        alm = crear_almacen(self.empresa, 'Almacén N2d')
+        art = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-03', nombre='Art D', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('1'), precio_divisa=Decimal('5'),
+        )
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        det = DetalleNotaEntrega.objects.create(
+            nota_entrega=nota, articulo=art, almacen=alm,
+            cantidad=Decimal('1'), precio_base=Decimal('10'),
+            precio_ajustado=Decimal('11'), precio_directo_bcv=Decimal('100'),
+            precio_ajustado_bcv=Decimal('110'), iva_porcentaje=Decimal('16'),
+        )
+        self.assertIsInstance(det.descuento_aplicado, Decimal)
+        self.assertEqual(det.descuento_aplicado, Decimal('0.00'))
+
+    def test_n2_descuento_individual_afecta_subtotales(self):
+        """Un descuento_aplicado de 10% debe reducir el subtotal_usd un 10%."""
+        from inventory.models import DetalleNotaEntrega, NotaEntrega, Almacen, Articulo
+        alm = crear_almacen(self.empresa, 'Almacén N2e')
+        art = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-04', nombre='Art Desc', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('1'), precio_divisa=Decimal('10'),
+        )
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        det = DetalleNotaEntrega.objects.create(
+            nota_entrega=nota, articulo=art, almacen=alm,
+            cantidad=Decimal('10'), precio_base=Decimal('100.00'),
+            precio_ajustado=Decimal('110.00'), precio_directo_bcv=Decimal('1000.00'),
+            precio_ajustado_bcv=Decimal('1100.00'), descuento_aplicado=Decimal('10.00'),
+            iva_porcentaje=Decimal('16.00'),
+        )
+        self.assertEqual(det.subtotal_usd, Decimal('900.00'))  # 1000 * 0.90
+        self.assertEqual(det.subtotal_bs, Decimal('9900.00'))  # 11000 * 0.90
+
+    def test_n2_iva_check_false_no_calcula_iva_total(self):
+        """Si iva_check=False, iva_total debe ser 0 (el campo no se calcula automáticamente)."""
+        from inventory.models import NotaEntrega, Almacen
+        alm = crear_almacen(self.empresa, 'Almacén N2f')
+        nota = NotaEntrega.objects.create(
+            empresa=self.empresa, almacen=alm, iva_check=False,
+        )
+        self.assertEqual(nota.iva_total, Decimal('0.0000'))
+
+    def test_n2_propiedad_total_iva_bs_con_iva_check_true(self):
+        """Con iva_check=True, total_iva_bs suma los iva_bs de cada detalle."""
+        from inventory.models import DetalleNotaEntrega, NotaEntrega, Almacen, Articulo
+        alm = crear_almacen(self.empresa, 'Almacén N2g')
+        art = Articulo.objects.create(
+            empresa=self.empresa, sku='N2-05', nombre='Art IVA', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('5'), precio_divisa=Decimal('100'),
+            iva_porcentaje=Decimal('16.00'),
+        )
+        nota = NotaEntrega.objects.create(
+            empresa=self.empresa, almacen=alm,
+            iva_check=True, tipo_documento='FACTURA', numero_factura='FA-001',
+        )
+        DetalleNotaEntrega.objects.create(
+            nota_entrega=nota, articulo=art, almacen=alm,
+            cantidad=Decimal('1'), precio_base=Decimal('100.00'),
+            precio_ajustado=Decimal('110.00'), precio_directo_bcv=Decimal('1000.00'),
+            precio_ajustado_bcv=Decimal('1100.00'), iva_porcentaje=Decimal('16.00'),
+        )
+        self.assertGreater(nota.total_iva_bs, Decimal('0'))
+
+
+class TestProcesarVentaN2(TestCase):
+
+    def setUp(self):
+        from inventory.services import registrar_movimiento
+        self.empresa = crear_empresa(nombre='FaseN2 Svc', rif='J-N2-SVC')
+        self.alm = crear_almacen(self.empresa, 'Almacén N2Svc')
+        self.art = crear_articulo_fisico(self.empresa, sku='N2-SVC-01', nombre='Art Svc')
+        registrar_movimiento(self.art, self.alm, 'ENTRADA', Decimal('1000'), 'Stock Inicial Test')
+
+    def test_n2_procesar_venta_tipo_documento_default_nota_entrega(self):
+        """Por default, procesar_venta crea tipo_documento=NOTA_ENTREGA."""
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+            almacen_id=self.alm.pk,
+        )
+        self.assertEqual(nota.tipo_documento, 'NOTA_ENTREGA')
+
+    def test_n2_procesar_venta_tipo_factura_requiere_numero_factura(self):
+        """tipo_documento=FACTURA sin numero_factura debe fallar con ValueError."""
+        from inventory.services import procesar_venta
+        with self.assertRaisesMessage(ValueError, "numero_factura es obligatorio"):
+            procesar_venta(
+                lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+                almacen_id=self.alm.pk,
+                tipo_documento='FACTURA',
+            )
+
+    def test_n2_procesar_venta_factura_crea_con_numero_factura(self):
+        """tipo_documento=FACTURA con numero_factura válido crea la nota."""
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA',
+            numero_factura='F-N2-001',
+        )
+        self.assertEqual(nota.tipo_documento, 'FACTURA')
+        self.assertEqual(nota.numero_factura, 'F-N2-001')
+
+    def test_n2_procesar_venta_numero_factura_duplicate_falla(self):
+        """No se puede crear dos facturas con el mismo numero_factura para la misma empresa."""
+        from inventory.services import procesar_venta
+        procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA',
+            numero_factura='F-N2-002',
+        )
+        with self.assertRaisesMessage(ValueError, "ya existe"):
+            procesar_venta(
+                lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+                almacen_id=self.alm.pk,
+                tipo_documento='FACTURA',
+                numero_factura='F-N2-002',
+            )
+
+    def test_n2_procesar_venta_iva_check_true_calcula_iva_total(self):
+        """Con iva_check=True, la nota debe tener iva_total > 0."""
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 100.0}],
+            almacen_id=self.alm.pk,
+            iva_check=True,
+        )
+        self.assertTrue(nota.iva_check)
+        self.assertGreater(nota.iva_total, Decimal('0'))
+
+    def test_n2_procesar_venta_iva_check_false_iva_total_cero(self):
+        """Con iva_check=False, iva_total debe ser 0."""
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 100.0}],
+            almacen_id=self.alm.pk,
+            iva_check=False,
+        )
+        self.assertFalse(nota.iva_check)
+        self.assertEqual(nota.iva_total, Decimal('0.0000'))
+
+    def test_n2_procesar_venta_snapshot_tasa_mercado_aplicada(self):
+        """tasa_mercado_aplicada debe guardarse como snapshot."""
+        from inventory.services import procesar_venta
+        from inventory.models import ConfiguracionEmpresa
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        config.tasa_mercado = Decimal('58.5000')
+        config.save()
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+            almacen_id=self.alm.pk,
+        )
+        self.assertEqual(nota.tasa_mercado_aplicada, Decimal('58.5000'))
+
+    def test_n2_procesar_venta_descuento_global_se_persiste(self):
+        """descuento_global del documento debe guardarse en la cabecera."""
+        from inventory.services import procesar_venta
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 100.0}],
+            almacen_id=self.alm.pk,
+            descuento_global=Decimal('5.00'),
+        )
+        self.assertEqual(nota.descuento_global, Decimal('5.00'))
+
+    def test_n2_procesar_venta_descuento_global_invalido_falla(self):
+        """descuento_global fuera de rango 0-100 debe fallar."""
+        from inventory.services import procesar_venta
+        with self.assertRaisesMessage(ValueError, "entre 0 y 100"):
+            procesar_venta(
+                lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 1, 'precio_base': 10.0}],
+                almacen_id=self.alm.pk,
+                descuento_global=Decimal('150'),
+            )
+
+    def test_n2_procesar_venta_4_precios_snapshot_en_detalle(self):
+        """Cada detalle debe tener los 4 precios snapshot y iva_porcentaje."""
+        from inventory.services import procesar_venta
+        from inventory.models import DetalleNotaEntrega
+        nota = procesar_venta(
+            lista_items=[{'articulo_sku': 'N2-SVC-01', 'cantidad': 2, 'precio_base': 50.0}],
+            almacen_id=self.alm.pk,
+        )
+        det = DetalleNotaEntrega.objects.get(nota_entrega=nota)
+        self.assertEqual(det.precio_base, Decimal('50'))
+        self.assertGreater(det.precio_ajustado, Decimal('0'))
+        self.assertGreater(det.precio_directo_bcv, Decimal('0'))
+        self.assertGreater(det.precio_ajustado_bcv, Decimal('0'))
+        self.assertIsInstance(det.iva_porcentaje, Decimal)
+        self.assertEqual(det.descuento_aplicado, Decimal('0.00'))
+
+

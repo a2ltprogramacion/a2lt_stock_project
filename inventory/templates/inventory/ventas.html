@@ -153,20 +153,50 @@
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-2 gap-3">
+                            <div class="space-y-3">
                                 <div>
-                                    <label
-                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
-                                        Factura Física</label>
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Tipo de Documento</label>
+                                    <div class="flex gap-4">
+                                        <label class="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name="doc-type" value="NOTA_ENTREGA" checked
+                                                onchange="onDocTypeChange(this.value)"
+                                                class="accent-indigo-600">
+                                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Nota de Entrega</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name="doc-type" value="FACTURA"
+                                                onchange="onDocTypeChange(this.value)"
+                                                class="accent-indigo-600">
+                                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Factura</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div id="invoice-ref-container" class="hidden">
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N° Factura Física</label>
                                     <input id="note-invoice-ref" type="text" placeholder="Ej. F-00213"
                                         class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
                                 </div>
+
                                 <div>
-                                    <label
-                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
-                                        Nota Interna</label>
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N° Nota Interna</label>
                                     <input id="note-correlative-lbl" type="text" readonly
                                         class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-850 rounded-xl p-2 text-xs text-slate-500 dark:text-slate-400 font-mono text-center font-bold">
+                                </div>
+
+                                <div id="iva-check-container" class="hidden">
+                                    <label class="flex items-center gap-2 cursor-pointer">
+                                        <input type="checkbox" id="note-iva-check" onchange="recalculateNoteTotal()"
+                                            class="accent-indigo-600 w-4 h-4">
+                                        <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Aplicar IVA (16%)</span>
+                                    </label>
+                                </div>
+
+                                <div>
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Descuento Global (%)</label>
+                                    <input id="note-discount-percent" type="number" min="0" max="100" step="0.01" value="0"
+                                        oninput="recalculateNoteTotal()"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
                                 </div>
                             </div>
 
@@ -188,18 +218,27 @@
                                         id="note-discount-usd">-$0.00</span>
                                 </div>
                                 <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Descuento Global:</span>
+                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
+                                        id="note-discount-global">-$0.00</span>
+                                </div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-1"></div>
                                 <div class="flex justify-between items-center text-sm">
                                     <!-- Verde para ingresos directos -->
-                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas
-                                        ($):</span>
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas ($):</span>
                                     <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base"
                                         id="note-total-usd">$0.00</span>
                                 </div>
-                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-1"></div>
                                 <div
                                     class="flex justify-between items-center text-xs text-indigo-600 dark:text-indigo-400">
                                     <span>Divisa BCV (Ajustada):</span>
                                     <span class="font-bold" id="note-total-bcv-usd">$0.00</span>
+                                </div>
+                                <div id="iva-row" class="hidden flex justify-between items-center text-xs text-amber-600 dark:text-amber-400">
+                                    <span>IVA (16%):</span>
+                                    <span class="font-bold" id="note-iva-amount">$0.00</span>
                                 </div>
                                 <div
                                     class="flex justify-between items-center text-base text-slate-900 dark:text-slate-100">
@@ -245,6 +284,21 @@
         {id: '{{ cliente.identificacion|escapejs }}', nombre: '{{ cliente.nombre|escapejs }}', identificacion: '{{ cliente.identificacion|escapejs }}', telefono: '{{ cliente.telefono|escapejs }}', direccion: '{{ cliente.direccion|escapejs }}'},
         {% endfor %}
     ];
+
+    function onDocTypeChange(value) {
+        const invoiceContainer = document.getElementById('invoice-ref-container');
+        const ivaContainer = document.getElementById('iva-check-container');
+        const ivaCheckbox = document.getElementById('note-iva-check');
+        if (value === 'FACTURA') {
+            invoiceContainer.classList.remove('hidden');
+            ivaContainer.classList.remove('hidden');
+        } else {
+            invoiceContainer.classList.add('hidden');
+            ivaContainer.classList.add('hidden');
+            if (ivaCheckbox) ivaCheckbox.checked = false;
+        }
+        recalculateNoteTotal();
+    }
 
     function showClientDropdown() {
         document.getElementById('client-dropdown').classList.remove('hidden');
@@ -356,6 +410,7 @@
                         document.getElementById('sale-item-selected-sku').dataset.precio = item.precio;
                         document.getElementById('sale-item-selected-sku').dataset.tipo = item.tipo;
                         document.getElementById('sale-item-selected-sku').dataset.usaSerial = item.usa_serial ? '1' : '';
+                        document.getElementById('sale-item-selected-sku').dataset.ivaPorcentaje = item.iva_porcentaje || 0;
                         dropdown.classList.add('hidden');
                     };
                     dropdown.appendChild(div);
@@ -372,6 +427,7 @@
         const precio = parseFloat(skuInput.dataset.precio);
         const tipo = skuInput.dataset.tipo;
         const usaSerial = skuInput.dataset.usaSerial === '1';
+        const ivaPorcentaje = parseFloat(skuInput.dataset.ivaPorcentaje) || 0;
         const almacenId = document.getElementById('sale-warehouse-select').value;
         const qty = parseInt(document.getElementById('sale-item-qty').value);
         
@@ -401,6 +457,7 @@
                 precio: precio,
                 tipo: tipo,
                 usa_serial: usaSerial,
+                iva_porcentaje: ivaPorcentaje,
                 cobertura_ind: null,
                 seriales_seleccionados: []
             });
@@ -478,16 +535,44 @@
         });
 
         const exactFactor = totalWeight > 0 ? (weightedFactorSum / totalWeight) : globalFactor;
-        const discountPercent = 0; // Configurable si se desea
-        const discount = subtotal * (discountPercent / 100);
-        const totalUSD = subtotal - discount;
+
+        // Descuento global
+        const descuentoGlobalPercent = parseFloat(document.getElementById('note-discount-percent').value) || 0;
+        const descuentoGlobal = subtotal * (descuentoGlobalPercent / 100);
+        const subtotalAfterDiscount = subtotal - descuentoGlobal;
+
+        // IVA (si está_checked y tipo=FACTURA)
+        const ivaChecked = document.getElementById('note-iva-check') && document.getElementById('note-iva-check').checked;
+        let ivaUSD = 0;
+        if (ivaChecked) {
+            draftNoteItems.forEach(item => {
+                const itemTotal = item.precio * item.qty;
+                const itemDiscounted = itemTotal * (1 - descuentoGlobalPercent / 100);
+                const itemIvaPct = item.iva_porcentaje || 0;
+                ivaUSD += itemDiscounted * (itemIvaPct / 100);
+            });
+        }
+
+        const totalUSD = subtotalAfterDiscount;
         const totalBCVUSD = totalUSD * exactFactor;
-        const totalVES = totalBCVUSD * globalBCV;
+        const totalIVA_BS = ivaUSD * globalBCV;
+        const totalVES = (totalBCVUSD + ivaUSD) * globalBCV;
 
         document.getElementById('note-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
-        document.getElementById('note-discount-usd').innerText = `-$${discount.toFixed(2)}`;
+        document.getElementById('note-discount-global').innerText = `-$${descuentoGlobal.toFixed(2)}`;
         document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
         document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
+
+        // IVA row visibility
+        const ivaRow = document.getElementById('iva-row');
+        const ivaAmountEl = document.getElementById('note-iva-amount');
+        if (ivaChecked && ivaUSD > 0) {
+            ivaRow.classList.remove('hidden');
+            ivaAmountEl.innerText = `${totalIVA_BS.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+        } else {
+            ivaRow.classList.add('hidden');
+        }
+
         document.getElementById('note-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
     }
 
@@ -598,11 +683,16 @@
             cliente_id: clientId || null,
             almacen_id: parseInt(almacenId),
             observaciones: observaciones,
+            tipo_documento: document.querySelector('input[name="doc-type"]:checked').value,
+            numero_factura: document.getElementById('note-invoice-ref').value.trim(),
+            iva_check: document.getElementById('note-iva-check') && document.getElementById('note-iva-check').checked,
+            descuento_global: parseFloat(document.getElementById('note-discount-percent').value) || 0,
             items: draftNoteItems.map(i => ({
                 sku: i.sku,
                 cantidad: i.qty,
                 precio_unitario_usd: i.precio,
-                precio_base: i.precio,  # FASE N1: nuevo nombre del campo
+                precio_base: i.precio,
+                descuento_aplicado: 0,
                 seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
             }))
         };
