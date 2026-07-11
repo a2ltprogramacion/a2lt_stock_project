@@ -431,8 +431,8 @@ def reporte_top_vendidos(empresa_id, limite=20, desde=None, hasta=None):
         'articulo_id', 'articulo__nombre'
     ).annotate(
         cantidad_total=Sum('cantidad'),
-        monto_usd_total=Sum(F('cantidad') * F('precio_unitario_usd')),
-        monto_bs_total=Sum(F('cantidad') * F('precio_unitario_bs')),
+        monto_usd_total=Sum(F('cantidad') * F('precio_base')),
+        monto_bs_total=Sum(F('cantidad') * F('precio_ajustado_bcv')),
     ).order_by('-monto_usd_total')[:limite]
 
     columns = [
@@ -558,7 +558,7 @@ def reporte_estado_resultados(empresa_id, desde=None, hasta=None):
         detalles_qs = detalles_qs.filter(nota_entrega__fecha__lte=hasta_dt)
 
     agg = detalles_qs.aggregate(
-        ingresos_usd=Sum(F('cantidad') * F('precio_unitario_usd')),
+        ingresos_usd=Sum(F('cantidad') * F('precio_base')),
         cogs_usd=Sum(F('cantidad') * F('costo_unitario_snapshot')),
     )
     ingresos = agg['ingresos_usd'] or Decimal('0.00')

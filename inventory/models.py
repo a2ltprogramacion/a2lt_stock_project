@@ -23,6 +23,7 @@ dentro de un bloque @transaction.atomic (implementado en services.py).
 """
 
 import math
+from decimal import Decimal
 
 from django.db import models
 from django.core.exceptions import ValidationError
@@ -99,6 +100,23 @@ class ConfiguracionEmpresa(models.Model):
         decimal_places=2,
         default=5.00,
         verbose_name='Descuento Global (%)',
+    )
+    prefijo_nota_entrega = models.CharField(
+        max_length=20,
+        default='NE',
+        verbose_name='Prefijo Nota de Entrega',
+        help_text='Prefijo alfanumérico fijo para el correlativo. Ej: NE, A2LT-B17.',
+    )
+    correlativo_inicial_nota = models.PositiveIntegerField(
+        default=1,
+        verbose_name='Correlativo Inicial Nota',
+        help_text='Número inicial del correlativo. Para migraciones puede arrancar desde N.',
+    )
+    ivas_disponibles = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='IVAs Disponibles (%)',
+        help_text='Lista de hasta 5 tasas de IVA configurables. Ej: [0, 8, 16].',
     )
 
     # -- Configuración del Motor de API de Tasas --
@@ -411,6 +429,14 @@ class Articulo(models.Model):
         blank=True,
         verbose_name='Factor de Cobertura Individual (Fc)',
         help_text='Si se configura, sobrescribe el Fc global del sistema.',
+    )
+    iva_porcentaje = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=16.00,
+        verbose_name='IVA del Artículo (%)',
+        help_text='Editable sólo por usuarios superiores en la Ficha. '
+                  'Snapshot inmutable al facturar.',
     )
 
     # -- Textos de Contenido y Social Selling --
@@ -1013,6 +1039,10 @@ class NotaEntrega(models.Model):
         ('PROCESADO', 'Procesado'),
         ('ANULADO', 'Anulado'),
     ]
+    TIPO_DOCUMENTO_CHOICES = [
+        ('NOTA_ENTREGA', 'Nota de Entrega'),
+        ('FACTURA', 'Factura'),
+    ]
     MONEDA_CHOICES = [
         ('USD', 'Dólares (USD)'),
         ('BS_BCV', 'Bolívares a Tasa BCV'),
@@ -1023,6 +1053,25 @@ class NotaEntrega(models.Model):
     numero = models.PositiveIntegerField(
         verbose_name='Nº de Nota de Entrega',
         help_text='Correlativo numérico único por empresa, generado automáticamente.',
+    )
+    tipo_documento = models.CharField(
+        max_length=15,
+        choices=TIPO_DOCUMENTO_CHOICES,
+        default='NOTA_ENTREGA',
+        verbose_name='Tipo de Documento',
+    )
+    numero_nota = models.CharField(
+        max_length=30,
+        blank=True,
+        verbose_name='N° Nota Interna',
+        help_text='Correlativo alfanumérico configurable. Ej: NE-00000008.',
+    )
+    numero_factura = models.CharField(
+        max_length=100,
+        blank=True,
+        default='',
+        verbose_name='N° Factura Física',
+        help_text='Manual. Sólo si tipo_documento=FACTURA. Único por empresa.',
     )
     fecha = models.DateTimeField(
         auto_now_add=True,
@@ -1070,6 +1119,30 @@ class NotaEntrega(models.Model):
         default=1.0000,
         verbose_name='Factor de Cobertura Aplicado',
     )
+    tasa_mercado_aplicada = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=0.0000,
+        verbose_name='Tasa Mercado al Momento de la Venta (Snapshot)',
+    )
+    iva_check = models.BooleanField(
+        default=False,
+        verbose_name='IVA Aplicado',
+        help_text='Indica si el documento procesa el cálculo impositivo.',
+    )
+    iva_total = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        default=0.0000,
+        verbose_name='IVA Total (Snapshot)',
+        help_text='Snapshot del IVA totalizado al momento de la venta.',
+    )
+    descuento_global = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0.00,
+        verbose_name='Descuento Global del Documento (%)',
+    )
     observaciones = models.TextField(
         blank=True,
         verbose_name='Observaciones',
@@ -1082,20 +1155,58 @@ class NotaEntrega(models.Model):
         verbose_name = 'Nota de Entrega'
         verbose_name_plural = '11. Notas de Entrega'
         ordering = ['-numero']
-        unique_together = ('empresa', 'numero')
+        unique_together = (
+            ('empresa', 'numero'),
+        )
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_nota'],
+                name='unique_numero_nota_por_empresa',
+                condition=~models.Q(numero_nota=''),
+            ),
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_factura'],
+                name='unique_numero_factura_por_empresa',
+                condition=~models.Q(numero_factura=''),
+            ),
+        ]
 
     def __str__(self):
         cliente_nombre = self.cliente.nombre if self.cliente else 'Cliente Genérico'
-        return f'NE-{self.numero:05d} | {cliente_nombre} | {self.get_estado_display()}'
+        ident = self.numero_nota or f'NE-{self.numero:08d}'
+        return f'{ident} | {cliente_nombre} | {self.get_estado_display()}'
 
     def save(self, *args, **kwargs):
-        """Auto-genera el número correlativo por empresa si es una nota nueva."""
+        """
+        Auto-genera:
+          - numero: correlativo entero por empresa (respetando correlativo_inicial_nota)
+          - numero_nota: formato {prefijo}-{numero:08d} (ej: NE-00000008)
+        Sólo si no vienen ya poblados (permite override para casos especiales).
+        """
         if not self.numero:
             from django.db.models import Max
             max_num = NotaEntrega.global_objects.filter(
                 empresa=self.empresa
             ).aggregate(max_num=Max('numero'))['max_num']
-            self.numero = (max_num + 1) if max_num else 1
+            # Arrancar desde correlativo_inicial_nota configurado, o 1 si no hay config
+            try:
+                inicial = ConfiguracionEmpresa.objects.get(
+                    empresa_id=self.empresa_id
+                ).correlativo_inicial_nota
+            except ConfiguracionEmpresa.DoesNotExist:
+                inicial = 1
+            if max_num:
+                self.numero = max_num + 1
+            else:
+                self.numero = max(inicial, 1)
+        if not self.numero_nota:
+            try:
+                prefijo = ConfiguracionEmpresa.objects.get(
+                    empresa_id=self.empresa_id
+                ).prefijo_nota_entrega
+            except ConfiguracionEmpresa.DoesNotExist:
+                prefijo = 'NE'
+            self.numero_nota = f'{prefijo}-{self.numero:08d}'
         super().save(*args, **kwargs)
 
 
@@ -1123,21 +1234,48 @@ class DetalleNotaEntrega(models.Model):
         related_name='detalles_nota_entrega',
         verbose_name='Artículo',
     )
+    almacen = models.ForeignKey(
+        Almacen,
+        on_delete=models.PROTECT,
+        related_name='detalles_nota_entrega',
+        null=True,
+        blank=True,
+        verbose_name='Almacén de Origen',
+        help_text='Almacén desde donde se ejecuta la rebaja real de stock.',
+    )
     cantidad = models.DecimalField(
         max_digits=12,
         decimal_places=2,
         verbose_name='Cantidad',
     )
-    # Snapshot de precios al momento de la venta (inmutables)
-    precio_unitario_usd = models.DecimalField(
+    # Snapshot de los 4 precios al momento de la venta (inmutables — ADR-18)
+    precio_base = models.DecimalField(
         max_digits=14,
         decimal_places=4,
-        verbose_name='Precio Unitario en USD (Snapshot)',
+        default=0.0000,
+        verbose_name='Precio Base (USD, Snapshot)',
+        help_text='Precio en divisas del catálogo al momento de facturar.',
     )
-    precio_unitario_bs = models.DecimalField(
+    precio_ajustado = models.DecimalField(
+        max_digits=14,
+        decimal_places=4,
+        default=0.0000,
+        verbose_name='Precio Ajustado (USD, Snapshot)',
+        help_text='precio_base × factor_cobertura. Protección cambiaria.',
+    )
+    precio_directo_bcv = models.DecimalField(
         max_digits=16,
         decimal_places=2,
-        verbose_name='Precio Unitario en Bs. (Snapshot)',
+        default=0.00,
+        verbose_name='Precio Bs. BCV (Snapshot)',
+        help_text='precio_base × tasa_bcv. Sin factor de cobertura.',
+    )
+    precio_ajustado_bcv = models.DecimalField(
+        max_digits=16,
+        decimal_places=2,
+        default=0.00,
+        verbose_name='Precio Bs. Ajustado (Snapshot)',
+        help_text='precio_base × factor_cobertura × tasa_bcv. Mayor protección.',
     )
     costo_unitario_snapshot = models.DecimalField(
         max_digits=14,
@@ -1149,8 +1287,15 @@ class DetalleNotaEntrega(models.Model):
     descuento_aplicado = models.DecimalField(
         max_digits=5,
         decimal_places=2,
+        default=Decimal('0.00'),
+        verbose_name='Descuento Individual (%)',
+    )
+    iva_porcentaje = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
         default=0.00,
-        verbose_name='Descuento Aplicado (%)',
+        verbose_name='IVA del Artículo (%) (Snapshot)',
+        help_text='Snapshot del IVA tomado de la ficha del artículo al facturar.',
     )
 
     class Meta:
@@ -1162,15 +1307,43 @@ class DetalleNotaEntrega(models.Model):
 
     @property
     def subtotal_usd(self):
-        """Calcula el subtotal en USD aplicando el descuento."""
-        factor_descuento = 1 - (self.descuento_aplicado / 100)
-        return self.precio_unitario_usd * self.cantidad * factor_descuento
+        """Subtotal en USD (precio_base) aplicando descuento individual."""
+        from decimal import Decimal
+        factor_descuento = Decimal('1') - (self.descuento_aplicado / Decimal('100'))
+        return self.precio_base * self.cantidad * factor_descuento
+
+    @property
+    def subtotal_ajustado_usd(self):
+        """Subtotal en USD ajustado (× factor_cobertura) aplicando descuento."""
+        from decimal import Decimal
+        factor_descuento = Decimal('1') - (self.descuento_aplicado / Decimal('100'))
+        return self.precio_ajustado * self.cantidad * factor_descuento
+
+    @property
+    def subtotal_bs_bcv(self):
+        """Subtotal en Bs. BCV (sin factor) aplicando descuento."""
+        from decimal import Decimal
+        factor_descuento = Decimal('1') - (self.descuento_aplicado / Decimal('100'))
+        return self.precio_directo_bcv * self.cantidad * factor_descuento
 
     @property
     def subtotal_bs(self):
-        """Calcula el subtotal en Bs. aplicando el descuento."""
-        factor_descuento = 1 - (self.descuento_aplicado / 100)
-        return self.precio_unitario_bs * self.cantidad * factor_descuento
+        """Subtotal en Bs. ajustado (con factor) aplicando descuento."""
+        from decimal import Decimal
+        factor_descuento = Decimal('1') - (self.descuento_aplicado / Decimal('100'))
+        return self.precio_ajustado_bcv * self.cantidad * factor_descuento
+
+    @property
+    def iva_usd(self):
+        """IVA en USD sobre el subtotal ajustado (precio_ajustado)."""
+        from decimal import Decimal
+        return self.subtotal_ajustado_usd * (self.iva_porcentaje / Decimal('100'))
+
+    @property
+    def iva_bs(self):
+        """IVA en Bs. sobre el subtotal ajustado (precio_ajustado_bcv)."""
+        from decimal import Decimal
+        return self.subtotal_bs * (self.iva_porcentaje / Decimal('100'))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

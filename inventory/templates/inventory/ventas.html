@@ -602,6 +602,7 @@
                 sku: i.sku,
                 cantidad: i.qty,
                 precio_unitario_usd: i.precio,
+                precio_base: i.precio,  # FASE N1: nuevo nombre del campo
                 seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
             }))
         };

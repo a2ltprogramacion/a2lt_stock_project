@@ -371,10 +371,13 @@ class DetalleNotaEntregaInline(admin.TabularInline):
 
 @admin.register(NotaEntrega)
 class NotaEntregaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
-    list_display = ('numero', 'fecha', 'cliente', 'almacen', 'estado', 'moneda_pago')
-    list_filter = ('estado', 'moneda_pago', 'almacen')
-    search_fields = ('numero', 'cliente__nombre', 'cliente__identificacion')
-    readonly_fields = ('numero', 'fecha', 'tasa_bcv_aplicada', 'factor_cobertura_aplicado')
+    list_display = ('numero_nota', 'numero_factura', 'tipo_documento', 'fecha', 'cliente', 'almacen', 'estado', 'moneda_pago')
+    list_filter = ('estado', 'moneda_pago', 'tipo_documento', 'almacen')
+    search_fields = ('numero', 'numero_nota', 'numero_factura',
+                     'cliente__nombre', 'cliente__identificacion')
+    readonly_fields = ('numero', 'numero_nota', 'fecha',
+                       'tasa_bcv_aplicada', 'factor_cobertura_aplicado',
+                       'tasa_mercado_aplicada', 'iva_total')
     inlines = [DetalleNotaEntregaInline]
     date_hierarchy = 'fecha'
 
@@ -382,10 +385,11 @@ class NotaEntregaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
 @admin.register(DetalleNotaEntrega)
 class DetalleNotaEntregaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
     list_display = (
-        'nota_entrega', 'articulo', 'cantidad',
-        'precio_unitario_usd', 'descuento_aplicado',
+        'nota_entrega', 'articulo', 'almacen', 'cantidad',
+        'precio_base', 'descuento_aplicado', 'iva_porcentaje',
     )
-    search_fields = ('nota_entrega__numero', 'articulo__nombre', 'articulo__sku')
+    search_fields = ('nota_entrega__numero', 'nota_entrega__numero_nota',
+                     'articulo__nombre', 'articulo__sku')
 
 
 # ─────────────────────────────────────────────────────────────────────────────

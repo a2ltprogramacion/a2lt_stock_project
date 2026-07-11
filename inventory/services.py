@@ -1223,7 +1223,12 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
     for item in lista_items:
         articulo = Articulo.objects.get(sku=item['articulo_sku'])
         cantidad = Decimal(str(item['cantidad']))
-        precio_unitario_usd = Decimal(str(item['precio_unitario_usd']))
+        # Compatibilidad: acepta precio_unitario_usd (legacy) o precio_base (nuevo).
+        precio_base = Decimal(str(
+            item.get('precio_base', item.get('precio_unitario_usd'))
+        ))
+        # Descuento individual opcional (default 0)
+        descuento_aplicado = Decimal(str(item.get('descuento_aplicado', '0')))
 
         # Validación estricta de Stock
         stock_disp = articulo.get_stock_disponible(almacen)
@@ -1253,18 +1258,27 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
                 usuario=usuario
             )
 
-        # Inmutabilidad Financiera: Cálculo matemático duro para grabar
-        # Fórmula: P_bs = P_usd * factor * bcv
-        precio_bs_final = precio_unitario_usd * factor_aplicado * tasa_aplicada
+        # Inmutabilidad Financiera: 4 snapshots de precios al momento de la venta
+        precio_ajustado = (precio_base * factor_aplicado).quantize(Decimal('0.0001'))
+        precio_directo_bcv = (precio_base * tasa_aplicada).quantize(Decimal('0.01'))
+        precio_ajustado_bcv = (precio_ajustado * tasa_aplicada).quantize(Decimal('0.01'))
 
-        # Creación de Detalle (Línea de factura) — ADR-18: Snapshot de costo inmutable
+        # IVA snapshot desde Articulo (no del payload, ver Hipótesis Operativa)
+        iva_porcentaje = articulo.iva_porcentaje
+
+        # Creación de Detalle (Línea de factura) — ADR-18: 4 precios snapshot + IVA
         detalle_nota = DetalleNotaEntrega.objects.create(
             nota_entrega=nota_entrega,
             articulo=articulo,
+            almacen=almacen,
             cantidad=cantidad,
-            precio_unitario_usd=precio_unitario_usd,
-            precio_unitario_bs=precio_bs_final,
+            precio_base=precio_base,
+            precio_ajustado=precio_ajustado,
+            precio_directo_bcv=precio_directo_bcv,
+            precio_ajustado_bcv=precio_ajustado_bcv,
             costo_unitario_snapshot=articulo.costo,
+            descuento_aplicado=descuento_aplicado,
+            iva_porcentaje=iva_porcentaje,
         )
 
         # Validación estricta y quema atómica de Seriales (Ticket #14-SAAS)
@@ -1977,7 +1991,7 @@ def procesar_devolucion_venta(nota_entrega_id: int, items_devolucion: list, tipo
             costo_aplicado=costo_aplicado
         )
 
-        monto_reembolso_total += detalle_venta.precio_unitario_usd * cantidad_devolver
+        monto_reembolso_total += detalle_venta.precio_base * cantidad_devolver
 
         # Control Defectuosos Automático (C-05: Concepto estandarizado)
         if not config.usa_almacen_cuarentena and es_defectuoso:

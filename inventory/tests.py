@@ -944,7 +944,7 @@ class TestVentaExitosa(TestCase):
 
         # 2. Detalle grabó precio BS calculado: 20 * 40 * 1.05 = 840
         detalle = nota.detalles.first()
-        self.assertEqual(detalle.precio_unitario_bs, Decimal('840.00'))
+        self.assertEqual(detalle.precio_ajustado_bcv, Decimal('840.00'))
 
         # 3. Kárdex descontó físico
         stock_mouse = self.mouse.get_stock_disponible(self.almacen)
@@ -1549,8 +1549,8 @@ class TestImpresionParametrizada(TestCase):
             nota_entrega=self.nota,
             articulo=self.articulo,
             cantidad=Decimal('2.00'),
-            precio_unitario_usd=Decimal('15.00'),
-            precio_unitario_bs=Decimal('600.00')
+            precio_base=Decimal('15.00'),
+            precio_ajustado_bcv=Decimal('600.00')
         )
 
     def test_persistencia_coordenadas_dimensionales(self):
@@ -5628,5 +5628,119 @@ class TestCatalogoPaginacion(TestCase):
         self.assertIn("'#4f46e5'", content,
                       msg='corporate.600 (#4f46e5) debe estar definido en '
                           'base.html tailwind.config.')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST C21: Modelos Nota de Entrega Fase N1 — campos nuevos + migración
+# ─────────────────────────────────────────────────────────────────────────────
+# Valida que los campos nuevos de NotaEntrega, DetalleNotaEntrega,
+# ConfiguracionEmpresa y Articulo existan y tengan defaults correctos.
+
+
+class TestModelosNotaEntregaFaseN1(TestCase):
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='FaseN1 Corp', rif='J-N1-001')
+
+    def test_n1_articulo_tiene_iva_porcentaje_default_16(self):
+        """Articulo.iva_porcentaje debe existir y defaultear a 16.00."""
+        art = Articulo.objects.create(
+            empresa=self.empresa, sku='N1-001', nombre='Art N1',
+            tipo='FISICO', categoria='OTROS',
+            costo=Decimal('10.00'), precio_divisa=Decimal('20.00'),
+        )
+        self.assertEqual(art.iva_porcentaje, Decimal('16.00'))
+
+    def test_n1_configuracion_tiene_prefijo_y_correlativo_inicial(self):
+        """ConfiguracionEmpresa debe tener prefijo_nota_entrega y
+        correlativo_inicial_nota con defaults sane."""
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.assertEqual(config.prefijo_nota_entrega, 'NE')
+        self.assertEqual(config.correlativo_inicial_nota, 1)
+
+    def test_n1_configuracion_ivas_disponibles_es_json_lista(self):
+        """ivas_disponibles debe ser una lista (JSONField)."""
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.assertIsInstance(config.ivas_disponibles, list)
+
+    def test_n1_nota_entrega_tiene_tipo_documento_default_nota_entrega(self):
+        """NotaEntrega.tipo_documento debe defaultear a NOTA_ENTREGA."""
+        from inventory.models import NotaEntrega, Almacen
+        alm = crear_almacen(self.empresa, 'Almacén N1')
+        nota = NotaEntrega.objects.create(
+            empresa=self.empresa, numero=1, almacen=alm,
+        )
+        self.assertEqual(nota.tipo_documento, 'NOTA_ENTREGA')
+        self.assertFalse(nota.iva_check)
+        self.assertEqual(nota.iva_total, Decimal('0.0000'))
+        self.assertEqual(nota.descuento_global, Decimal('0.00'))
+        self.assertEqual(nota.numero_factura, '')
+
+    def test_n1_nota_entrega_numero_nota_se_genera_con_prefijo_configurado(self):
+        """Al guardar, numero_nota debe tomar el formato {prefijo}-{numero:08d}."""
+        from inventory.models import NotaEntrega, Almacen
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        config.prefijo_nota_entrega = 'A2LT-B17'
+        config.save()
+        alm = crear_almacen(self.empresa, 'Almacén N1b')
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        expected = f'A2LT-B17-{nota.numero:08d}'
+        self.assertEqual(nota.numero_nota, expected)
+
+    def test_n1_nota_entrega_correlativo_respeta_inicial_configurado(self):
+        """Si no hay notas previas, el numero arranca en correlativo_inicial_nota."""
+        from inventory.models import NotaEntrega, Almacen
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        config.correlativo_inicial_nota = 100
+        config.save()
+        alm = crear_almacen(self.empresa, 'Almacén N1c')
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        self.assertEqual(nota.numero, 100)
+        self.assertEqual(nota.numero_nota, f'NE-{100:08d}')
+
+    def test_n1_numero_factura_unique_por_empresa(self):
+        """Dos notas con mismo numero_factura en la misma empresa deben fallar."""
+        from inventory.models import NotaEntrega, Almacen
+        from django.db import IntegrityError
+        alm = crear_almacen(self.empresa, 'Almacén N1d')
+        NotaEntrega.objects.create(
+            empresa=self.empresa, numero=1, almacen=alm,
+            numero_factura='F-001',
+        )
+        with self.assertRaises(IntegrityError):
+            NotaEntrega.objects.create(
+                empresa=self.empresa, numero=2, almacen=alm,
+                numero_factura='F-001',
+            )
+
+    def test_n1_detalle_tiene_4_precios_snapshot_e_iva(self):
+        """DetalleNotaEntrega debe tener precio_base, precio_ajustado,
+        precio_directo_bcv, precio_ajustado_bcv e iva_porcentaje."""
+        from inventory.models import NotaEntrega, Almacen, DetalleNotaEntrega
+        alm = crear_almacen(self.empresa, 'Almacén N1e')
+        art = Articulo.objects.create(
+            empresa=self.empresa, sku='N1-DET', nombre='Art Det',
+            tipo='FISICO', categoria='OTROS',
+            costo=Decimal('5.00'), precio_divisa=Decimal('10.00'),
+        )
+        nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
+        det = DetalleNotaEntrega.objects.create(
+            nota_entrega=nota, articulo=art, almacen=alm,
+            cantidad=Decimal('2'),
+            precio_base=Decimal('10.00'),
+            precio_ajustado=Decimal('11.00'),
+            precio_directo_bcv=Decimal('400.00'),
+            precio_ajustado_bcv=Decimal('440.00'),
+            iva_porcentaje=Decimal('16.00'),
+        )
+        self.assertEqual(det.precio_base, Decimal('10.00'))
+        self.assertEqual(det.precio_ajustado, Decimal('11.00'))
+        self.assertEqual(det.precio_directo_bcv, Decimal('400.00'))
+        self.assertEqual(det.precio_ajustado_bcv, Decimal('440.00'))
+        self.assertEqual(det.iva_porcentaje, Decimal('16.00'))
+        self.assertEqual(det.descuento_aplicado, Decimal('0.00'))
+        # Propiedades calculadas (sin descuento, sin iva)
+        self.assertEqual(det.subtotal_usd, Decimal('20.00'))
+        self.assertEqual(det.iva_usd, Decimal('3.52'))  # 22 * 0.16 = 3.52
 
 

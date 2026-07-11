@@ -405,7 +405,8 @@ class Command(BaseCommand):
                     {
                         "articulo_sku": articulo.sku,
                         "cantidad": catidad_vender,
-                        "precio_unitario_usd": str(articulo.precio_divisa),
+                        "precio_base": str(articulo.precio_divisa),
+                        "precio_unitario_usd": str(articulo.precio_divisa),  # alias retrocompat
                         "seriales": seriales_venta,
                     }
                 )

@@ -139,8 +139,8 @@ def dashboard(request):
         nota_entrega__empresa_id=empresa_id,
         nota_entrega__estado='PROCESADO',
     ).aggregate(
-        volumen_usd=Sum(F('precio_unitario_usd') * F('cantidad')),
-        volumen_bs=Sum(F('precio_unitario_bs') * F('cantidad'))
+        volumen_usd=Sum(F('precio_base') * F('cantidad')),
+        volumen_bs=Sum(F('precio_ajustado_bcv') * F('cantidad'))
     )
     volumen_usd = ventas_mes['volumen_usd'] or Decimal('0.00')
     volumen_bs = ventas_mes['volumen_bs'] or Decimal('0.00')
@@ -696,8 +696,8 @@ def vista_imprimir_nota(request, nota_id):
     detalles = nota.detalles.select_related('articulo').all()
     config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
     
-    total_usd = sum(d.cantidad * d.precio_unitario_usd for d in detalles)
-    total_bs = sum(d.cantidad * d.precio_unitario_bs for d in detalles)
+    total_usd = sum(d.cantidad * d.precio_base for d in detalles)
+    total_bs = sum(d.cantidad * d.precio_ajustado_bcv for d in detalles)
     
     context = {
         'nota': nota,
@@ -973,8 +973,8 @@ def vista_imprimir_coordenadas(request, nota_id):
     config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
 
     # Calculamos totales para el documento
-    total_usd = sum(d.precio_unitario_usd * d.cantidad for d in nota.detalles.all())
-    total_bs = sum(d.precio_unitario_bs * d.cantidad for d in nota.detalles.all())
+    total_usd = sum(d.precio_base * d.cantidad for d in nota.detalles.all())
+    total_bs = sum(d.precio_ajustado_bcv * d.cantidad for d in nota.detalles.all())
 
     context = {
         'nota': nota,

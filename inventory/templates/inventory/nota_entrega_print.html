@@ -96,8 +96,8 @@
                         <p class="font-bold text-gray-900">{{ d.articulo.nombre }}</p>
                         <p class="text-xs text-gray-500 font-mono">{{ d.articulo.sku }}</p>
                     </td>
-                    <td class="py-3 px-4 text-right font-mono">${{ d.precio_unitario_usd|stringformat:".2f" }}</td>
-                    <td class="py-3 px-4 text-right font-mono font-bold">${% widthratio d.cantidad 1 d.precio_unitario_usd %}</td>
+                    <td class="py-3 px-4 text-right font-mono">${{ d.precio_base|stringformat:".2f" }}</td>
+                    <td class="py-3 px-4 text-right font-mono font-bold">${% widthratio d.cantidad 1 d.precio_base %}</td>
                 </tr>
                 {% empty %}
                 <tr>
