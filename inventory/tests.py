@@ -2219,13 +2219,12 @@ class TestCoberturaCritica(TransactionTestCase):
         lista_items = [{
             'sku': 'COV-001', 'cantidad': Decimal('5.00'),
             'costo_factura': Decimal('10.00'),
-            'seriales': ['SN-COMP-1', 'SN-COMP-2']
+            'seriales': ['SN-COMP-1', 'SN-COMP-2', 'SN-COMP-3', 'SN-COMP-4', 'SN-COMP-5']
         }]
         res = svc.registrar_compra_proveedor(
             proveedor_id=str(proveedor.pk),
             numero_factura='FACT-COV',
-            fecha_compra='2026-06-25',
-            monto_total_usd=Decimal('50.00'),
+            fecha_compra='2026-01-15',
             almacen_id=self.almacen.pk,
             lista_items=lista_items,
             usuario='Admin'
@@ -4799,8 +4798,7 @@ class TestSnapshotTasaEnCompra(TestCase):
         resultado = registrar_compra_proveedor(
             proveedor_id=str(proveedor.pk),
             numero_factura='FACT-SNAP-001',
-            fecha_compra='2026-07-15',
-            monto_total_usd=Decimal('100.00'),
+            fecha_compra='2026-01-15',
             almacen_id=almacen.pk,
             lista_items=[{
                 'sku': 'SNAP-001',
@@ -4892,7 +4890,6 @@ class TestReportesFase4(TestCase):
             proveedor_id=self.proveedor.pk,
             numero_factura='F-REP-001',
             fecha_compra='2026-07-01',
-            monto_total_usd=Decimal('100.00'),
             almacen_id=self.almacen.pk,
             lista_items=[{'sku': 'REP-ART-1', 'cantidad': Decimal('3'), 'costo_factura': Decimal('10.00')}],
             usuario='test',
@@ -4964,8 +4961,8 @@ class TestReportesFase4(TestCase):
         self.assertEqual(r['meta']['titulo'], 'Cuentas por Pagar')
         self.assertGreaterEqual(len(r['rows']), 1)
         self.assertIn('total_usd', r['totals'])
-        # 1 compra de 100 USD
-        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('100.0000'))
+        # 1 compra de 30 USD (3 * 10)
+        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('30.0000'))
 
     # ── Reporte 6: Top vendidos ─────────────────────────────────────────────
     def test_reporte_top_vendidos(self):

@@ -1717,13 +1717,43 @@ def ejecutar_ajuste_manual(articulo_sku: str, almacen_id: int, nueva_cantidad_fi
 # 9. CONTROL DE COSTOS Y COMPRAS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_compra: str, monto_total_usd: Decimal, almacen_id: int, lista_items: list, usuario: str = '', empresa_id=None, observaciones: str = '') -> dict:
+def registrar_compra_proveedor(
+    empresa_id=None, proveedor_id=None, tipo_documento='FACTURA_COMPRA',
+    numero_factura='', fecha_compra=None, descuento_global=Decimal('0.00'),
+    lista_items=None, almacen_id=None, usuario='',
+    observaciones='', **kwargs) -> dict:
     """
     Registra el ingreso de mercancía por compra a proveedor mediante un Documento de Compra.
-    Actualiza el costo base de cada producto y recalcula dinámicamente el precio en divisas
-    para mantener el margen comercial. Genera movimientos de Kárdex asociados a la compra.
+    Tipos: FACTURA_COMPRA, NOTA_CREDITO_COMPRA, ORDEN_COMPRA.
+    Parámetros:
+      - tipo_documento: 'FACTURA_COMPRA' | 'NOTA_CREDITO_COMPRA' | 'ORDEN_COMPRA'
+      - numero_factura: obligatorio para FACTURA_COMPRA. Único por empresa.
+      - descuento_global: Decimal 0-100 (default 0)
+      - lista_items: [{sku, cantidad, costo_factura, descuento_aplicado(optional), iva_porcentaje(optional), seriales(optional)}]
+    Flujo atómico:
+    1. Valida tenant, proveedor, almacén, items.
+    2. Lee snapshot tasas de ConfiguracionEmpresa.
+    3. Crea DocumentoCompra (con correlativo interno auto).
+    4. Para cada item: crea DetalleDocumentoCompra (4 costos snapshot + IVA + descuento),
+       actualiza costo base del artículo, recalcula precio venta, registra Kárdex ENTRADA,
+       crea seriales si aplica.
+    5. Calcula totales del documento (subtotal, descuento, IVA, total Bs) y persiste.
     """
+    # Compatibilidad hacia atrás: si se pasa monto_total_usd (firma antigua), 
+    # se ignora y se calcula desde los items.
+    if 'monto_total_usd' in kwargs:
+        import warnings
+        warnings.warn(
+            "El parámetro 'monto_total_usd' está deprecado. "
+            "El total se calcula automáticamente desde los items.",
+            DeprecationWarning, stacklevel=2
+        )
     from .managers import get_current_empresa
+    from .models import (
+        Articulo, Almacen, Contacto, ConfiguracionEmpresa,
+        DocumentoCompra, DetalleDocumentoCompra
+    )
+    from decimal import Decimal
     # Validación perimetral Multi-Tenant contra contaminación de sesión cruzada
     _ctx_empresa = get_current_empresa()
 
@@ -1745,22 +1775,38 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
     if empresa_id_int != ctx_int:
         raise ValueError("El contexto de la empresa ha cambiado en otra pestaña. Petición abortada por seguridad contable.")
 
-    from .models import Articulo, Almacen, Contacto, ConfiguracionEmpresa, DocumentoCompra
-    from .services import registrar_movimiento
-    from decimal import Decimal
+    # Validaciones de tipos y rangos
+    if tipo_documento not in ('FACTURA_COMPRA', 'NOTA_CREDITO_COMPRA', 'ORDEN_COMPRA'):
+        raise ValueError(
+            f"Tipo de documento inválido: '{tipo_documento}'. "
+            "Debe ser 'FACTURA_COMPRA', 'NOTA_CREDITO_COMPRA' o 'ORDEN_COMPRA'."
+        )
+    if tipo_documento == 'FACTURA_COMPRA':
+        if not numero_factura or not str(numero_factura).strip():
+            raise ValueError("Seguridad Contable: numero_factura es obligatorio cuando tipo_documento='FACTURA_COMPRA'.")
+        numero_factura = str(numero_factura).strip()
+    else:
+        # Para NC y OC, numero_factura es opcional
+        numero_factura = str(numero_factura).strip() if numero_factura else ''
+
+    try:
+        descuento_global = Decimal(str(descuento_global))
+    except (ValueError, TypeError):
+        raise ValueError("descuento_global debe ser un número decimal entre 0 y 100.")
+    if not (Decimal('0') <= descuento_global <= Decimal('100')):
+        raise ValueError("descuento_global debe estar entre 0 y 100.")
 
     if not lista_items:
         raise ValueError("La lista de artículos no puede estar vacía.")
 
     with transaction.atomic():
-        # Validacion multi-tenant del almacen: debe pertenecer a la empresa activa.
+        # Validación multi-tenant del almacén
         try:
             almacen = Almacen.objects.get(pk=almacen_id, empresa_id=empresa_id_int)
         except Almacen.DoesNotExist:
             raise ValueError(f"El almacen {almacen_id} no pertenece a la empresa activa.")
 
-        # Validacion multi-tenant del proveedor: debe pertenecer a la empresa activa.
-        # Ademas validamos tipo='PROVEEDOR' para evitar pasar un cliente por error.
+        # Validación multi-tenant del proveedor
         try:
             proveedor = Contacto.objects.get(
                 pk=proveedor_id, tipo='PROVEEDOR', empresa_id=empresa_id_int
@@ -1771,57 +1817,83 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
                 f"o no existe."
             )
 
-        # FASE 3 — Snapshot de tasa al momento de la compra.
-        # Sin importar la fuente (BCV/MANUAL/API), los valores
-        # auditables se guardan en el documento para conservarlos
-        # aunque la configuracion global cambie despues.
-        config_tasa = ConfiguracionEmpresa.objects.get(
-            empresa_id=empresa_id_int
-        )
-        tasa_bcv_snap = config_tasa.tasa_bcv
-        tasa_mercado_snap = (config_tasa.tasa_mercado
-                             if hasattr(config_tasa, 'tasa_mercado')
-                             else config_tasa.tasa_bcv)
-        factor_snap = (config_tasa.factor_cobertura
-                       if hasattr(config_tasa, 'factor_cobertura')
-                       else Decimal('1.0000'))
-        # Monto en Bs: USD * (mercado / bcv) * bcv (formula venezolano
-        # que mantiene auditabilidad: dos factores separados)
-        if tasa_bcv_snap > 0:
-            monto_bs_snap = (
-                Decimal(str(monto_total_usd))
-                * (tasa_mercado_snap / tasa_bcv_snap)
-                * tasa_bcv_snap
-            ).quantize(Decimal('0.01'))
-        else:
-            monto_bs_snap = Decimal('0.00')
+        # Validación fecha_compra (no futura)
+        if fecha_compra:
+            from datetime import date
+            if isinstance(fecha_compra, str):
+                fecha_compra = date.fromisoformat(fecha_compra)
+            if fecha_compra > date.today():
+                raise ValueError("La fecha de compra no puede ser futura.")
 
+        # Snapshot de tasas
+        config_tasa = ConfiguracionEmpresa.objects.get(empresa_id=empresa_id_int)
+        tasa_bcv_snap = config_tasa.tasa_bcv
+        tasa_mercado_snap = config_tasa.tasa_mercado
+        factor_snap = config_tasa.factor_cobertura
+
+        # Generar correlativo interno (numero_interno) = prefijo + número secuencial
+        prefijo = config_tasa.prefijo_factura_compra or 'FC'
+        # Buscar el último número usado para esta empresa
+        from django.db.models import Max
+        max_num = DocumentoCompra.global_objects.filter(
+            empresa_id=empresa_id_int
+        ).aggregate(max_num=Max('id'))['max_num'] or 0
+        # Usar el correlativo inicial configurado
+        correlativo_inicial = config_tasa.correlativo_inicial_factura_compra or 1
+        numero_secuencial = max(max_num + 1, correlativo_inicial)
+        numero_interno = f"{prefijo}-{numero_secuencial:08d}"
+
+        # Validar unicidad de numero_factura si es FACTURA_COMPRA
+        if tipo_documento == 'FACTURA_COMPRA':
+            if DocumentoCompra.global_objects.filter(
+                empresa_id=empresa_id_int,
+                numero_factura=numero_factura
+            ).exists():
+                raise ValueError(
+                    f"El número de factura '{numero_factura}' ya existe "
+                    "para esta empresa. No se pueden duplicar facturas."
+                )
+
+        # Crear cabecera (los totales se recalculan abajo)
         documento = DocumentoCompra.objects.create(
             empresa_id=empresa_id_int,
             proveedor=proveedor,
+            tipo_documento=tipo_documento,
+            numero_interno=numero_interno,
             numero_factura=numero_factura,
             fecha_compra=fecha_compra,
-            monto_total_usd=monto_total_usd,
-            observaciones=observaciones,
+            monto_total_usd=Decimal('0.0000'),  # se recalcula
+            descuento_global=descuento_global,
+            iva_total=Decimal('0.0000'),  # se recalcula
             tasa_bcv_aplicada=tasa_bcv_snap,
             tasa_mercado_aplicada=tasa_mercado_snap,
             factor_cobertura_aplicado=factor_snap,
             fuente_tasa='MANUAL',
-            monto_total_bs_snapshot=monto_bs_snap,
+            monto_total_bs_snapshot=Decimal('0.00'),
+            observaciones=observaciones,
         )
 
+        # Procesar ítems
+        subtotal_usd = Decimal('0.0000')
+        iva_total_usd = Decimal('0.0000')
+
         for item in lista_items:
-            sku = item.get('sku')
+            sku = item.get('sku') or item.get('articulo_sku')
             cantidad = Decimal(str(item.get('cantidad', 0)))
-            costo_factura = Decimal(str(item.get('costo_factura', 0)))
+            costo_factura = Decimal(str(item.get('costo_factura', item.get('costo_base', 0))))
+            descuento_aplicado = Decimal(str(item.get('descuento_aplicado', '0')))
+            iva_porcentaje = Decimal(str(item.get('iva_porcentaje', '16.00')))
 
             if cantidad <= 0:
                 raise ValueError(f"La cantidad comprada para {sku} debe ser mayor a 0.")
             if costo_factura < 0:
                 raise ValueError(f"El costo para {sku} no puede ser negativo.")
+            if not (Decimal('0') <= descuento_aplicado <= Decimal('100')):
+                raise ValueError(f"descuento_aplicado para {sku} debe estar entre 0 y 100.")
+            if not (Decimal('0') <= iva_porcentaje <= Decimal('100')):
+                raise ValueError(f"iva_porcentaje para {sku} debe estar entre 0 y 100.")
 
-            # Validacion multi-tenant del articulo: debe pertenecer a la empresa activa.
-            # Validacion multi-tenant del articulo: debe pertenecer a la empresa activa.
+            # Validación multi-tenant del artículo
             try:
                 articulo = Articulo.objects.select_for_update().get(
                     sku=sku, empresa_id=empresa_id_int
@@ -1829,23 +1901,41 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
             except Articulo.DoesNotExist:
                 raise ValueError(f"El articulo {sku} no pertence a la empresa activa.")
 
-            # 1. Actualización de Costo Base
-            articulo.costo = costo_factura
+            # 4 snapshots de costos
+            costo_ajustado = (costo_factura * factor_snap).quantize(Decimal('0.0001'))
+            costo_directo_bcv = (costo_factura * tasa_bcv_snap).quantize(Decimal('0.01'))
+            costo_ajustado_bcv = (costo_ajustado * tasa_bcv_snap).quantize(Decimal('0.01'))
 
-            # 2. Recálculo Automático de Precios (Protección de Margen)
+            # Crear Detalle (snapshot inmutable)
+            detalle = DetalleDocumentoCompra.objects.create(
+                documento_compra=documento,
+                articulo=articulo,
+                almacen=almacen,
+                cantidad=cantidad,
+                costo_base=costo_factura,
+                costo_ajustado=costo_ajustado,
+                costo_directo_bcv=costo_directo_bcv,
+                costo_ajustado_bcv=costo_ajustado_bcv,
+                costo_unitario_snapshot=articulo.costo,
+                descuento_aplicado=descuento_aplicado,
+                iva_porcentaje=iva_porcentaje,
+            )
+
+            # Acumular totales del documento (usando propiedades del detalle)
+            subtotal_usd += detalle.subtotal_usd
+            iva_total_usd += detalle.iva_usd
+
+            # Actualización de Costo Base + Recalculo Precio Venta
+            articulo.costo = costo_factura
             margen = articulo.margen_ind
             if not margen or margen <= 0:
                 config = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
-                margen = config.margen_global if config.margen_global else Decimal('30.00') # Default 30%
+                margen = config.margen_global if config.margen_global else Decimal('30.00')
 
             metodo = (articulo.metodo_ganancia or 'MARKUP').upper()
             if metodo == 'MARKUP':
-                # MARKUP: precio = costo * (1 + margen/100)
-                # Ejemplo con margen 30%: 100 * 1.30 = 130.00
                 precio_recalculado = costo_factura * (Decimal('1') + (margen / Decimal('100')))
             else:  # MARGIN
-                # MARGIN: precio = costo / (1 - margen/100)
-                # Ejemplo con margen 30%: 100 / 0.70 = 142.86
                 factor_margen = Decimal('1') - (margen / Decimal('100'))
                 if factor_margen <= 0:
                     raise ValueError("El margen comercial no puede ser igual o mayor al 100%.")
@@ -1854,23 +1944,29 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
             articulo.precio_divisa = precio_recalculado.quantize(Decimal('0.01'))
             articulo.save(update_fields=['costo', 'precio_divisa', 'fecha_actualizacion'])
 
-            # 3. Registro en Kárdex inyectando DocumentoCompra
+            # Kárdex ENTRADA
             registrar_movimiento(
                 articulo=articulo,
                 almacen=almacen,
                 tipo='ENTRADA',
                 cantidad=cantidad,
                 concepto='COMPRA',
-                detalle_adicional=f"Factura {numero_factura}",
                 usuario=usuario,
-                documento_compra=documento
+                documento_compra=documento,
             )
 
-            # 4. Inyección Masiva de Seriales (si aplica)
+            # Seriales (si usa_serial y vienen en item)
             seriales = item.get('seriales', [])
-            if seriales:
+            if articulo.usa_serial:
+                if not seriales:
+                    raise ValueError(f"El artículo '{articulo.nombre}' requiere seriales, pero no se enviaron.")
                 from .models import SerialArticulo
                 seriales_unicos = list(set(seriales))
+                if len(seriales_unicos) != int(cantidad):
+                    raise ValueError(
+                        f"El artículo '{articulo.nombre}' requiere exactamente {int(cantidad)} seriales, "
+                        f"pero se enviaron {len(seriales_unicos)}."
+                    )
                 nuevos_seriales = [
                     SerialArticulo(
                         empresa=articulo.empresa,
@@ -1884,12 +1980,31 @@ def registrar_compra_proveedor(proveedor_id: str, numero_factura: str, fecha_com
                 SerialArticulo.objects.bulk_create(nuevos_seriales)
 
             logger.info("[COMPRA] %s unid. de %s. Costo actualizado a %s", cantidad, sku, costo_factura)
-    
-    return {
-        'ok': True, 
-        'mensaje': f"Compra {numero_factura} registrada exitosamente con {len(lista_items)} ítems.",
-        'documento_id': documento.id
-    }
+
+        # Totales finales del documento
+        # Aplicar descuento global sobre subtotal
+        descuento_global_usd = (subtotal_usd * (descuento_global / Decimal('100'))).quantize(Decimal('0.0001'))
+        monto_total_usd = (subtotal_usd - descuento_global_usd).quantize(Decimal('0.0001'))
+
+        # IVA total en Bs
+        iva_total_bs = sum(d.iva_bs for d in documento.detalles.all())
+
+        # Total en Bs = (subtotal_usd - descuento_global_usd + iva_total_usd) * tasa_bcv
+        total_bs = ((monto_total_usd + iva_total_usd) * tasa_bcv_snap).quantize(Decimal('0.01'))
+
+        # Actualizar documento con totales finales
+        documento.monto_total_usd = monto_total_usd
+        documento.iva_total = iva_total_usd
+        documento.monto_total_bs_snapshot = total_bs
+        documento.save(update_fields=['monto_total_usd', 'iva_total', 'monto_total_bs_snapshot'])
+
+        return {
+            'ok': True,
+            'mensaje': f"Compra {documento.numero_interno} registrada exitosamente con {len(lista_items)} ítems.",
+            'documento_id': documento.id,
+            'numero_interno': documento.numero_interno,
+            'numero_factura': documento.numero_factura,
+        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -30,7 +30,24 @@ from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from .managers import EmpresaManager
+from .managers import EmpresaManager, EmpresaQuerySet
+
+
+# Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
+class DetalleCompraQuerySet(EmpresaQuerySet):
+    def para_empresa(self):
+        empresa_id = get_current_empresa()
+        if empresa_id is not None:
+            return self.filter(documento_compra__empresa_id=empresa_id)
+        return self.none()
+
+
+class DetalleCompraManager(models.Manager):
+    def get_queryset(self):
+        return DetalleCompraQuerySet(self.model, using=self._db)
+
+    def para_empresa(self):
+        return self.get_queryset().para_empresa()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -111,6 +128,18 @@ class ConfiguracionEmpresa(models.Model):
         default=1,
         verbose_name='Correlativo Inicial Nota',
         help_text='Número inicial del correlativo. Para migraciones puede arrancar desde N.',
+    )
+    # -- Configuración Facturas de Compra (Módulo Compras) --
+    prefijo_factura_compra = models.CharField(
+        max_length=20,
+        default='FC',
+        verbose_name='Prefijo Factura Compra',
+        help_text='Prefijo alfanumérico fijo para el correlativo de facturas de compra. Ej: FC, COM.',
+    )
+    correlativo_inicial_factura_compra = models.PositiveIntegerField(
+        default=1,
+        verbose_name='Correlativo Inicial Factura Compra',
+        help_text='Número inicial del correlativo de facturas de compra.',
     )
     ivas_disponibles = models.JSONField(
         default=list,
@@ -783,6 +812,12 @@ class DocumentoCompra(models.Model):
     """
     Cabecera ligera de importación que agrupa compras a proveedores.
     """
+    TIPO_DOCUMENTO_CHOICES = [
+        ('FACTURA_COMPRA', 'Factura de Compra'),
+        ('NOTA_CREDITO_COMPRA', 'Nota de Crédito de Compra'),
+        ('ORDEN_COMPRA', 'Orden de Compra'),
+    ]
+
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='documentos_compra')
     proveedor = models.ForeignKey(
         Contacto,
@@ -791,21 +826,41 @@ class DocumentoCompra(models.Model):
         related_name='documentos_compra',
         verbose_name='Proveedor'
     )
-    numero_factura = models.CharField(max_length=100, blank=True, default='', verbose_name='Número de Factura')
+    tipo_documento = models.CharField(
+        max_length=20, choices=TIPO_DOCUMENTO_CHOICES, default='FACTURA_COMPRA',
+        verbose_name='Tipo de Documento'
+    )
+    numero_interno = models.CharField(
+        max_length=50, blank=True, default='', verbose_name='N° Interno',
+        help_text='Correlativo auto-generado: prefijo + número secuencial.'
+    )
+    numero = models.PositiveIntegerField(
+        default=0, verbose_name='Correlativo',
+        help_text='Número secuencial entero por empresa (no mostrar al usuario, usar numero_interno).'
+    )
+    numero_factura = models.CharField(max_length=100, blank=True, default='', verbose_name='N° Factura Proveedor')
     fecha_compra = models.DateField(blank=True, null=True, default=None, verbose_name='Fecha de Compra')
     monto_total_usd = models.DecimalField(max_digits=14, decimal_places=4, verbose_name='Monto Total (USD)')
+    descuento_global = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'),
+        verbose_name='Descuento Global (%)', help_text='Descuento global sobre el documento (0-100).'
+    )
+    iva_total = models.DecimalField(
+        max_digits=14, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='IVA Total (USD)', help_text='Suma de IVA de cada ítem en USD.'
+    )
 
     # FASE 3 — Snapshot de tasa al momento de la compra (regla contable)
     tasa_bcv_aplicada = models.DecimalField(
-        max_digits=12, decimal_places=4, default=0.0000, null=True, blank=True,
+        max_digits=12, decimal_places=4, default=Decimal('0.0000'), null=True, blank=True,
         verbose_name='Tasa BCV aplicada (snapshot)'
     )
     tasa_mercado_aplicada = models.DecimalField(
-        max_digits=12, decimal_places=4, default=0.0000, null=True, blank=True,
+        max_digits=12, decimal_places=4, default=Decimal('0.0000'), null=True, blank=True,
         verbose_name='Tasa mercado aplicada (snapshot)'
     )
     factor_cobertura_aplicado = models.DecimalField(
-        max_digits=8, decimal_places=4, default=1.0000, null=True, blank=True,
+        max_digits=8, decimal_places=4, default=Decimal('1.0000'), null=True, blank=True,
         verbose_name='Factor cobertura aplicada (snapshot)'
     )
     fuente_tasa = models.CharField(
@@ -813,7 +868,7 @@ class DocumentoCompra(models.Model):
         verbose_name='Fuente de la tasa (BCV/MANUAL/BINANCE)'
     )
     monto_total_bs_snapshot = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0.00, null=True, blank=True,
+        max_digits=18, decimal_places=2, default=Decimal('0.00'), null=True, blank=True,
         verbose_name='Monto total en Bs (snapshot)'
     )
 
@@ -834,12 +889,158 @@ class DocumentoCompra(models.Model):
         verbose_name = 'Documento de Compra'
         verbose_name_plural = '12. Documentos de Compra'
         ordering = ['-fecha_compra', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_factura'],
+                condition=models.Q(numero_factura__gt=''),
+                name='unique_numero_factura_compra_per_empresa'
+            ),
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_interno'],
+                condition=models.Q(numero_interno__gt=''),
+                name='unique_numero_interno_compra_per_empresa'
+            ),
+        ]
 
     def __str__(self):
         return f"Factura {self.numero_factura} - {self.proveedor.nombre}"
 
+    def save(self, *args, **kwargs):
+        """
+        Auto-genera:
+          - numero: correlativo entero por empresa (respetando correlativo_inicial_factura_compra)
+          - numero_interno: formato {prefijo}-{numero:08d} (ej: FC-00000008)
+        Sólo si no vienen ya poblados (permite override para casos especiales).
+        """
+        if not self.numero:
+            from django.db.models import Max
+            from .models import DocumentoCompra
+            max_num = DocumentoCompra.global_objects.filter(
+                empresa=self.empresa
+            ).aggregate(max_num=Max('numero'))['max_num']
+            try:
+                inicial = ConfiguracionEmpresa.objects.get(
+                    empresa_id=self.empresa_id
+                ).correlativo_inicial_factura_compra
+            except ConfiguracionEmpresa.DoesNotExist:
+                inicial = 1
+            if max_num:
+                self.numero = max_num + 1
+            else:
+                self.numero = max(inicial, 1)
+        if not self.numero_interno:
+            try:
+                prefijo = ConfiguracionEmpresa.objects.get(
+                    empresa_id=self.empresa_id
+                ).prefijo_factura_compra
+            except ConfiguracionEmpresa.DoesNotExist:
+                prefijo = 'FC'
+            self.numero_interno = f'{prefijo}-{self.numero:08d}'
+        super().save(*args, **kwargs)
+
+    @property
+    def subtotal_usd(self):
+        """Suma de costo_base * cantidad de todos los detalles (sin descuento)."""
+        return sum(d.subtotal_usd for d in self.detalles.all())
+
+    @property
+    def subtotal_bs(self):
+        """Suma de costo_ajustado * cantidad (con factor) de todos los detalles."""
+        return sum(d.subtotal_bs for d in self.detalles.all())
+
+    @property
+    def total_iva_bs(self):
+        """IVA total en Bs. = suma de iva_bs de cada detalle."""
+        return sum(d.iva_bs for d in self.detalles.all())
+
+    @property
+    def total_documento_bs(self):
+        """Total documento = subtotal_bs + IVA BS."""
+        return self.subtotal_bs + self.total_iva_bs
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. MOVIMIENTO KÁRDEX (Registro Inalterable — Regla Sagrada)
+# 7.6. DETALLE DE DOCUMENTO DE COMPRA
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DetalleDocumentoCompra(models.Model):
+    """
+    Línea de detalle de un Documento de Compra (Factura de Proveedor).
+    Almacena el snapshot del costo al momento de la compra para
+    que los reportes históricos sean inmutables e independientes
+    de futuros cambios en la ficha del artículo.
+    Snapshot de 4 costos: costo_base (factura), costo_ajustado (con factor), 
+    costo_directo_bcv, costo_ajustado_bcv + IVA + descuento individual.
+    """
+    documento_compra = models.ForeignKey(
+        DocumentoCompra, on_delete=models.CASCADE, related_name='detalles'
+    )
+    articulo = models.ForeignKey(
+        Articulo, on_delete=models.PROTECT, related_name='detalles_compra'
+    )
+    almacen = models.ForeignKey(
+        Almacen, on_delete=models.PROTECT, related_name='detalles_compra'
+    )
+    cantidad = models.DecimalField(max_digits=14, decimal_places=4, verbose_name='Cantidad')
+
+    # 4 snapshots de costos (inmutabilidad financiera)
+    costo_base = models.DecimalField(max_digits=14, decimal_places=4, verbose_name='Costo Factura ($)')
+    costo_ajustado = models.DecimalField(max_digits=14, decimal_places=4, verbose_name='Costo Ajustado ($)')
+    costo_directo_bcv = models.DecimalField(max_digits=14, decimal_places=2, verbose_name='Costo Directo BCV (Bs)')
+    costo_ajustado_bcv = models.DecimalField(max_digits=14, decimal_places=2, verbose_name='Costo Ajustado BCV (Bs)')
+    
+    costo_unitario_snapshot = models.DecimalField(
+        max_digits=14, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='Costo Promedio Snapshot ($)'
+    )
+    descuento_aplicado = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'),
+        verbose_name='Descuento Individual (%)'
+    )
+    iva_porcentaje = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('16.00'),
+        verbose_name='IVA (%)'
+    )
+
+    objects = DetalleCompraManager()
+    global_objects = models.Manager()
+
+    class Meta:
+        verbose_name = 'Detalle de Compra'
+        verbose_name_plural = '13. Detalles de Compras'
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.documento_compra.numero_interno} - {self.articulo.sku}"
+
+    @property
+    def subtotal_usd(self):
+        """costo_base * cantidad * (1 - descuento/100)"""
+        from decimal import Decimal
+        factor = Decimal('1') - (self.descuento_aplicado / Decimal('100'))
+        return (self.costo_base * self.cantidad * factor).quantize(Decimal('0.0001'))
+
+    @property
+    def subtotal_bs(self):
+        """costo_ajustado * cantidad * (1 - descuento/100)"""
+        from decimal import Decimal
+        factor = Decimal('1') - (self.descuento_aplicado / Decimal('100'))
+        return (self.costo_ajustado * self.cantidad * factor).quantize(Decimal('0.01'))
+
+    @property
+    def iva_usd(self):
+        """IVA en USD = subtotal_usd * iva_porcentaje / 100"""
+        from decimal import Decimal
+        return (self.subtotal_usd * (self.iva_porcentaje / Decimal('100'))).quantize(Decimal('0.0001'))
+
+    @property
+    def iva_bs(self):
+        """IVA en Bs = iva_usd * tasa_bcv_aplicada del documento"""
+        from decimal import Decimal
+        tasa = self.documento_compra.tasa_bcv_aplicada
+        if not tasa:
+            return Decimal('0.00')
+        return (self.iva_usd * tasa).quantize(Decimal('0.01'))
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MovimientoKardex(models.Model):

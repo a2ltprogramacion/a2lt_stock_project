@@ -759,9 +759,9 @@ def vista_detalle_nota(request, nota_id):
 @login_required
 @require_http_methods(["GET"])
 def generar_pdf_nota(request, nota_id):
-    """Genera un PDF A4 de la Nota de Entrega o Factura usando ReportLab."""
+    """Genera un PDF tamaño Carta (Letter) de la Nota de Entrega o Factura usando ReportLab."""
     from .models import NotaEntrega, ConfiguracionEmpresa
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import cm, mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
@@ -778,7 +778,7 @@ def generar_pdf_nota(request, nota_id):
     response['Content-Disposition'] = f'inline; filename="{filename}"'
 
     doc = SimpleDocTemplate(
-        response, pagesize=A4,
+        response, pagesize=letter,
         rightMargin=1.5*cm, leftMargin=1.5*cm,
         topMargin=1.5*cm, bottomMargin=1.5*cm
     )
@@ -1375,19 +1375,25 @@ def registrar_compra_api(request):
         proveedor_id = data.get('proveedor_id')
         numero_factura = data.get('numero_factura')
         fecha_compra = data.get('fecha_compra')
-        monto_total_usd = Decimal(str(data.get('monto_total_usd', '0.00')))
+        tipo_documento = data.get('tipo_documento', 'FACTURA_COMPRA')
+        descuento_global = Decimal(str(data.get('descuento_global', '0.00')))
         almacen_id = data.get('almacen_id')
         lista_items = data.get('lista_items', [])
         observaciones = data.get('observaciones', '')
 
         if not proveedor_id:
             return JsonResponse({'ok': False, 'error': 'Seleccione un proveedor.'}, status=400)
+        if not fecha_compra:
+            return JsonResponse({'ok': False, 'error': 'Fecha de compra es obligatoria.'}, status=400)
 
         for item in lista_items:
             if 'sku' in item and 'articulo_sku' not in item:
                 item['articulo_sku'] = item.pop('sku')
             item['cantidad'] = Decimal(str(item['cantidad']))
-            item['costo_factura'] = Decimal(str(item['costo_factura']))
+            item['costo_factura'] = Decimal(str(item.get('costo_factura', item.get('costo_base', 0))))
+            # Descuento individual y IVA por ítem
+            item['descuento_aplicado'] = Decimal(str(item.get('descuento_aplicado', '0')))
+            item['iva_porcentaje'] = Decimal(str(item.get('iva_porcentaje', '16.00')))
             # Los seriales ya vienen como lista de strings en item.get('seriales')
 
         registrar_compra_proveedor(
@@ -1395,7 +1401,8 @@ def registrar_compra_api(request):
             proveedor_id=proveedor_id,
             numero_factura=numero_factura,
             fecha_compra=fecha_compra,
-            monto_total_usd=monto_total_usd,
+            tipo_documento=tipo_documento,
+            descuento_global=descuento_global,
             almacen_id=almacen_id,
             lista_items=lista_items,
             usuario=request.user.username,
