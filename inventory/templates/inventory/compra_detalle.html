@@ -1,0 +1,153 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section id="tab-compras" class="tab-content space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white">
+                {% if documento.tipo_documento == 'FACTURA_COMPRA' %}Factura de Compra{% elif documento.tipo_documento == 'NOTA_CREDITO_COMPRA' %}Nota de Crédito{% else %}Orden de Compra{% endif %} 
+                <span class="text-sm font-normal text-slate-500 dark:text-slate-400 ml-2">{{ documento.numero_interno }}</span>
+            </h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                {% if documento.tipo_documento == 'FACTURA_COMPRA' and documento.numero_factura %}N° Factura: {{ documento.numero_factura }} | {% endif %}
+                Fecha: {{ documento.fecha_compra|date:"d/m/Y" }}
+            </p>
+        </div>
+        <div class="flex gap-2">
+            <a href="/compras/" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-750 text-xs font-bold rounded-xl transition">
+                <i class="fa-solid fa-arrow-left mr-1"></i> Volver
+            </a>
+            <a href="{{ print_url }}" target="_blank" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow">
+                <i class="fa-solid fa-file-pdf"></i> Imprimir PDF
+            </a>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+            <div class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-receipt text-indigo-500"></i> Detalle del Documento
+                </h3>
+            </div>
+
+            <div class="space-y-3">
+                <div class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                            {% if documento.tipo_documento == 'FACTURA_COMPRA' %}Factura de Compra{% elif documento.tipo_documento == 'NOTA_CREDITO_COMPRA' %}Nota de Crédito{% else %}Orden de Compra{% endif %}
+                            {% if documento.numero_factura %} N° {{ documento.numero_factura }}{% endif %}
+                        </span>
+                        <span class="font-mono text-[10px] text-slate-500 dark:text-slate-400">Interno: {{ documento.numero_interno }}</span>
+                    </div>
+                    <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400 mt-1">
+                        <span><i class="fa-solid fa-calendar mr-1"></i>{{ documento.fecha_compra|date:"d/m/Y" }}</span>
+                        <span><i class="fa-solid fa-warehouse mr-1"></i>{{ documento.almacen.nombre }}</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 space-y-1">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-slate-800 dark:text-slate-200 text-xs">Proveedor</span>
+                        <span class="font-mono text-[10px] text-slate-500 dark:text-slate-400">{{ documento.proveedor.identificacion }}</span>
+                    </div>
+                    <div class="text-slate-800 dark:text-slate-200">{{ documento.proveedor.nombre }}</div>
+                    <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400">
+                        <span><i class="fa-solid fa-phone mr-1"></i>{{ documento.proveedor.telefono or '--' }}</span>
+                        <span><i class="fa-solid fa-location-dot mr-1"></i>{{ documento.proveedor.direccion or '--' }}</span>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-100 dark:border-slate-800 my-4"></div>
+
+                <div class="space-y-2 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 font-mono">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500 dark:text-slate-400">Subtotal Divisas ($):</span>
+                        <span class="text-slate-800 dark:text-slate-200 font-bold">${{ total_usd|floatformat:2 }}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500 dark:text-slate-400">Total IVA USD:</span>
+                        <span class="text-amber-600 dark:text-amber-400 font-bold">${{ total_iva_usd|floatformat:2 }}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500 dark:text-slate-400">Total IVA Bs:</span>
+                        <span class="text-amber-600 dark:text-amber-400 font-bold">{{ total_iva_bs|floatformat:2 }} Bs</span>
+                    </div>
+                    <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
+                    <div class="flex justify-between items-center text-sm">
+                        <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas ($):</span>
+                        <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base">${{ total_usd|add:total_iva_usd|floatformat:2 }}</span>
+                    </div>
+                    <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-1"></div>
+                    <div class="flex justify-between items-center text-base text-slate-900 dark:text-slate-100">
+                        <span class="font-bold">Total en Bolívares (Bs):</span>
+                        <span class="font-bold text-lg text-indigo-600 dark:text-indigo-400">{{ total_bs|floatformat:2 }} Bs</span>
+                    </div>
+                    <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-2 text-right">
+                        Tasa BCV: {{ documento.tasa_bcv_aplicada|floatformat:4 }} | Factor: {{ documento.factor_cobertura_aplicado|floatformat:4 }} | Tasa Mercado: {{ documento.tasa_mercado_aplicada|floatformat:4 }}
+                    </div>
+                </div>
+
+                <a href="{{ print_url }}" target="_blank" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
+                    <i class="fa-solid fa-file-pdf"></i> Imprimir PDF
+                </a>
+            </div>
+        </div>
+
+        <!-- ITEMS TABLE -->
+        <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm h-fit">
+            <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
+                <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-list text-indigo-500"></i> Ítems
+                </h3>
+            </div>
+
+            <div class="overflow-x-auto pt-2">
+                <table class="w-full text-left text-[10px]">
+                    <thead>
+                        <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                            <th class="pb-2">SKU</th>
+                            <th class="pb-2">Artículo</th>
+                            <th class="pb-2 text-center">Cant.</th>
+                            <th class="pb-2 text-right">Costo $</th>
+                            <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total $</th>
+                            <th class="pb-2 text-center">Desc %</th>
+                            <th class="pb-2 text-center">IVA%</th>
+                            <th class="pb-2 text-right text-amber-600 dark:text-amber-400">IVA $</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
+                        {% for d in detalles %}
+                        <tr class="hover:bg-slate-100 dark:hover:bg-slate-800/40">
+                            <td class="py-2 px-2 text-slate-500 dark:text-slate-400 font-bold">{{ d.articulo.sku }}</td>
+                            <td class="py-2 px-2 text-slate-800 dark:text-slate-200 font-medium">{{ d.articulo.nombre }}</td>
+                            <td class="py-2 px-2 text-center font-bold text-slate-800 dark:text-slate-200">{{ d.cantidad }}</td>
+                            <td class="py-2 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">${{ d.costo_base|floatformat:2 }}</td>
+                            <td class="py-2 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">${{ d.line_usd|floatformat:2 }}</td>
+                            <td class="py-2 px-2 text-center text-amber-600 dark:text-amber-400 font-bold">{{ d.descuento_aplicado|floatformat:2 }}</td>
+                            <td class="py-2 px-2 text-center text-amber-600 dark:text-amber-400 font-bold">{{ d.iva_porcentaje|floatformat:2 }}</td>
+                            <td class="py-2 px-2 text-right text-amber-600 dark:text-amber-400 font-bold">${{ d.iva_usd|floatformat:2 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="8" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                                <i class="fa-solid fa-box-open text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                Sin ítems en este documento.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% if documento.observaciones %}
+    <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+        <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider">
+            <i class="fa-solid fa-sticky-note text-amber-500"></i> Observaciones
+        </h3>
+        <p class="text-slate-700 dark:text-slate-300 text-sm">{{ documento.observaciones }}</p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

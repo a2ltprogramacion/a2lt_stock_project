@@ -2,7 +2,7 @@
 {% block content %}
 <section id="tab-compras" class="tab-content space-y-6"><div class="flex justify-between items-center">
                     <div>
-                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Recepción de Compras a Proveedores</h2>
+                        <h2 class="text-xl font-bold text-slate-900 dark:text-white">Recepción de Facturas de Compra</h2>
                         <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de entrada rápidos y
                             calcula conversión exacta para el proveedor.</p>
                     </div>
@@ -16,7 +16,7 @@
                             class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
                             <h3
                                 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-cart-plus text-indigo-500"></i> Agregar Artículos a la Nota
+                                <i class="fa-solid fa-truck-ramp-box text-indigo-500"></i> Agregar Artículos a la Compra
                             </h3>
                             <span class="text-[10px] text-slate-400">Paso 1: Agrega items y cantidades</span>
                         </div>
@@ -26,24 +26,24 @@
                             class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">
 
                             <!-- Searchable input dropdown container -->
-                            <div class="md:col-span-6 relative" id="searchable-sale-item-container">
+                            <div class="md:col-span-6 relative" id="searchable-purchase-item-container">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Buscar
                                     y Seleccionar Artículo</label>
                                 <div class="relative">
-                                    <input id="sale-item-search" oninput="filterSaleItemDropdown()"
-                                        onfocus="showSaleItemDropdown()" type="text"
+                                    <input id="purchase-item-search" oninput="filterPurchaseItemDropdown()"
+                                        onfocus="showPurchaseItemDropdown()" type="text"
                                         placeholder="Escribe SKU o nombre del producto..."
                                         class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
-                                    <button onclick="clearSaleSearch()"
+                                    <button onclick="clearPurchaseSearch()"
                                         class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
                                         <i class="fa-solid fa-circle-xmark"></i>
                                     </button>
                                 </div>
-                                <input type="hidden" id="sale-item-selected-sku" value="">
+                                <input type="hidden" id="purchase-item-selected-sku" value="">
 
                                 <!-- Dropdown flotante optimizado en RAM -->
-                                <div id="sale-item-dropdown"
+                                <div id="purchase-item-dropdown"
                                     class="hidden absolute left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
                                     <!-- Dynamic elements loaded via JS -->
                                 </div>
@@ -52,24 +52,30 @@
                             <div class="md:col-span-2">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
-                                    Origen</label>
-                                <select id="sale-warehouse-select"
+                                    Destino</label>
+                                <select id="purchase-warehouse-select"
                                     class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
                                     {% for almacen in almacenes %}
                                     <option value="{{ almacen.id }}">{{ almacen.nombre }}</option>
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="md:col-span-1">
+                            <div class="md:col-span-2">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Costo</label>
-                                <input id="sale-item-cost" type="number" min="0" step="0.01" value="0.00"
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
+                                <input id="purchase-item-qty" type="number" min="1" value="1"
                                     class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
-                            <div class="md:col-span-1">
+                            <div class="md:col-span-2">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cant.</label>
-                                <input id="sale-item-qty" type="number" min="1" value="1"
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Costo Factura ($)</label>
+                                <input id="purchase-item-cost" type="number" min="0" step="0.01" value="0.00"
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                            </div>
+                            <div class="md:col-span-2">
+                                <label
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Descuento Item (%)</label>
+                                <input id="purchase-item-discount" type="number" min="0" max="100" step="0.01" value="0.00"
                                     class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
                             <div class="md:col-span-2">
@@ -80,7 +86,7 @@
                             </div>
                         </div>
 
-                        <!-- ITEMS TABLE IN NOTE -->
+                        <!-- ITEMS TABLE IN PURCHASE -->
                         <div class="overflow-x-auto pt-2">
                             <table class="w-full text-left text-xs">
                                 <thead>
@@ -91,19 +97,20 @@
                                         <th class="pb-2 font-semibold">Almacén</th>
                                         <th class="pb-2 text-center">Cantidad</th>
                                         <th class="pb-2 text-right">Costo Factura ($)</th>
+                                        <th class="pb-2 text-center">Desc. %</th>
                                         <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total ($)
                                         </th>
                                         <th class="pb-2 text-center">Acción</th>
                                     </tr>
                                 </thead>
-                                <tbody id="note-items-tbody"
+                                <tbody id="purchase-items-tbody"
                                     class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
-                                    <tr id="empty-note-row">
-                                        <td colspan="7"
+                                    <tr id="empty-purchase-row">
+                                        <td colspan="8"
                                             class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                                             <i
-                                                class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
-                                            Aún no has agregado artículos a esta nota de entrega.
+                                                class="fa-solid fa-truck-ramp-box text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                            Aún no has agregado artículos a esta factura de compra.
                                         </td>
                                     </tr>
                                 </tbody>
@@ -111,7 +118,7 @@
                         </div>
                     </div>
 
-                    <!-- DATOS DEL CLIENTE, FACTURA Y TOTALES -->
+                    <!-- DATOS DEL PROVEEDOR, FACTURA Y TOTALES -->
                     <div
                         class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm h-fit">
                         <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
@@ -121,7 +128,7 @@
                             </h3>
                         </div>
 
-                        <!-- CLIENT SELECTOR -->
+                        <!-- PROVIDER SELECTOR -->
                         <div class="space-y-3">
                             <div class="flex items-center justify-between gap-2">
                                 <div class="flex-1">
@@ -139,9 +146,9 @@
                                             class="hidden absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
                                         </div>
                                     </div>
-                                    <input type="hidden" id="note-provider-select" value="">
+                                    <input type="hidden" id="purchase-provider-select" value="">
                                 </div>
-                                <button type="button" onclick="openContactModal('PROVEEDOR')"
+                                <button onclick="openContactModal('PROVEEDOR')"
                                     class="mt-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 text-[10px] font-bold px-2.5 py-2 rounded-xl transition whitespace-nowrap"
                                     title="Registrar Nuevo Proveedor">
                                     <i class="fa-solid fa-plus mr-1"></i> Nuevo
@@ -159,20 +166,55 @@
                                 </div>
                             </div>
 
-                            <div class="grid grid-cols-2 gap-3">
+                            <div class="space-y-3">
                                 <div>
-                                    <label
-                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
-                                        Factura Física</label>
-                                    <input id="note-invoice-ref" type="text" placeholder="Ej. F-00213"
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Tipo de Documento</label>
+                                    <div class="flex gap-4">
+                                        <label class="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name="purchase-doc-type" value="FACTURA_COMPRA" checked
+                                                onchange="onPurchaseDocTypeChange(this.value)"
+                                                class="accent-indigo-600">
+                                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Factura Compra</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name="purchase-doc-type" value="NOTA_CREDITO_COMPRA"
+                                                onchange="onPurchaseDocTypeChange(this.value)"
+                                                class="accent-indigo-600">
+                                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Nota Crédito</span>
+                                        </label>
+                                        <label class="flex items-center gap-1.5 cursor-pointer">
+                                            <input type="radio" name="purchase-doc-type" value="ORDEN_COMPRA"
+                                                onchange="onPurchaseDocTypeChange(this.value)"
+                                                class="accent-indigo-600">
+                                            <span class="text-xs font-semibold text-slate-700 dark:text-slate-300">Orden Compra</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div id="purchase-invoice-ref-container" class="hidden">
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N° Factura Proveedor</label>
+                                    <input id="purchase-invoice-ref" type="text" placeholder="Ej. F-00213"
+                                        oninput="enableConfirmIfPurchaseReady()"
                                         class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500">
                                 </div>
+
                                 <div>
-                                    <label
-                                        class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N°
-                                        Nota Interna</label>
-                                    <input id="note-date-lbl" type="date"
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Fecha Compra</label>
+                                    <input id="purchase-date" type="date"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
+                                </div>
+
+                                <div>
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">N° Interno</label>
+                                    <input id="purchase-correlative-lbl" type="text" readonly
                                         class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-850 rounded-xl p-2 text-xs text-slate-500 dark:text-slate-400 font-mono text-center font-bold">
+                                </div>
+
+                                <div>
+                                    <label class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Descuento Global (%)</label>
+                                    <input id="purchase-discount-percent" type="number" min="0" max="100" step="0.01" value="0"
+                                        oninput="recalculatePurchaseTotal()"
+                                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono">
                                 </div>
                             </div>
 
@@ -185,33 +227,40 @@
                                 <div class="flex justify-between items-center text-xs">
                                     <span class="text-slate-500 dark:text-slate-400">Subtotal Divisas ($):</span>
                                     <span class="text-slate-800 dark:text-slate-200 font-bold"
-                                        id="note-subtotal-usd">$0.00</span>
+                                        id="purchase-subtotal-usd">$0.00</span>
                                 </div>
                                 <div class="flex justify-between items-center text-xs">
                                     <span class="text-slate-500 dark:text-slate-400">Descuento Aplicado:</span>
-                                    <!-- Rojo para salidas o deducciones -->
                                     <span class="text-rose-600 dark:text-rose-400 font-bold"
-                                        id="note-discount-usd">-$0.00</span>
+                                        id="purchase-discount-usd">-$0.00</span>
                                 </div>
                                 <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
-                                <div class="flex justify-between items-center text-sm">
-                                    <!-- Verde para ingresos directos -->
-                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas
-                                        ($):</span>
-                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base"
-                                        id="note-total-usd">$0.00</span>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Descuento Global:</span>
+                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
+                                        id="purchase-discount-global">-$0.00</span>
                                 </div>
-                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-2"></div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-1"></div>
+                                <div class="flex justify-between items-center text-sm">
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold">Total Divisas ($):</span>
+                                    <span class="text-emerald-600 dark:text-emerald-400 font-bold text-base"
+                                        id="purchase-total-usd">$0.00</span>
+                                </div>
+                                <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-1"></div>
                                 <div
                                     class="flex justify-between items-center text-xs text-indigo-600 dark:text-indigo-400">
                                     <span>Divisa BCV (Ajustada):</span>
-                                    <span class="font-bold" id="note-total-bcv-usd">$0.00</span>
+                                    <span class="font-bold" id="purchase-total-bcv-usd">$0.00</span>
+                                </div>
+                                <div id="purchase-iva-row" class="hidden flex justify-between items-center text-xs text-amber-600 dark:text-amber-400">
+                                    <span>IVA (16%):</span>
+                                    <span class="font-bold" id="purchase-iva-amount">$0.00</span>
                                 </div>
                                 <div
                                     class="flex justify-between items-center text-base text-slate-900 dark:text-slate-100">
                                     <span class="font-bold">Total en Bolívares (Bs):</span>
                                     <span class="font-bold text-lg text-indigo-600 dark:text-indigo-400"
-                                        id="note-total-ves">0.00 Bs</span>
+                                        id="purchase-total-ves">0.00 Bs</span>
                                 </div>
                             </div>
 
@@ -224,13 +273,22 @@
                                     class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-medium"></textarea>
                             </div>
 
-                            <button onclick="processPurchase()"
+                            <div id="purchase-seriales-panel-container" class="hidden space-y-3">
+                                <div class="flex items-center gap-2 pb-1 border-b border-slate-100 dark:border-slate-800">
+                                    <i class="fa-solid fa-barcode text-amber-500 text-xs"></i>
+                                    <span class="font-bold text-slate-800 dark:text-slate-200 text-[10px] uppercase tracking-wider">Asignación de Seriales</span>
+                                </div>
+                                <div id="purchase-seriales-sections"></div>
+                            </div>
+
+                            <button onclick="processPurchase()" id="confirm-purchase-btn"
                                 class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
                                 <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Compra
                             </button>
                         </div>
                     </div>
                 </div>
+            </div>
 
 <script>
     let globalFactor = Number("{{ config.factor_cobertura|stringformat:'.4f'|default:'1.0000' }}");
@@ -238,10 +296,43 @@
     let lastCorrelative = 1;
 
     let providerDataset = [
+        {id: '', nombre: 'Proveedor Genérico', identificacion: '', telefono: '', direccion: ''},
         {% for proveedor in proveedores %}
         {id: '{{ proveedor.identificacion|escapejs }}', nombre: '{{ proveedor.nombre|escapejs }}', identificacion: '{{ proveedor.identificacion|escapejs }}', telefono: '{{ proveedor.telefono|escapejs }}', direccion: '{{ proveedor.direccion|escapejs }}'},
         {% endfor %}
     ];
+
+    function onPurchaseDocTypeChange(value) {
+        const invoiceContainer = document.getElementById('purchase-invoice-ref-container');
+        const confirmBtn = document.getElementById('confirm-purchase-btn');
+        if (value === 'FACTURA_COMPRA') {
+            invoiceContainer.classList.remove('hidden');
+            if (!document.getElementById('purchase-invoice-ref').value.trim()) {
+                confirmBtn.disabled = true;
+                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        } else {
+            invoiceContainer.classList.add('hidden');
+            document.getElementById('purchase-invoice-ref').value = '';
+            confirmBtn.disabled = false;
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+        recalculatePurchaseTotal();
+    }
+
+    function enableConfirmIfPurchaseReady() {
+        const docType = document.querySelector('input[name="purchase-doc-type"]:checked').value;
+        const confirmBtn = document.getElementById('confirm-purchase-btn');
+        if (docType === 'FACTURA_COMPRA') {
+            const hasRef = document.getElementById('purchase-invoice-ref').value.trim().length > 0;
+            confirmBtn.disabled = !hasRef;
+            if (!hasRef) {
+                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            } else {
+                confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+    }
 
     function showProviderDropdown() {
         document.getElementById('provider-dropdown').classList.remove('hidden');
@@ -252,7 +343,7 @@
 
     function clearProviderSearch() {
         document.getElementById('provider-search-input').value = '';
-        document.getElementById('note-provider-select').value = '';
+        document.getElementById('purchase-provider-select').value = '';
         document.getElementById('provider-dropdown').classList.add('hidden');
         document.getElementById('provider-summary-card').classList.add('hidden');
     }
@@ -283,13 +374,18 @@
 
     function selectProvider(p) {
         document.getElementById('provider-search-input').value = p.nombre;
-        document.getElementById('note-provider-select').value = p.id;
+        document.getElementById('purchase-provider-select').value = p.id;
         document.getElementById('provider-dropdown').classList.add('hidden');
-        document.getElementById('provider-card-name').innerText = p.nombre;
-        document.getElementById('provider-card-id').innerText = p.identificacion;
-        document.getElementById('provider-card-phone').innerText = p.telefono || '--';
-        document.getElementById('provider-card-address').innerText = p.direccion || '--';
-        document.getElementById('provider-summary-card').classList.remove('hidden');
+        const card = document.getElementById('provider-summary-card');
+        if (p.id) {
+            document.getElementById('provider-card-name').innerText = p.nombre;
+            document.getElementById('provider-card-id').innerText = p.identificacion;
+            document.getElementById('provider-card-phone').innerText = p.telefono || '--';
+            document.getElementById('provider-card-address').innerText = p.direccion || '--';
+            card.classList.remove('hidden');
+        } else {
+            card.classList.add('hidden');
+        }
     }
 
     function getCookie(name) {
@@ -308,19 +404,19 @@
     }
     const csrftoken = getCookie('csrftoken');
 
-    function showSaleItemDropdown() {
-        document.getElementById('sale-item-dropdown').classList.remove('hidden');
+    function showPurchaseItemDropdown() {
+        document.getElementById('purchase-item-dropdown').classList.remove('hidden');
     }
     
-    function clearSaleSearch() {
-        document.getElementById('sale-item-search').value = '';
-        document.getElementById('sale-item-selected-sku').value = '';
-        document.getElementById('sale-item-dropdown').classList.add('hidden');
+    function clearPurchaseSearch() {
+        document.getElementById('purchase-item-search').value = '';
+        document.getElementById('purchase-item-selected-sku').value = '';
+        document.getElementById('purchase-item-dropdown').classList.add('hidden');
     }
 
-    function filterSaleItemDropdown() {
-        const query = document.getElementById('sale-item-search').value.toLowerCase();
-        const dropdown = document.getElementById('sale-item-dropdown');
+    function filterPurchaseItemDropdown() {
+        const query = document.getElementById('purchase-item-search').value.toLowerCase();
+        const dropdown = document.getElementById('purchase-item-dropdown');
         if (query.length < 2) return;
         dropdown.innerHTML = '<div class="p-2 text-xs text-center text-slate-500">Buscando en servidor...</div>';
         dropdown.classList.remove('hidden');
@@ -336,15 +432,15 @@
                 data.results.forEach(item => {
                     const div = document.createElement('div');
                     div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs flex justify-between";
-                    div.innerHTML = `<span class="font-bold text-indigo-600">${item.sku}</span> <span class="text-slate-800 dark:text-slate-300">${item.nombre}</span> <span class="font-bold text-emerald-600">$${item.precio}</span>`;
+                    div.innerHTML = `<span class="font-bold text-indigo-600">${item.sku}</span> <span class="text-slate-800 dark:text-slate-300">${item.nombre}</span> <span class="font-bold text-emerald-600">$${item.precio}</span>${item.usa_serial ? '<span class="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30 px-1 py-0.5 rounded ml-1">Serial</span>' : ''}`;
                     div.onclick = () => {
-                        document.getElementById('sale-item-search').value = item.nombre;
-                        document.getElementById('sale-item-selected-sku').value = item.sku;
-                        // Store full item temp
-                        document.getElementById('sale-item-selected-sku').dataset.nombre = item.nombre;
-                        document.getElementById('sale-item-selected-sku').dataset.precio = item.precio;
-                        document.getElementById('sale-item-selected-sku').dataset.tipo = item.tipo;
-                        document.getElementById('sale-item-selected-sku').dataset.usa_serial = item.usa_serial ? 'true' : 'false';
+                        document.getElementById('purchase-item-search').value = item.nombre;
+                        document.getElementById('purchase-item-selected-sku').value = item.sku;
+                        document.getElementById('purchase-item-selected-sku').dataset.nombre = item.nombre;
+                        document.getElementById('purchase-item-selected-sku').dataset.costo = item.precio;
+                        document.getElementById('purchase-item-selected-sku').dataset.tipo = item.tipo;
+                        document.getElementById('purchase-item-selected-sku').dataset.usaSerial = item.usa_serial ? '1' : '';
+                        document.getElementById('purchase-item-selected-sku').dataset.ivaPorcentaje = item.iva_porcentaje || 0;
                         dropdown.classList.add('hidden');
                     };
                     dropdown.appendChild(div);
@@ -352,23 +448,24 @@
             });
     }
 
-    let draftNoteItems = [];
+    let draftPurchaseItems = [];
     
     async function addItemToPurchase() {
-        const skuInput = document.getElementById('sale-item-selected-sku');
+        const skuInput = document.getElementById('purchase-item-selected-sku');
         const sku = skuInput.value;
         const nombre = skuInput.dataset.nombre;
-        const precio = parseFloat(skuInput.dataset.precio);
+        const costo = parseFloat(skuInput.dataset.costo);
         const tipo = skuInput.dataset.tipo;
-        const almacenId = document.getElementById('sale-warehouse-select').value;
-        const qty = parseInt(document.getElementById('sale-item-qty').value);
+        const usaSerial = skuInput.dataset.usaSerial === '1';
+        const ivaPorcentaje = parseFloat(skuInput.dataset.ivaPorcentaje) || 0;
+        const almacenId = document.getElementById('purchase-warehouse-select').value;
+        const qty = parseInt(document.getElementById('purchase-item-qty').value);
+        const descuentoItem = parseFloat(document.getElementById('purchase-item-discount').value) || 0;
         
         if(!sku || qty <= 0) return;
 
         // Validar que el SKU existe en el catalogo (sin validar stock,
         // porque esto es COMPRA: el objetivo ES ingresar stock).
-        // Antes llamaba a /ventas/validar_stock/ (endpoint de VENTAS),
-        // bloqueando cualquier compra de articulos sin stock existente.
         try {
             const response = await fetch(`/catalogo/buscar/?q=${encodeURIComponent(sku)}`);
             if (!response.ok) {
@@ -387,51 +484,61 @@
             return;
         }
 
-        const existingItem = draftNoteItems.find(item => item.sku === sku && item.almacen === almacenId);
+        const existingItem = draftPurchaseItems.find(item => item.sku === sku && item.almacen === almacenId);
         if (existingItem) {
             existingItem.qty += qty;
         } else {
-            draftNoteItems.push({
+            draftPurchaseItems.push({
                 sku: sku,
                 nombre: nombre,
                 almacen: almacenId,
                 qty: qty,
-                precio: precio,
+                costo: costo,
                 tipo: tipo,
-                cobertura_ind: null
+                usa_serial: usaSerial,
+                iva_porcentaje: ivaPorcentaje,
+                descuento_item: descuentoItem,
+                iva_porcentaje: ivaPorcentaje,
+                seriales_seleccionados: []
             });
         }
 
-        document.getElementById('sale-item-search').value = '';
-        document.getElementById('sale-item-selected-sku').value = '';
-        renderNoteItems();
-        recalculateNoteTotal();
-    }
-    
-    function removeNoteItem(index) {
-        draftNoteItems.splice(index, 1);
-        renderNoteItems();
-        recalculateNoteTotal();
+        document.getElementById('purchase-item-search').value = '';
+        document.getElementById('purchase-item-selected-sku').value = '';
+        renderPurchaseItems();
+        recalculatePurchaseTotal();
+
+        if (usaSerial) {
+            loadSerialesForPurchaseItem(draftPurchaseItems.find(i => i.sku === sku && i.almacen === almacenId) || {sku, almacen: almacenId});
+            setTimeout(() => renderPurchaseSerialesPanel(), 300);
+        }
     }
 
-    function renderNoteItems() {
-        const tbody = document.getElementById('note-items-tbody');
+    function removePurchaseItem(index) {
+        const removed = draftPurchaseItems.splice(index, 1);
+        renderPurchaseItems();
+        recalculatePurchaseTotal();
+        renderPurchaseSerialesPanel();
+    }
+
+    function renderPurchaseItems() {
+        const tbody = document.getElementById('purchase-items-tbody');
         tbody.innerHTML = '';
 
-        if (draftNoteItems.length === 0) {
+        if (draftPurchaseItems.length === 0) {
             tbody.innerHTML = `
-                <tr id="empty-note-row">
-                    <td colspan="7" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
-                        <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
-                        Aún no has agregado artículos a esta nota de entrega.
+                <tr id="empty-purchase-row">
+                    <td colspan="8" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                        <i class="fa-solid fa-truck-ramp-box text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                        Aún no has agregado artículos a esta factura de compra.
                     </td>
                 </tr>
             `;
             return;
         }
 
-        draftNoteItems.forEach((item, index) => {
-            const itemTotal = item.precio * item.qty;
+        draftPurchaseItems.forEach((item, index) => {
+            const itemTotal = item.costo * item.qty * (1 - (item.descuento_item || 0) / 100);
             const row = document.createElement('tr');
             row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
             row.innerHTML = `
@@ -442,10 +549,11 @@
                 </td>
                 <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
                 <td class="py-3 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
-                <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.precio.toFixed(2)}</td>
+                <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.costo.toFixed(2)}</td>
+                <td class="py-3 px-2 text-center font-bold text-slate-600 dark:text-slate-400">${(item.descuento_item || 0).toFixed(2)}%</td>
                 <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
                 <td class="py-3 px-2 text-center">
-                    <button onclick="removeNoteItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
+                    <button onclick="removePurchaseItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </td>
@@ -454,13 +562,13 @@
         });
     }
 
-    function recalculateNoteTotal() {
+    function recalculatePurchaseTotal() {
         let subtotal = 0;
         let weightedFactorSum = 0;
         let totalWeight = 0;
 
-        draftNoteItems.forEach(item => {
-            const itemTotal = item.precio * item.qty;
+        draftPurchaseItems.forEach(item => {
+            const itemTotal = item.costo * item.qty * (1 - (item.descuento_item || 0) / 100);
             subtotal += itemTotal;
             const factor = item.cobertura_ind ? item.cobertura_ind : globalFactor;
             weightedFactorSum += factor * itemTotal;
@@ -468,52 +576,172 @@
         });
 
         const exactFactor = totalWeight > 0 ? (weightedFactorSum / totalWeight) : globalFactor;
-        const discountPercent = 0; // Configurable si se desea
-        const discount = subtotal * (discountPercent / 100);
-        const totalUSD = subtotal - discount;
-        const totalBCVUSD = totalUSD * exactFactor;
-        const totalVES = totalBCVUSD * globalBCV;
 
-        document.getElementById('note-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
-        document.getElementById('note-discount-usd').innerText = `-$${discount.toFixed(2)}`;
-        document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
-        document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
-        document.getElementById('note-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+        // Descuento global
+        const descuentoGlobalPercent = parseFloat(document.getElementById('purchase-discount-percent').value) || 0;
+        const descuentoGlobal = subtotal * (descuentoGlobalPercent / 100);
+        const subtotalAfterDiscount = subtotal - descuentoGlobal;
+
+        // IVA (siempre se calcula individual por articulo)
+        let ivaUSD = 0;
+        draftPurchaseItems.forEach(item => {
+            const itemTotal = item.costo * item.qty * (1 - (item.descuento_item || 0) / 100);
+            const itemDiscounted = itemTotal * (1 - descuentoGlobalPercent / 100);
+            const itemIvaPct = item.iva_porcentaje || 0;
+            ivaUSD += itemDiscounted * (itemIvaPct / 100);
+        });
+
+        const totalUSD = subtotalAfterDiscount;
+        const totalBCVUSD = totalUSD * exactFactor;
+        const totalIVA_BS = ivaUSD * globalBCV;
+        const totalVES = (totalBCVUSD + ivaUSD) * globalBCV;
+
+        document.getElementById('purchase-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
+        document.getElementById('purchase-discount-global').innerText = `-$${descuentoGlobal.toFixed(2)}`;
+        document.getElementById('purchase-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
+        document.getElementById('purchase-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
+
+        // IVA row visibility
+        const ivaRow = document.getElementById('purchase-iva-row');
+        const ivaAmountEl = document.getElementById('purchase-iva-amount');
+        if (ivaUSD > 0) {
+            ivaRow.classList.remove('hidden');
+            ivaAmountEl.innerText = `${totalIVA_BS.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+        } else {
+            ivaRow.classList.add('hidden');
+        }
+
+        document.getElementById('purchase-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
     }
 
-    function processPurchase() {
-        if (draftNoteItems.length === 0) {
-            alert("No hay productos en la compra.");
+    let serialesCache = {};
+
+    async function loadSerialesForPurchaseItem(item) {
+        const cacheKey = `${item.sku}_${item.almacen}`;
+        if (serialesCache[cacheKey]) return;
+        try {
+            const res = await fetch(`/ventas/seriales/${item.sku}/${item.almacen}/`);
+            const data = await res.json();
+            if (data.ok) {
+                serialesCache[cacheKey] = data.data;
+            }
+        } catch(e) {
+            serialesCache[cacheKey] = [];
+        }
+    }
+
+    function renderPurchaseSerialesPanel() {
+        const container = document.getElementById('purchase-seriales-panel-container');
+        const sectionsDiv = document.getElementById('purchase-seriales-sections');
+        const serialItems = draftPurchaseItems.filter(i => i.usa_serial);
+
+        if (serialItems.length === 0) {
+            container.classList.add('hidden');
+            sectionsDiv.innerHTML = '';
             return;
         }
 
-        const proveedorId = document.getElementById('note-provider-select').value;
-        const numeroFactura = document.getElementById('note-invoice-ref').value;
-        const fechaCompra = document.getElementById('note-date-lbl').value;
-        const almacenId = document.getElementById('sale-warehouse-select').value;
+        container.classList.remove('hidden');
+        sectionsDiv.innerHTML = '';
+
+        serialItems.forEach((item, idx) => {
+            const cacheKey = `${item.sku}_${item.almacen}`;
+            const disponibles = serialesCache[cacheKey] || [];
+            const seleccionados = item.seriales_seleccionados || [];
+            const completado = seleccionados.length === item.qty;
+            const progreso = `${seleccionados.length}/${item.qty}`;
+
+            const section = document.createElement('div');
+            section.className = "bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl p-3 space-y-2";
+
+            let html = `<div class="flex justify-between items-center">
+                <span class="font-bold text-xs text-slate-800 dark:text-slate-200">${item.nombre} <span class="font-mono text-[10px] text-slate-500">(${item.sku})</span></span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded ${completado ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'}">${completado ? 'Completo' : 'Pendiente'} — ${progreso}</span>
+            </div>`;
+
+            if (disponibles.length === 0) {
+                html += `<div class="text-[10px] text-slate-400 text-center py-2">Cargando seriales...</div>`;
+            } else {
+                html += `<div class="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1">`;
+                disponibles.forEach(s => {
+                    const checked = seleccionados.includes(s.serial);
+                    const disabled = !checked && completado;
+                    html += `<label class="flex items-center gap-2 text-[10px] p-1.5 rounded-lg cursor-pointer transition ${checked ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800/40' : disabled ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'}">
+                        <input type="checkbox" class="serial-checkbox accent-indigo-600" data-item-sku="${item.sku}" data-item-almacen="${item.almacen}" data-serial="${s.serial}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="togglePurchaseSerial(this)">
+                        <span class="font-mono font-bold text-slate-800 dark:text-slate-200">${s.serial}</span>
+                    </label>`;
+                });
+                html += `</div>`;
+            }
+
+            section.innerHTML = html;
+            sectionsDiv.appendChild(section);
+        });
+    }
+
+    function togglePurchaseSerial(checkbox) {
+        const sku = checkbox.dataset.itemSku;
+        const almacen = checkbox.dataset.itemAlmacen;
+        const serial = checkbox.dataset.serial;
+        const item = draftPurchaseItems.find(i => i.sku === sku && i.almacen === almacen);
+        if (!item) return;
+
+        if (checkbox.checked) {
+            if (item.seriales_seleccionados.length >= item.qty) {
+                checkbox.checked = false;
+                return;
+            }
+            item.seriales_seleccionados.push(serial);
+        } else {
+            item.seriales_seleccionados = item.seriales_seleccionados.filter(s => s !== serial);
+        }
+        renderPurchaseSerialesPanel();
+    }
+
+    function processPurchase() {
+        if (draftPurchaseItems.length === 0) {
+            alert("No hay productos en la factura de compra.");
+            return;
+        }
+
+        const serialItems = draftPurchaseItems.filter(i => i.usa_serial);
+        for (const item of serialItems) {
+            if ((item.seriales_seleccionados || []).length !== item.qty) {
+                alert(`Debe seleccionar ${item.qty} serial(es) para "${item.nombre}" (${item.sku}). Actualmente tiene ${(item.seriales_seleccionados || []).length}.`);
+                return;
+            }
+        }
+
+        const proveedorId = document.getElementById('purchase-provider-select').value;
+        const almacenId = document.getElementById('purchase-warehouse-select').value;
         const observaciones = document.getElementById('purchase-observaciones').value.trim();
+        const tipoDocumento = document.querySelector('input[name="purchase-doc-type"]:checked').value;
+        const numeroFactura = document.getElementById('purchase-invoice-ref').value.trim();
+        const fechaCompra = document.getElementById('purchase-date').value;
+        const descuentoGlobal = parseFloat(document.getElementById('purchase-discount-percent').value) || 0;
 
         if (!proveedorId) { alert("Seleccione un proveedor."); return; }
-        if (!numeroFactura) { alert("Ingrese el número de factura."); return; }
+        if (tipoDocumento === 'FACTURA_COMPRA' && !numeroFactura) { alert("Ingrese el número de factura del proveedor."); return; }
         if (!fechaCompra) { alert("Ingrese la fecha de compra."); return; }
-
-        const listaItems = draftNoteItems.map(i => ({
-            sku: i.sku,
-            cantidad: i.qty,
-            costo_factura: i.precio
-        }));
-
-        const montoTotal = listaItems.reduce((sum, item) => sum + (item.cantidad * item.costo_factura), 0);
 
         const payload = {
             empresa_id: {{ request.session.empresa_id|default:'null' }},
             proveedor_id: proveedorId,
+            almacen_id: parseInt(almacenId),
+            observaciones: observaciones,
+            tipo_documento: tipoDocumento,
             numero_factura: numeroFactura,
             fecha_compra: fechaCompra,
-            monto_total_usd: montoTotal,
-            almacen_id: parseInt(almacenId),
-            lista_items: listaItems,
-            observaciones: observaciones
+            descuento_global: descuentoGlobal,
+            items: draftPurchaseItems.map(i => ({
+                sku: i.sku,
+                cantidad: i.qty,
+                costo_factura: i.costo,
+                costo_base: i.costo,
+                descuento_aplicado: i.descuento_item || 0,
+                iva_porcentaje: i.iva_porcentaje || 0,
+                seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
+            }))
         };
 
         fetch('/compras/registrar/', {
@@ -527,8 +755,14 @@
         .then(r => r.json())
         .then(data => {
             if(data.ok) {
-                alert(`Compra registrada con éxito.`);
-                window.location.reload();
+                const compraId = data.documento_id;
+                const correlativo = data.numero_interno;
+                const detailUrl = `/compras/${compraId}/`;
+                if (confirm(`Compra registrada con éxito. Documento Interno: ${correlativo}\n\n¿Desea ver el documento ahora?`)) {
+                    window.location.href = detailUrl;
+                } else {
+                    window.location.reload();
+                }
             } else {
                 alert(`Error: ${data.error}`);
             }
@@ -539,224 +773,4 @@
     }
 </script>
 
-<div id="modal-contact"
-        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div
-            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-lg w-full rounded-2xl shadow-2xl overflow-hidden overflow-y-auto max-h-[90vh]">
-            <div class="p-6 space-y-4">
-                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
-                    <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2"
-                        id="contact-modal-title">
-                        <i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Contacto
-                    </h3>
-                    <button onclick="closeContactModal()"
-                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
-                            class="fa-solid fa-xmark text-lg"></i></button>
-                </div>
-
-                <form method="POST" action="{% url 'inventory:contactos' %}" class="space-y-3 text-xs">
-{% csrf_token %}
-                    <input type="hidden" id="form-c-type" name="tipo">
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1"
-                                id="contact-id-lbl">Cédula / RIF</label>
-                            <input id="form-c-id" name="rif" type="text" placeholder="Ej. V-26412411 o J-41241"
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label
-                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
-                                Completo / Razón Social</label>
-                            <input id="form-c-name" name="nombre" type="text" placeholder="Ej. Corporación Metal-X C.A."
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <label
-                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Teléfono
-                                o Canal Comercial</label>
-                            <input id="form-c-phone" name="telefono" type="text" placeholder="Ej. 0412.186.92.11"
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
-                        </div>
-                        <div>
-                            <label
-                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Correo
-                                Electrónico</label>
-                            <input id="form-c-email" name="correo" type="email" placeholder="Ej. info@empresa.com"
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <label
-                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Red
-                                Social (IG/TikTok)</label>
-                            <input id="form-c-social" name="red_social" type="text" placeholder="Ej. @metal_x"
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-medium focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div id="form-group-nombre-asesor" class="hidden">
-                            <label
-                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Nombre
-                                del Asesor (Proveedor)</label>
-                            <input id="form-c-asesor" name="nombre_asesor" type="text" placeholder="Ej. Juan Pérez"
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-medium focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label
-                                class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Dirección
-                                Física Completa</label>
-                            <input id="form-c-address" name="direccion" type="text" placeholder="Ej. Zona Industrial San Diego, Cl. 4"
-                                class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-medium">
-                        </div>
-                    </div>
-
-                    <div>
-                        <label
-                            class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Observaciones
-                            / Comentarios Internos</label>
-                        <textarea id="form-c-notes" name="observaciones" rows="3"
-                            placeholder="Indique de forma libre observaciones para marketing, histórico o condiciones..."
-                            class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none h-24 font-medium"></textarea>
-                    </div>
-                </div>
-            </div>
-
-            <!-- MODAL BUTTONS -->
-            <div
-                class="bg-slate-100 dark:bg-slate-900 px-6 py-4 border-t border-slate-200 dark:border-slate-750 flex justify-end gap-3">
-                <button onclick="closeContactModal()"
-                    class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition">
-                    Cancelar
-                </button>
-                <button type="submit"
-                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-semibold transition shadow-md shadow-indigo-600/10">
-                    Guardar Contacto
-                </button>
-            </div>
-</form>
-        </div>
-    </div>
-
-    
-<div id="modal-contact-details"
-        class="hidden fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div
-            class="bg-white dark:bg-slate-850 border border-slate-300 dark:border-slate-700 max-w-md w-full rounded-2xl shadow-2xl overflow-hidden">
-            <div class="p-6 space-y-4">
-                <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
-                    <h3 class="font-bold text-md text-indigo-600 dark:text-indigo-400 flex items-center gap-2">
-                        <i class="fa-solid fa-id-card"></i> Ficha Informativa del Contacto
-                    </h3>
-                    <button onclick="closeContactDetailsModal()"
-                        class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><i
-                            class="fa-solid fa-xmark text-lg"></i></button>
-                </div>
-
-                <div class="space-y-3 text-xs leading-relaxed">
-                    <div
-                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                        <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Nombre /
-                            Razón Social</span>
-                        <span id="detail-c-name" class="font-bold text-slate-800 dark:text-slate-200 text-sm">--</span>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-3">
-                        <div
-                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <span
-                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Identificación
-                                (RIF/C.I)</span>
-                            <span id="detail-c-id"
-                                class="font-mono text-slate-700 dark:text-slate-300 font-bold">--</span>
-                        </div>
-                        <div
-                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <span
-                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Tipo</span>
-                            <span id="detail-c-type" class="text-slate-700 dark:text-slate-300 font-semibold">--</span>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-3">
-                        <div
-                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <span
-                                class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Teléfono</span>
-                            <span id="detail-c-phone" class="text-slate-700 dark:text-slate-300">--</span>
-                        </div>
-                        <div
-                            class="bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
-                            <span class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Red
-                                Social</span>
-                            <span id="detail-c-social" class="font-mono text-indigo-600 dark:text-indigo-400">--</span>
-                        </div>
-                    </div>
-
-                    <div
-                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                        <span
-                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Dirección</span>
-                        <span id="detail-c-address" class="text-slate-700 dark:text-slate-300">--</span>
-                    </div>
-
-                    <div
-                        class="bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
-                        <span
-                            class="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 block">Observaciones
-                            y Comentarios</span>
-                        <p id="detail-c-notes" class="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">--</p>
-                    </div>
-                </div>
-            </div>
-
-<script>
-    function openContactModal(type) {
-        document.getElementById('form-c-type').value = type;
-        document.getElementById('contact-modal-title').innerHTML = type === 'CLIENTE' ? `<i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Cliente` : `<i class="fa-solid fa-truck-field text-indigo-500"></i> Registrar Proveedor`;
-        document.getElementById('contact-id-lbl').innerText = type === 'CLIENTE' ? 'Cédula / RIF del Cliente' : 'RIF / ID Fiscal del Proveedor';
-
-        document.getElementById('form-c-id').value = '';
-        document.getElementById('form-c-name').value = '';
-        document.getElementById('form-c-phone').value = '';
-        document.getElementById('form-c-email').value = '';
-        document.getElementById('form-c-social').value = '';
-        document.getElementById('form-c-address').value = '';
-        document.getElementById('form-c-notes').value = '';
-        document.getElementById('form-c-asesor').value = '';
-
-        const asesorGroup = document.getElementById('form-group-nombre-asesor');
-        if (type === 'PROVEEDOR') {
-            asesorGroup.classList.remove('hidden');
-        } else {
-            asesorGroup.classList.add('hidden');
-        }
-
-        document.getElementById('modal-contact').classList.remove('hidden');
-    }
-
-    function closeContactModal() {
-        document.getElementById('modal-contact').classList.add('hidden');
-    }
-
-    function viewContactDetails(name, id, type, phone, social, address, notes) {
-        document.getElementById('detail-c-name').innerText = name;
-        document.getElementById('detail-c-id').innerText = id;
-        document.getElementById('detail-c-type').innerText = type;
-        document.getElementById('detail-c-phone').innerText = phone || '--';
-        document.getElementById('detail-c-social').innerText = social || '--';
-        document.getElementById('detail-c-address').innerText = address || '--';
-        document.getElementById('detail-c-notes').innerText = notes || 'Sin comentarios registrados.';
-
-        document.getElementById('modal-contact-details').classList.remove('hidden');
-    }
-
-    function closeContactDetailsModal() {
-        document.getElementById('modal-contact-details').classList.add('hidden');
-    }
-</script>
 {% endblock %}

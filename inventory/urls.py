@@ -43,6 +43,10 @@ urlpatterns = [
     path('ventas/<int:nota_id>/imprimir/', views.vista_imprimir_nota, name='imprimir_nota'),
     path('ventas/<int:nota_id>/imprimir-coordenadas/', views.vista_imprimir_coordenadas, name='imprimir_coordenadas'),
 
+    # ── Compras ─────────────────────────────────────────────────────────────
+    path('compras/<int:compra_id>/pdf/', views.generar_pdf_compra, name='pdf_compra'),
+    path('compras/<int:compra_id>/', views.vista_detalle_compra, name='detalle_compra'),
+
     # Tasas
     path('tasas/sincronizar/', views.vista_sincronizar_tasa, name='sincronizar_tasa'),
 

@@ -862,6 +862,152 @@ def generar_pdf_nota(request, nota_id):
     return response
 
 
+@login_required
+@require_http_methods(["GET"])
+def vista_detalle_compra(request, compra_id):
+    """Muestra el detalle de una Factura de Compra con botón de impresión."""
+    from .models import DocumentoCompra, ConfiguracionEmpresa
+    from decimal import Decimal
+    documento = get_object_or_404(DocumentoCompra.objects.select_related('proveedor', 'almacen', 'empresa'), pk=compra_id)
+    detalles = documento.detalles.select_related('articulo').all()
+    config = ConfiguracionEmpresa.objects.get(empresa=documento.empresa)
+
+    # Pre-calcular totales de línea para el template
+    detalles_con_totales = []
+    total_usd = Decimal('0')
+    total_bs = Decimal('0')
+    total_iva_usd = Decimal('0')
+    total_iva_bs = Decimal('0')
+    for d in detalles:
+        line_usd = d.cantidad * d.costo_base
+        line_bs = d.cantidad * d.costo_ajustado_bcv
+        total_usd += line_usd
+        total_bs += line_bs
+        total_iva_usd += d.iva_usd
+        total_iva_bs += d.iva_bs
+        d.line_usd = line_usd
+        d.line_bs = line_bs
+        detalles_con_totales.append(d)
+
+    context = {
+        'documento': documento,
+        'detalles': detalles_con_totales,
+        'config': config,
+        'total_usd': total_usd,
+        'total_bs': total_bs,
+        'total_iva_usd': total_iva_usd,
+        'total_iva_bs': total_iva_bs,
+        'print_url': f'/compras/{compra_id}/pdf/',
+    }
+    return render(request, 'inventory/compra_detalle.html', context)
+
+
+@login_required
+@require_http_methods(["GET"])
+def generar_pdf_compra(request, compra_id):
+    """Genera un PDF tamaño Carta (Letter) de la Factura de Compra usando ReportLab."""
+    from .models import DocumentoCompra, ConfiguracionEmpresa
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm, mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+
+    documento = get_object_or_404(DocumentoCompra.objects.select_related('proveedor', 'almacen', 'empresa'), pk=compra_id)
+    detalles = documento.detalles.select_related('articulo').all()
+    config = ConfiguracionEmpresa.objects.get(empresa=documento.empresa)
+
+    response = HttpResponse(content_type='application/pdf')
+    doc_type_str = 'FACTURA DE COMPRA' if documento.tipo_documento == 'FACTURA_COMPRA' else documento.get_tipo_documento_display().upper()
+    filename = f'{doc_type_str.replace(" ", "_")}_{documento.numero_interno}.pdf'
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+
+    doc = SimpleDocTemplate(
+        response, pagesize=letter,
+        rightMargin=1.5*cm, leftMargin=1.5*cm,
+        topMargin=1.5*cm, bottomMargin=1.5*cm
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=16, spaceAfter=4, alignment=TA_CENTER)
+    normal_style = styles['Normal']
+    right_style = ParagraphStyle('RightAlign', parent=normal_style, alignment=TA_RIGHT)
+    header_style = ParagraphStyle('Header', parent=normal_style, fontSize=9, textColor=colors.grey, alignment=TA_CENTER)
+
+    story.append(Paragraph(documento.empresa.nombre, title_style))
+    story.append(Paragraph(f"RIF: {documento.empresa.rif or 'N/A'}", header_style))
+    story.append(Spacer(1, 3*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.black))
+    story.append(Spacer(1, 3*mm))
+
+    doc_title = f"{doc_type_str} {'N° ' + documento.numero_factura if documento.numero_factura else ''}"
+    story.append(Paragraph(doc_title, ParagraphStyle('DocType', parent=styles['Heading2'], fontSize=12, alignment=TA_CENTER)))
+    story.append(Paragraph(f"Interno: {documento.numero_interno} | Fecha: {documento.fecha_compra.strftime('%d/%m/%Y')}", header_style))
+    story.append(Spacer(1, 5*mm))
+
+    story.append(Paragraph(f"Proveedor: {documento.proveedor.nombre}  |  ID: {documento.proveedor.identificacion or 'N/A'}", normal_style))
+    story.append(Paragraph(f"Almacén: {documento.almacen.nombre}", normal_style))
+    story.append(Spacer(1, 4*mm))
+
+    table_data = [['SKU', 'Artículo', 'Alm.', 'Cant.', 'Costo $', 'Total $', 'IVA%', 'IVA $', 'Total IVA Bs']]
+    for d in detalles:
+        table_data.append([
+            d.articulo.sku,
+            d.articulo.nombre[:28],
+            documento.almacen.nombre[:10],
+            str(d.cantidad),
+            f'{d.costo_base:.2f}',
+            f'{(d.cantidad * d.costo_base):.2f}',
+            f'{d.iva_porcentaje:.2f}',
+            f'{d.iva_usd:.2f}',
+            f'{d.iva_bs:.2f}',
+        ])
+
+    col_widths = [2*cm, 5*cm, 1.8*cm, 1.3*cm, 1.8*cm, 1.8*cm, 1.3*cm, 1.5*cm, 2*cm]
+    t = Table(table_data, colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (1, 1), (1, -1), 'LEFT'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 6*mm))
+
+    subtotal_usd = sum(d.cantidad * d.costo_base for d in detalles)
+    total_iva_usd = sum(d.iva_usd for d in detalles)
+    total_iva_bs = sum(d.iva_bs for d in detalles)
+    total_bs = subtotal_usd * documento.tasa_bcv_aplicada + total_iva_bs
+
+    story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
+    story.append(Paragraph(f"Total IVA USD: ${total_iva_usd:.2f}", right_style))
+    story.append(Paragraph(f"Total IVA Bs: {total_iva_bs:.2f} Bs", right_style))
+    story.append(Spacer(1, 2*mm))
+    story.append(HRFlowable(width="40%", thickness=0.5, color=colors.black))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(f"TOTAL USD: ${subtotal_usd + total_iva_usd:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
+    story.append(Paragraph(f"TOTAL Bs: {total_bs:.2f} Bs", ParagraphStyle('TotalBs', parent=styles['Heading3'], fontSize=10, alignment=TA_RIGHT)))
+    story.append(Spacer(1, 5*mm))
+
+    story.append(Paragraph(f"Tasa BCV: {documento.tasa_bcv_aplicada:.4f}  |  Factor: {documento.factor_cobertura_aplicado:.4f}  |  Tasa Mercado: {documento.tasa_mercado_aplicada:.4f}", header_style))
+    if documento.observaciones:
+        story.append(Spacer(1, 3*mm))
+        story.append(Paragraph(f"Obs: {documento.observaciones}", ParagraphStyle('Obs', parent=normal_style, fontSize=8, textColor=colors.grey)))
+
+    doc.build(story)
+    return response
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. TASAS DE CAMBIO
 # ─────────────────────────────────────────────────────────────────────────────
