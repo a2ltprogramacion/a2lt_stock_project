@@ -4,11 +4,12 @@
     <div class="flex justify-between items-center">
         <div>
             <h2 class="text-xl font-bold text-slate-900 dark:text-white">
-                {% if documento.tipo_documento == 'FACTURA_COMPRA' %}Factura de Compra{% elif documento.tipo_documento == 'NOTA_CREDITO_COMPRA' %}Nota de Crédito{% else %}Orden de Compra{% endif %} 
+                {% if documento.tipo_documento == 'FACTURA_COMPRA' %}Factura de Compra{% elif documento.tipo_documento == 'NOTA_ENTREGA_PROVEEDOR' %}Nota de Entrega / Recibo{% elif documento.tipo_documento == 'REGISTRO_MENOR' %}Registro Menor{% else %}{{ documento.get_tipo_documento_display }}{% endif %} 
                 <span class="text-sm font-normal text-slate-500 dark:text-slate-400 ml-2">{{ documento.numero_interno }}</span>
             </h2>
             <p class="text-xs text-slate-500 dark:text-slate-400">
                 {% if documento.tipo_documento == 'FACTURA_COMPRA' and documento.numero_factura %}N° Factura: {{ documento.numero_factura }} | {% endif %}
+                {% if documento.tipo_documento == 'NOTA_ENTREGA_PROVEEDOR' and documento.numero_factura %}N° Documento: {{ documento.numero_factura }} | {% endif %}
                 Fecha: {{ documento.fecha_compra|date:"d/m/Y" }}
             </p>
         </div>
@@ -34,7 +35,7 @@
                 <div class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
                     <div class="flex justify-between items-center">
                         <span class="font-bold text-slate-800 dark:text-slate-200 text-xs">
-                            {% if documento.tipo_documento == 'FACTURA_COMPRA' %}Factura de Compra{% elif documento.tipo_documento == 'NOTA_CREDITO_COMPRA' %}Nota de Crédito{% else %}Orden de Compra{% endif %}
+                            {% if documento.tipo_documento == 'FACTURA_COMPRA' %}Factura de Compra{% elif documento.tipo_documento == 'NOTA_ENTREGA_PROVEEDOR' %}Nota de Entrega / Recibo{% elif documento.tipo_documento == 'REGISTRO_MENOR' %}Registro Menor{% else %}{{ documento.get_tipo_documento_display }}{% endif %}
                             {% if documento.numero_factura %} N° {{ documento.numero_factura }}{% endif %}
                         </span>
                         <span class="font-mono text-[10px] text-slate-500 dark:text-slate-400">Interno: {{ documento.numero_interno }}</span>

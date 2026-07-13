@@ -17,6 +17,7 @@ para que `@transaction.atomic` opere sobre la base de datos real sin savepoints
 intermedios que interfieran con la verificación del rollback.
 """
 import io
+import json
 from decimal import Decimal
 
 # Workaround: Django 5.1 + Python 3.14 rompen BaseContext.__copy__()
@@ -6390,4 +6391,333 @@ class TestArticulosToolbarRender(TestCase):
         """El HTML debe mencionar $[PRECIO_BS_BASE]."""
         response = self.client.get(reverse('inventory:articulos'))
         self.assertContains(response, '$[PRECIO_BS_BASE]')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TESTS 1.1.2 — Iteración Observaciones del Cliente (O1, O2)
+#
+#   O1:  El usuario puede elegir entre FACTURA_COMPRA (con #factura obligatorio),
+#        NOTA_ENTREGA_PROVEEDOR (recibo), o REGISTRO_MENOR (sin doc).
+#        Las 3 opciones son válidas en backend; el radio del template expone 3.
+#
+#   O2:  Cada línea del carrito (Compra o Venta) puede tener su propio
+#        iva_porcentaje (snapshot). El backend respeta el override.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestTipoDocumentoCompra3Opciones(TransactionTestCase):
+
+    def setUp(self):
+        from inventory.services import registrar_movimiento
+        from inventory.models import ConfiguracionEmpresa
+        self.empresa = crear_empresa(nombre='CompraTipoCorp', rif='J-CTP-001')
+        self.alm = crear_almacen(self.empresa, 'Almacen TipoDoc')
+        self.proveedor = Contacto.objects.create(
+            empresa=self.empresa, identificacion='PROV-O1',
+            nombre='Proveedor O1', tipo='PROVEEDOR'
+        )
+
+    def test_tipo_documento_opcion_nota_entrega_proveedor_acepta_doc_opcional(self):
+        """
+        El servicio acepta NOTA_ENTREGA_PROVEEDOR con numero_factura opcional.
+        Antes era NOTA_CREDITO_COMPRA que también lo aceptaba,
+        pero aquí validamos que el nuevo string funciona.
+        """
+        from inventory.services import registrar_compra_proveedor, registrar_movimiento
+        from inventory.models import DocumentoCompra
+        art = crear_articulo_fisico(self.empresa, sku='O1-NE', nombre='Art NE')
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        # Con número de documento
+        resp = registrar_compra_proveedor(
+            empresa_id=self.empresa.pk,
+            proveedor_id=self.proveedor.pk,
+            almacen_id=self.alm.pk,
+            tipo_documento='NOTA_ENTREGA_PROVEEDOR',
+            numero_factura='NE-PROV-001',
+            fecha_compra=None,
+            lista_items=[{
+                'sku': 'O1-NE', 'cantidad': 2,
+                'costo_factura': Decimal('10.00'),
+                'iva_porcentaje': Decimal('16.00'),
+            }],
+        )
+        nuevo_doc = DocumentoCompra.objects.get(pk=resp['documento_id'])
+        self.assertEqual(nuevo_doc.tipo_documento, 'NOTA_ENTREGA_PROVEEDOR')
+        self.assertEqual(nuevo_doc.numero_factura, 'NE-PROV-001')
+
+    def test_tipo_documento_opcion_registro_menor_requiere_no_haber_duplicado(self):
+        """REGISTRO_MENOR puede no traer numero_factura (ej. reposición mostrador)."""
+        from inventory.services import registrar_compra_proveedor, registrar_movimiento
+        from inventory.models import DocumentoCompra
+        art = crear_articulo_fisico(self.empresa, sku='O1-RM', nombre='Art RM')
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        # Sin número de documento
+        resp = registrar_compra_proveedor(
+            empresa_id=self.empresa.pk,
+            proveedor_id=self.proveedor.pk,
+            almacen_id=self.alm.pk,
+            tipo_documento='REGISTRO_MENOR',
+            numero_factura='',
+            fecha_compra=None,
+            lista_items=[{
+                'sku': 'O1-RM', 'cantidad': 1,
+                'costo_factura': Decimal('5.00'),
+                'iva_porcentaje': Decimal('8.00'),
+            }],
+        )
+        nuevo_doc = DocumentoCompra.objects.get(pk=resp['documento_id'])
+        self.assertEqual(nuevo_doc.tipo_documento, 'REGISTRO_MENOR')
+        self.assertEqual(nuevo_doc.numero_factura, '')
+
+    def test_tipo_documento_opcion_factura_sin_numero_falla(self):
+        """FACTURA_COMPRA sin numero_factura debe fallar (regla de obligatoriedad)."""
+        from inventory.services import registrar_compra_proveedor, registrar_movimiento
+        art = crear_articulo_fisico(self.empresa, sku='O1-FA', nombre='Art FA')
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        with self.assertRaisesMessage(ValueError, "numero_factura es obligatorio"):
+            registrar_compra_proveedor(
+                empresa_id=self.empresa.pk,
+                proveedor_id=self.proveedor.pk,
+                almacen_id=self.alm.pk,
+                tipo_documento='FACTURA_COMPRA',
+                numero_factura='',
+                fecha_compra=None,
+                lista_items=[{
+                    'sku': 'O1-FA', 'cantidad': 1,
+                    'costo_factura': Decimal('5.00'),
+                }],
+            )
+
+    def test_tipo_documento_opcion_choice_viejos_fallan(self):
+        """Los choices viejos (NOTA_CREDITO_COMPRA, ORDEN_COMPRA) deben rechazarse."""
+        from inventory.services import registrar_movimiento, registrar_compra_proveedor
+        from inventory.models import Articulo
+        # Crear un artículo con stock para no afectar el primer subtest
+        Articulo.objects.create(
+            empresa=self.empresa, sku='O1-X', nombre='Art X', tipo='FISICO',
+            categoria='OTROS', costo=Decimal('1.00'), precio_divisa=Decimal('5.00'),
+        )
+        art = Articulo.objects.get(sku='O1-X')
+        art_inv = art.inventarios.first()
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        with self.assertRaises(ValueError):
+            registrar_compra_proveedor(
+                empresa_id=self.empresa.pk,
+                proveedor_id=self.proveedor.pk,
+                almacen_id=self.alm.pk,
+                tipo_documento='NOTA_CREDITO_COMPRA',
+                numero_factura='',
+                fecha_compra=None,
+                lista_items=[{
+                    'sku': 'O1-X', 'cantidad': 1,
+                    'costo_factura': Decimal('5.00'),
+                }],
+            )
+        with self.assertRaises(ValueError):
+            registrar_compra_proveedor(
+                empresa_id=self.empresa.pk,
+                proveedor_id=self.proveedor.pk,
+                almacen_id=self.alm.pk,
+                tipo_documento='ORDEN_COMPRA',
+                numero_factura='',
+                fecha_compra=None,
+                lista_items=[{
+                    'sku': 'O1-X', 'cantidad': 1,
+                    'costo_factura': Decimal('5.00'),
+                }],
+            )
+
+    def test_tipo_documento_compras_html_3_opciones(self):
+        """El HTML `compras.html` renderiza 3 radios (Factura/NE/RegistroMenor)."""
+        from django.contrib.auth.models import User
+        user = User.objects.create_user('compras_o1_user', password='test1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='compras_o1_user', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+        response = self.client.get(reverse('inventory:compras'))
+        self.assertEqual(response.status_code, 200)
+        # 3 radios
+        self.assertContains(response, 'value="FACTURA_COMPRA"', 1)
+        self.assertContains(response, 'value="NOTA_ENTREGA_PROVEEDOR"', 1)
+        self.assertContains(response, 'value="REGISTRO_MENOR"', 1)
+        # El radio de NC viejo NO debe aparecer
+        self.assertNotContains(response, 'value="NOTA_CREDITO_COMPRA"')
+        self.assertNotContains(response, 'value="ORDEN_COMPRA"')
+        # El contexto debe incluir ivas_disponibles_json (lista serializada).
+        # Si config.ivas_disponibles está vacío, la vista aplica fallback [16,8,0].
+        self.assertContains(response, 'ivasDisponibles')
+
+
+class TestIvaIndividualPorLinea(TransactionTestCase):
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='IvaLineCorp', rif='J-IVA-LINE-001')
+        self.alm = crear_almacen(self.empresa, 'Almacen Iva Line')
+        self.proveedor = Contacto.objects.create(
+            empresa=self.empresa, identificacion='PROV-IVA',
+            nombre='Proveedor IVA', tipo='PROVEEDOR'
+        )
+
+    def test_procesar_venta_respeta_iva_porcentaje_por_item(self):
+        """procesar_venta debe usar iva_porcentaje del item, no del Articulo."""
+        from inventory.services import procesar_venta, registrar_movimiento
+        # Artículo con iva default 16
+        art = crear_articulo_fisico(self.empresa, sku='IVA-A', nombre='Art A')
+        art.iva_porcentaje = Decimal('16.00')
+        art.save()
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        # Venta: el item dice iva=8, debe prevalecer
+        nota = procesar_venta(
+            empresa_id=self.empresa.pk,
+            lista_items=[{
+                'articulo_sku': 'IVA-A', 'cantidad': 1,
+                'precio_base': Decimal('100.00'),
+                'iva_porcentaje': Decimal('8.00'),
+            }],
+            almacen_id=self.alm.pk,
+        )
+        det = nota.detalles.first()
+        self.assertEqual(det.iva_porcentaje, Decimal('8.00'),
+                         msg='iva_porcentaje del item debe prevalecer')
+
+    def test_procesar_venta_sin_iva_porcentaje_cae_al_articulo(self):
+        """Compatibilidad: si no viene iva en el item, cae a Articulo.iva_porcentaje."""
+        from inventory.services import procesar_venta, registrar_movimiento
+        art = crear_articulo_fisico(self.empresa, sku='IVA-B', nombre='Art B')
+        art.iva_porcentaje = Decimal('8.00')
+        art.save()
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        nota = procesar_venta(
+            empresa_id=self.empresa.pk,
+            lista_items=[{
+                'articulo_sku': 'IVA-B', 'cantidad': 1,
+                'precio_base': Decimal('100.00'),
+                # sin iva_porcentaje en el item
+            }],
+            almacen_id=self.alm.pk,
+        )
+        det = nota.detalles.first()
+        self.assertEqual(det.iva_porcentaje, Decimal('8.00'))
+
+    def test_procesar_venta_iva_fuera_de_rango_falla(self):
+        """Item con iva fuera de [0,100] debe lanzar ValueError."""
+        from inventory.services import procesar_venta, registrar_movimiento
+        art = crear_articulo_fisico(self.empresa, sku='IVA-C', nombre='Art C')
+        art.iva_porcentaje = Decimal('16.00')
+        art.save()
+        registrar_movimiento(art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
+        with self.assertRaisesMessage(ValueError, "iva_porcentaje para IVA-C"):
+            procesar_venta(
+                empresa_id=self.empresa.pk,
+                lista_items=[{
+                    'articulo_sku': 'IVA-C', 'cantidad': 1,
+                    'precio_base': Decimal('100.00'),
+                    'iva_porcentaje': Decimal('150.00'),
+                }],
+                almacen_id=self.alm.pk,
+            )
+
+    def test_registrar_compra_con_ivas_mixtos(self):
+        """Compra con 2 items a 16% y 8% debe desglosarse correctamente."""
+        from inventory.services import registrar_compra_proveedor
+        from inventory.models import DocumentoCompra
+        art16 = crear_articulo_fisico(self.empresa, sku='IVA-M16', nombre='Art 16%')
+        art8 = crear_articulo_fisico(self.empresa, sku='IVA-M8', nombre='Art 8%')
+        art0 = crear_articulo_fisico(self.empresa, sku='IVA-M0', nombre='Art 0%')
+
+        resp = registrar_compra_proveedor(
+            empresa_id=self.empresa.pk,
+            proveedor_id=self.proveedor.pk,
+            almacen_id=self.alm.pk,
+            tipo_documento='FACTURA_COMPRA',
+            numero_factura='FA-MIX-001',
+            fecha_compra=None,
+            lista_items=[
+                {'sku': 'IVA-M16', 'cantidad': 1, 'costo_factura': Decimal('100.00'), 'iva_porcentaje': Decimal('16.00')},
+                {'sku': 'IVA-M8', 'cantidad': 1, 'costo_factura': Decimal('50.00'), 'iva_porcentaje': Decimal('8.00')},
+                {'sku': 'IVA-M0', 'cantidad': 1, 'costo_factura': Decimal('20.00'), 'iva_porcentaje': Decimal('0.00')},
+            ],
+        )
+        self.assertTrue(resp.get('ok'))
+        # acceder al documento via documento_id retornado en el dict
+        doc = DocumentoCompra.objects.get(pk=resp['documento_id'])
+        detalles = list(doc.detalles.all())
+        iva_detail = {d.articulo.sku: d.iva_porcentaje for d in detalles}
+        self.assertEqual(iva_detail['IVA-M16'], Decimal('16.00'))
+        self.assertEqual(iva_detail['IVA-M8'], Decimal('8.00'))
+        self.assertEqual(iva_detail['IVA-M0'], Decimal('0.00'))
+        # IVA total = 100*.16 + 50*.08 + 20*.0 = 16 + 4 + 0 = 20
+        self.assertEqual(doc.iva_total, Decimal('20.0000'))
+
+    def test_compras_html_iva_individual_en_grilla(self):
+        """`compras.html` debe tener columna IVA % con select por item."""
+        from django.contrib.auth.models import User
+        user = User.objects.create_user('ivap_compra_user', password='test1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='ivap_compra_user', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+        response = self.client.get(reverse('inventory:compras'))
+        # La columna y la función JS deben existir
+        self.assertContains(response, 'IVA %')
+        self.assertContains(response, 'updatePurchaseItemIva(')
+
+    def test_ventas_html_iva_individual_en_grilla(self):
+        """`ventas.html` debe tener columna IVA % con select por item."""
+        from django.contrib.auth.models import User
+        user = User.objects.create_user('ivap_venta_user', password='test1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='ivap_venta_user', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+        response = self.client.get(reverse('inventory:ventas'))
+        # La columna y la función JS deben existir
+        self.assertContains(response, 'IVA %')
+        self.assertContains(response, 'updateNoteItemIva(')
+        # Contexto expone ivas_disponibles_json serializado (fallback [16, 8, 0]).
+        self.assertContains(response, json.dumps([16, 8, 0]))
+
+
+class TestIVAConfiguracionIvasDisponibles(TestCase):
+    """ConfiguracionEmpresa.ivas_disponibles debe serializarse en JS."""
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='IvasCorp', rif='J-IVAS-001')
+
+    def test_ivas_disponibles_default_es_lista(self):
+        """ivas_disponibles por defecto es una lista vacía (configuración por tenant)."""
+        from inventory.models import ConfiguracionEmpresa
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.assertIsInstance(config.ivas_disponibles, list)
+
+    def test_ivas_disponibles_serializa_en_json_para_template(self):
+        """La vista ventas/compras expone ivas_disponibles_json (json-encoded list).
+           Cuando está vacío en config, fallback a [16, 8, 0]."""
+        from inventory.models import ConfiguracionEmpresa
+        from django.contrib.auth.models import User
+        user = User.objects.create_user('ivcfg_user', password='test1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='ivcfg_user', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+        # Por defecto, fallback a [16, 8, 0]
+        response = self.client.get(reverse('inventory:ventas'))
+        self.assertContains(response, json.dumps([16, 8, 0]))
 

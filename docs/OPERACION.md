@@ -96,7 +96,7 @@
 | `/ventas/` | Notas de Entrega / Facturas (1.1.0) | Punto de venta. Emite `NOTA_ENTREGA` o `FACTURA` (con `numero_factura` único por empresa). Soporta `descuento_global` (0-100 %) e `iva_porcentaje` por artículo. PDF descargable. |
 | `/ventas/<id>/` | Detalle NE/Factura (1.1.0) | Vista detallada de nota con desglose de 4 precios por líneas, IVA y descuento. |
 | `/ventas/<id>/pdf/` | PDF NE/Factura (1.1.0) | Descarga PDF A4 portrait con reportlab. |
-| `/compras/` | Compras a Proveedor (1.1.0) | Registro de compra con 4 snapshots de costo + IVA + descuento + seriales por artículo. |
+| `/compras/` | Compras a Proveedor (1.1.0/1.1.1) | Registro de compra con **3 tipos de documento** (Factura obligatoria, Nota Entrega/Recibo opcional, Registro Menor sin doc), **IVA individual por línea** (1.1.1), 4 snapshots de costo + descuento + seriales por artículo. |
 | `/compras/<id>/` | Detalle Compra (1.1.0) | Vista detallada con desglose de 4 costos por líneas. |
 | `/compras/<id>/pdf/` | PDF Compra (1.1.0) | Descarga PDF A4 portrait. |
 | `/reversos/` | Reversos | Listado de notas y compras; opción de anular con motivo. |
@@ -205,12 +205,13 @@ que ya gestiona esto.
 
 ### Tests lentos en Windows
 
-La suite de **234 tests toma ~151s** (1.1.0). Es esperable en SQLite 
+La suite de **247 tests toma ~160s** (1.1.1). Es esperable en SQLite 
 WAL con migraciones completas cada vez. Para tests rápidos de un 
 módulo:
 ```bash
 python manage.py test inventory.tests.TestDashboardLiveData -v 2
 python manage.py test inventory.tests.TestArticulosToolbarTokens -v 2  # Fichas (rápidos)
+python manage.py test inventory.tests.TestIvaIndividualPorLinea -v 2   # 1.1.1 IVA por línea (rápido)
 ```
 
 ### BD corrupta / backup inválido
@@ -262,3 +263,14 @@ python manage.py createsuperuser
 6. **FACTURA** requiere `numero_factura` único por empresa (ADR-23). 
    La UI deshabilita el botón "Confirmar Venta" si el tipo FACTURA 
    está seleccionado pero el campo está vacío (interlock N4).
+7. **Tipos de documento de Compra** (1.1.1 O1): 3 opciones en el 
+   radio: Factura (obligatorio #factura), Nota Entrega / Recibo 
+   (opcional el #documento), Registro Menor (sin documento físico). 
+   Las viejas `NOTA_CREDITO_COMPRA` y `ORDEN_COMPRA` fueron 
+   removidas — Notas de Crédito se reservan para TICKET #18 
+   (módulo aparte `/notas-credito/`).
+8. **IVA individual por línea** (1.1.1 O2): cada ítem en 
+   `/ventas/` y `/compras/` puede tener su propio `iva_porcentaje` 
+   (default 16 desde `Articulo.iva_porcentaje`; override desde 
+   `<select>` de la grilla). Rango `[0, 100]`. `iva_total` del 
+   documento se recalcula sumando IVAs individuales.

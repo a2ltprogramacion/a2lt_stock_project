@@ -814,8 +814,8 @@ class DocumentoCompra(models.Model):
     """
     TIPO_DOCUMENTO_CHOICES = [
         ('FACTURA_COMPRA', 'Factura de Compra'),
-        ('NOTA_CREDITO_COMPRA', 'Nota de Crédito de Compra'),
-        ('ORDEN_COMPRA', 'Orden de Compra'),
+        ('NOTA_ENTREGA_PROVEEDOR', 'Nota de Entrega / Recibo'),
+        ('REGISTRO_MENOR', 'Registro Menor (sin doc.)'),
     ]
 
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='documentos_compra')
@@ -827,7 +827,7 @@ class DocumentoCompra(models.Model):
         verbose_name='Proveedor'
     )
     tipo_documento = models.CharField(
-        max_length=20, choices=TIPO_DOCUMENTO_CHOICES, default='FACTURA_COMPRA',
+        max_length=30, choices=TIPO_DOCUMENTO_CHOICES, default='FACTURA_COMPRA',
         verbose_name='Tipo de Documento'
     )
     numero_interno = models.CharField(
@@ -838,7 +838,12 @@ class DocumentoCompra(models.Model):
         default=0, verbose_name='Correlativo',
         help_text='Número secuencial entero por empresa (no mostrar al usuario, usar numero_interno).'
     )
-    numero_factura = models.CharField(max_length=100, blank=True, default='', verbose_name='N° Factura Proveedor')
+    numero_factura = models.CharField(
+        max_length=100, blank=True, default='', verbose_name='N° Documento Proveedor',
+        help_text='N° de factura, nota de entrega o recibo del proveedor. '
+                  'Obligatorio para FACTURA_COMPRA; opcional para NOTA_ENTREGA_PROVEEDOR '
+                  'y REGISTRO_MENOR. Único por empresa cuando no es vacío.'
+    )
     fecha_compra = models.DateField(blank=True, null=True, default=None, verbose_name='Fecha de Compra')
     monto_total_usd = models.DecimalField(max_digits=14, decimal_places=4, verbose_name='Monto Total (USD)')
     descuento_global = models.DecimalField(

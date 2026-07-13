@@ -85,6 +85,7 @@
                                         <th class="pb-2 font-semibold">Almacén</th>
                                         <th class="pb-2 text-center">Cantidad</th>
                                         <th class="pb-2 text-right">Precio ($)</th>
+                                        <th class="pb-2 text-center">IVA %</th>
                                         <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total ($)
                                         </th>
                                         <th class="pb-2 text-center">Acción</th>
@@ -93,7 +94,7 @@
                                 <tbody id="note-items-tbody"
                                     class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
                                     <tr id="empty-note-row">
-                                        <td colspan="7"
+                                        <td colspan="8"
                                             class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                                             <i
                                                 class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
@@ -387,6 +388,7 @@
         return cookieValue;
     }
     const csrftoken = getCookie('csrftoken');
+    const ivasDisponibles = {{ ivas_disponibles_json|safe }};
 
     function showSaleItemDropdown() {
         document.getElementById('sale-item-dropdown').classList.remove('hidden');
@@ -502,7 +504,7 @@
         if (draftNoteItems.length === 0) {
             tbody.innerHTML = `
                 <tr id="empty-note-row">
-                    <td colspan="7" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                    <td colspan="8" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                         <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
                         Aún no has agregado artículos a esta nota de entrega.
                     </td>
@@ -513,6 +515,10 @@
 
         draftNoteItems.forEach((item, index) => {
             const itemTotal = item.precio * item.qty;
+            const ivaActual = item.iva_porcentaje || 16;
+            const ivaOptions = ivasDisponibles.map(v =>
+                `<option value="${v}" ${Number(v) === Number(ivaActual) ? 'selected' : ''}>${v}%</option>`
+            ).join('');
             const row = document.createElement('tr');
             row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
             row.innerHTML = `
@@ -524,6 +530,10 @@
                 <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
                 <td class="py-3 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
                 <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.precio.toFixed(2)}</td>
+                <td class="py-3 px-2 text-center">
+                    <select onchange="updateNoteItemIva(${index}, this.value)"
+                        class="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-1.5 py-0.5 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500">${ivaOptions}</select>
+                </td>
                 <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
                 <td class="py-3 px-2 text-center">
                     <button onclick="removeNoteItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
@@ -533,6 +543,13 @@
             `;
             tbody.appendChild(row);
         });
+    }
+
+    function updateNoteItemIva(index, newIva) {
+        if (draftNoteItems[index]) {
+            draftNoteItems[index].iva_porcentaje = parseFloat(newIva);
+            recalculateNoteTotal();
+        }
     }
 
     function recalculateNoteTotal() {
@@ -703,6 +720,7 @@
                 precio_unitario_usd: i.precio,
                 precio_base: i.precio,
                 descuento_aplicado: 0,
+                iva_porcentaje: i.iva_porcentaje || 16,
                 seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
             }))
         };

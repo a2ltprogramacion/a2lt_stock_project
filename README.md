@@ -21,19 +21,22 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
 - **Emisión de Notas de Entrega / Facturas** (1.1.0) — el servicio 
   `procesar_venta` soporta `tipo_documento` (`NOTA_ENTREGA` | `FACTURA`), 
   `numero_factura` único por empresa, `descuento_global` configurable, 
-  `iva_porcentaje` por artículo y `iva_check` automático. 
-  Cada `DetalleNotaEntrega` guarda **4 snapshots de precio** 
-  (`precio_base`, `precio_ajustado`, `precio_directo_bcv`, 
-  `precio_ajustado_bcv`) + `iva_porcentaje` + `descuento_aplicado`. 
-  PDF A4 portrait con reportlab. Vista detalle`/ventas/<id>/` + 
-  PDF descargable `/ventas/<id>/pdf/`.
-- **Módulo de Compras a proveedores** (1.1.0) — `DocumentoCompra` con 
-  correlativo automático por empresa via signal + 
-  `DetalleDocumentoCompra` con **4 snapshots de costo** + IVA + 
-  descuento + seriales. `registrar_compra_proveedor` valida FKs 
-  multi-tenant; `reversar_documento_compra` genera contramovimiento 
-  auditado. PDF + vista detalle `/compras/<id>/` + 
-  `/compras/<id>/pdf/`.
+  `iva_porcentaje` **por línea** (1.1.1: cada ítem puede llevar su 
+  propio 16 / 8 / 0 %) e `iva_check` automático. Cada 
+  `DetalleNotaEntrega` guarda **4 snapshots de precio** (`precio_base`, 
+  `precio_ajustado`, `precio_directo_bcv`, `precio_ajustado_bcv`) + 
+  `iva_porcentaje` + `descuento_aplicado`. PDF A4 portrait con 
+  reportlab. Vista detalle `/ventas/<id>/` + PDF descargable 
+  `/ventas/<id>/pdf/`.
+- **Módulo de Compras a proveedores** (1.1.0/1.1.1) — 
+  `DocumentoCompra` con **3 tipos de documento** (1.1.1: 
+  `FACTURA_COMPRA`, `NOTA_ENTREGA_PROVEEDOR`, `REGISTRO_MENOR`) y 
+  correlativo automático por empresa vía signal + 
+  `DetalleDocumentoCompra` con **4 snapshots de costo** + `iva_porcentaje` 
+  **por línea** + `descuento_aplicado` + seriales. 
+  `registrar_compra_proveedor` valida FKs multi-tenant; 
+  `reversar_documento_compra` genera contramovimiento auditado. PDF + 
+  vista detalle `/compras/<id>/` + `/compras/<id>/pdf/`.
 - **Fichas de Artículos con tokens de precio** (1.1.0) — 4 variables 
   dinámicas para redactar mensajes de mercadeo en `social_quick` y 
   `social_cross` sin reescribir al cambiar precios/tasas: 
@@ -66,8 +69,8 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
 - **Frontend:** Tailwind CSS (CDN), Chart.js, FontAwesome. Sin build JS.
 - **PDF:** reportlab 5.0.
 - **Excel:** openpyxl 3.1.
-- **Tests:** Django TestCase/TransactionTestCase — 234 tests verdes 
-  en **~151s** (157 en 1.0.0 + 77 en 1.1.0).
+- **Tests:** Django TestCase/TransactionTestCase — 247 tests verdes 
+  en **~160s** (157 en 1.0.0 + 77 en 1.1.0 + 13 en 1.1.1).
 
 ## Instalación rápida
 

@@ -314,6 +314,61 @@ para el editor. La `#form-p-ficha` (Ficha Técnica) NO tiene toolbar
 **Tests:** C23 (toolbar presencia + 4 botones × 2 textareas + función 
 `injectToken` definida + no-contiene-fetch + caret tracking).
 
+---
+
+## ADR-27: IVA individual por línea con override opcional (1.1.1 O2)
+
+**Estado:** Aceptada  
+**Contexto:** Una factura puede mezclar items con diferentes IVAs 
+(16%, 8%, exento). El backend tenía un solo `iva_check` global y 
+un único `iva_porcentaje` por artículo en `Articulo`. No había 
+forma de cargar el PDT diferenciando por línea — problema real 
+en operaciones cotidianas.  
+**Decisión:**  
+1. `procesar_venta` y `registrar_compra_proveedor` aceptan 
+   `iva_porcentaje` por item en `lista_items[]`. Si viene, toma 
+   precedencia sobre `Articulo.iva_porcentaje`; si no viene, cae 
+   al default para compatibilidad hacia atrás.
+2. `ConfiguracionEmpresa.ivas_disponibles` (JSONField) es la lista 
+   de hasta 5 tasas permitidas que se inyecta como 
+   `ivas_disponibles_json` (fallback `[16, 8, 0]`) en 
+   `ventas.html` y `compras.html`, y se renderiza como `<select>` 
+   por línea en la grilla de items.
+3. Rango válido: `0 ≤ iva_porcentaje ≤ 100`. Fuera de rango → 
+   `ValueError`.  
+**Consecuencias:** Permite cargar PDT diferenciadas sin tocar la 
+configuración de inventario. El `iva_total` de cabecera se calcula 
+sumando los IVAs individuales de cada detalle. UI con `<select>` 
+es nativo HTML, sin librerías JS.  
+**Tests:** C24 (3 tipos de documento), C25 (IVA por línea en backend + UI), 
+C26 (configuración por tenant).
+
+## ADR-28: Tipo de Documento de Compra separado en 3 opciones (1.1.1 O1)
+
+**Estado:** Aceptada  
+**Contexto:** `DocumentoCompra.TIPO_DOCUMENTO_CHOICES` mezclaba 
+`FACTURA_COMPRA`, `NOTA_CREDITO_COMPRA` y `ORDEN_COMPRA`. Las 
+Notas de Crédito son devoluciones (diferente flujo), y la "Orden 
+de Compra" no debería tocar inventario hasta ser aprobada 
+(flujo pendiente de implementar). La opción clásica `NOTA_ENTREGA` 
+del proveedor (recibos sin factura) no estaba soportada.  
+**Decisión:**  
+1. Choices reducidos a 3: `FACTURA_COMPRA` (con #factura obligatorio), 
+   `NOTA_ENTREGA_PROVEEDOR` (con #documento opcional), `REGISTRO_MENOR` 
+   (sin doc. físico — repos de mostrador).
+2. Migración 0013 (`tipo_documento_compra_3_opciones`).
+3. Las Notas de Crédito se reservan como **módulo aparte** 
+   (`/notas-credito/`, TICKET #18-NC), fuera del formulario de 
+   Compras, porque requieren referenciar un documento origen, listar 
+   items a devolver (parcial/total) y generar contramovimientos 
+   de kardex — no caben en un radio button.
+4. La unicidad de `numero_factura` aplica a cualquier doc con número 
+   informado (no sólo FACTURA_COMPRA).  
+**Consecuencias:** El usuario puede cargar compras con recibos/notas 
+del proveedor sin complejidad. Las Notas de Crédito ganan su propio 
+módulo con trazabilidad desde el doc. original.  
+**Tests:** C24 (5 tests: 3 opciones + 2 choices viejos fallan).
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 
@@ -350,3 +405,5 @@ desarrollo formal en este archivo:
 | 24 | 4 precios snapshot por detalle | `DetalleNotaEntrega`, `DetalleDocumentoCompra`, migraciones 0010/0011 |
 | 25 | Tokens de precio literales | `Articulo.social_quick/social_cross`, `catalogo.html` JS |
 | 26 | Toolbar caret tracking sin servidor | `articulos.html` JS `injectToken()` |
+| 27 | IVA individual por línea con override (1.1.1) | `procesar_venta`, `registrar_compra_proveedor`, `ivas_disponibles_json` |
+| 28 | Tipo de Documento Compra 3 opciones (1.1.1) | `DocumentoCompra.TIPO_DOCUMENTO_CHOICES`, migración 0013 |

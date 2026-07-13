@@ -1281,6 +1281,15 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         ))
         # Descuento individual opcional (default 0)
         descuento_aplicado = Decimal(str(item.get('descuento_aplicado', '0')))
+        # IVA por línea opcional (default 0, sobrescribe Articulo.iva_porcentaje
+        # si la UI lo envía; NO aceptamos valor fuera de 0-100).
+        iva_porcentaje_item = item.get('iva_porcentaje', None)
+        if iva_porcentaje_item is not None:
+            iva_porcentaje_item = Decimal(str(iva_porcentaje_item))
+            if not (Decimal('0') <= iva_porcentaje_item <= Decimal('100')):
+                raise ValueError(
+                    f"iva_porcentaje para {articulo.sku} debe estar entre 0 y 100."
+                )
 
         # Validación estricta de Stock
         stock_disp = articulo.get_stock_disponible(almacen)
@@ -1315,8 +1324,12 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         precio_directo_bcv = (precio_base * tasa_aplicada).quantize(Decimal('0.01'))
         precio_ajustado_bcv = (precio_ajustado * tasa_aplicada).quantize(Decimal('0.01'))
 
-        # IVA snapshot desde Articulo (no del payload, ver Hipótesis Operativa)
-        iva_porcentaje = articulo.iva_porcentaje
+        # IVA snapshot — preferir el del item si la UI lo manda (1.1.2 O2);
+        # caer al del Articulo si no viene (compat hacia atrás).
+        if iva_porcentaje_item is not None:
+            iva_porcentaje = iva_porcentaje_item
+        else:
+            iva_porcentaje = articulo.iva_porcentaje
 
         # Creación de Detalle (Línea de factura) — ADR-18: 4 precios snapshot + IVA
         detalle_nota = DetalleNotaEntrega.objects.create(
@@ -1724,10 +1737,11 @@ def registrar_compra_proveedor(
     observaciones='', **kwargs) -> dict:
     """
     Registra el ingreso de mercancía por compra a proveedor mediante un Documento de Compra.
-    Tipos: FACTURA_COMPRA, NOTA_CREDITO_COMPRA, ORDEN_COMPRA.
+    Tipos: FACTURA_COMPRA, NOTA_ENTREGA_PROVEEDOR, REGISTRO_MENOR.
     Parámetros:
-      - tipo_documento: 'FACTURA_COMPRA' | 'NOTA_CREDITO_COMPRA' | 'ORDEN_COMPRA'
-      - numero_factura: obligatorio para FACTURA_COMPRA. Único por empresa.
+      - tipo_documento: 'FACTURA_COMPRA' | 'NOTA_ENTREGA_PROVEEDOR' | 'REGISTRO_MENOR'
+      - numero_factura: obligatorio para FACTURA_COMPRA. Opcional para los demás.
+        Único por empresa cuando no es vacío.
       - descuento_global: Decimal 0-100 (default 0)
       - lista_items: [{sku, cantidad, costo_factura, descuento_aplicado(optional), iva_porcentaje(optional), seriales(optional)}]
     Flujo atómico:
@@ -1776,17 +1790,17 @@ def registrar_compra_proveedor(
         raise ValueError("El contexto de la empresa ha cambiado en otra pestaña. Petición abortada por seguridad contable.")
 
     # Validaciones de tipos y rangos
-    if tipo_documento not in ('FACTURA_COMPRA', 'NOTA_CREDITO_COMPRA', 'ORDEN_COMPRA'):
+    if tipo_documento not in ('FACTURA_COMPRA', 'NOTA_ENTREGA_PROVEEDOR', 'REGISTRO_MENOR'):
         raise ValueError(
             f"Tipo de documento inválido: '{tipo_documento}'. "
-            "Debe ser 'FACTURA_COMPRA', 'NOTA_CREDITO_COMPRA' o 'ORDEN_COMPRA'."
+            "Debe ser 'FACTURA_COMPRA', 'NOTA_ENTREGA_PROVEEDOR' o 'REGISTRO_MENOR'."
         )
     if tipo_documento == 'FACTURA_COMPRA':
         if not numero_factura or not str(numero_factura).strip():
             raise ValueError("Seguridad Contable: numero_factura es obligatorio cuando tipo_documento='FACTURA_COMPRA'.")
         numero_factura = str(numero_factura).strip()
     else:
-        # Para NC y OC, numero_factura es opcional
+        # NOTA_ENTREGA_PROVEEDOR y REGISTRO_MENOR: numero_documento opcional
         numero_factura = str(numero_factura).strip() if numero_factura else ''
 
     try:
@@ -1831,15 +1845,18 @@ def registrar_compra_proveedor(
         tasa_mercado_snap = config_tasa.tasa_mercado
         factor_snap = config_tasa.factor_cobertura
 
-        # Validar unicidad de numero_factura si es FACTURA_COMPRA
-        if tipo_documento == 'FACTURA_COMPRA':
+        # Validar unicidad de numero_factura cuando viene informado
+        # (FACTURA_COMPRA siempre trae valor obligatorio; NOTA_ENTREGA_PROVEEDOR
+        #  puede traer el # de recibo del proveedor si se desea registrar).
+        # REGISTRO_MENOR normalmente va sin número.
+        if numero_factura:
             if DocumentoCompra.global_objects.filter(
                 empresa_id=empresa_id_int,
                 numero_factura=numero_factura
             ).exists():
                 raise ValueError(
-                    f"El número de factura '{numero_factura}' ya existe "
-                    "para esta empresa. No se pueden duplicar facturas."
+                    f"El número de documento '{numero_factura}' ya existe "
+                    "para esta empresa. No se pueden duplicar documentos."
                 )
 
         # Crear cabecera (los totales se recalculan abajo).

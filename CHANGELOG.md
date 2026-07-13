@@ -8,6 +8,76 @@ vez público.
 
 ---
 
+## [1.1.1] — 2026-07-13
+
+Iteración de refinamiento basada en feedback del cliente sobre los 
+módulos de Compras y Ventas. Resuelve 3 observaciones reales:
+
+**O1**: Tipo de Documento de Compra — antes sólo había 
+`FACTURA_COMPRA` y se confundía "nota de entrega" con "Nota de 
+Crédito". Ahora hay 3 opciones: **Factura** (con #factura 
+obligatorio), **Nota de Entrega / Recibo** (con #documento 
+opcional), **Registro Menor** (sin documento físico, repos de 
+mostrador). Las opciones obsoletas `NOTA_CREDITO_COMPRA` y 
+`ORDEN_COMPRA` se removieron: las Notas de Crédito se reservan 
+para **TICKET #18** (módulo aparte `/notas-credito/`) porque 
+requieren referenciar el documento original, listar items a 
+devolver (parcial/total) y generar contramovimientos de kardex 
+— no caben en un radio botón del formulario Compras.
+
+**O2**: IVA Individual por Línea en PDT虍 — antes había un 
+checkbox global `iva_check` y un sólo porcentaje por documento. 
+Ahora el backend (`procesar_venta` y `registrar_compra_proveedor`) 
+respeta `iva_porcentaje` enviado por cada item, sobrescribiendo 
+el default del artículo. La grilla en `ventas.html` y 
+`compras.html` ahora tiene una **columna "IVA %"** con `<select>` 
+por línea poblado con `ConfiguracionEmpresa.ivas_disponibles` 
+(default `[16, 8, 0]`). Permite facturas mixtas: 16% para una 
+línea, 8% para otra, exento para otra. El `iva_total` del 
+documento se recalcula sumando los IVAs individuales. Validación: 
+rango `[0, 100]`.
+
+**O3**: Las Notas de Crédito son un módulo aparte (TICKET #18, 
+planificado en BACKLOG sin implementar aún).
+
+### Cambios
+
+- **`models.py`:** `DocumentoCompra.TIPO_DOCUMENTO_CHOICES` a 3 
+opciones (`FACTURA_COMPRA`, `NOTA_ENTREGA_PROVEEDOR`, 
+`REGISTRO_MENOR`). `max_length` 20 → 30. Label `numero_factura` 
+→ `N° Documento Proveedor` con `help_text` ampliado.
+- **Migración 0013:** `tipo_documento_compra_3_opciones` 
+(actualiza `choices` + `max_length` + `help_text` del campo).
+- **`services.py`:** validación `tipo_documento` ahora acepta las 3 
+opciones; unicidad de `numero_factura` aplica a cualquier doc con 
+número informado (no sólo FACTURA). `procesar_venta` lee 
+`item['iva_porcentaje']` con prioridad sobre `Articulo.iva_porcentaje`.
+- **`views.py`:** `ventas()` y `compras_view()` inyectan 
+`ivas_disponibles_json` (fallback `[16, 8, 0]` si config vacío).
+- **`ventas.html`:** columna "IVA %" nueva en grilla, `<select>` 
+por línea con `ivasDisponibles`. `processSale` envía 
+`iva_porcentaje` por item.
+- **`compras.html`:** idem para compras. `onPurchaseDocTypeChange()` 
+re-escrito: container siempre visible, label y obligatoriedad 
+cambian segun `tipo_documento`.
+- **`compra_detalle.html`:** etiquetas `tipo_documento` actualizadas 
+a las 3 opciones con fallback a `get_tipo_documento_display`.
+- **Tests:** +13 tests en 3 clases (`TestTipoDocumentoCompra3Opciones`, 
+`TestIvaIndividualPorLinea`, `TestIVAConfiguracionIvasDisponibles`).
+  Cobertura: FACTURA obliga #factura, NOTA_ENTREGA_PROVEEDOR/ 
+REGISTRO_MENOR permite sin #, choices viejos rechazados, 
+procesar_venta respeta iva_porcentaje por item, mezcla de 
+ivas (%16, %8, %0), 3 radios en `compras.html`, columna IVA % 
+en grilla.
+
+### Estadísticas
+
+- 247 tests en verde en ~160s (234 previos + 13 nuevos).
+- Migración nueva: 0013 (`tipo_documento_compra_3_opciones`).
+- Commits: este y los previos de 1.1.0.
+
+---
+
 ## [1.1.0] — 2026-07-13
 
 Iteración sobre el núcleo 1.0.0: añadido el flujo completo de Emisión 

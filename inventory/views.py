@@ -306,6 +306,7 @@ def catalogo(request):
 def ventas(request):
     from .models import Articulo, Almacen, Contacto, ConfiguracionEmpresa
     from .managers import get_current_empresa
+    import json as _json
 
     articulos = Articulo.objects.filter(activo=True).order_by('nombre')
     almacenes = Almacen.objects.filter(activo=True).order_by('-es_principal', 'nombre')
@@ -317,11 +318,17 @@ def ventas(request):
     except ConfiguracionEmpresa.DoesNotExist:
         config = None
 
+    if config and getattr(config, 'ivas_disponibles', None):
+        ivas_disponibles_json = _json.dumps(config.ivas_disponibles)
+    else:
+        ivas_disponibles_json = _json.dumps([16, 8, 0])
+
     context = {
         'articulos': articulos,
         'almacenes': almacenes,
         'clientes': clientes,
         'config': config,
+        'ivas_disponibles_json': ivas_disponibles_json,
     }
     return render(request, 'inventory/ventas.html', context)
 
@@ -1551,7 +1558,8 @@ def compras_view(request):
     """
     from .models import Contacto, Almacen, ConfiguracionEmpresa
     from .managers import get_current_empresa
-    
+    import json as _json
+
     proveedores = Contacto.objects.filter(tipo='PROVEEDOR').order_by('nombre')
     almacenes = Almacen.objects.filter(activo=True).order_by('-es_principal', 'nombre')
 
@@ -1561,10 +1569,16 @@ def compras_view(request):
     except ConfiguracionEmpresa.DoesNotExist:
         config = None
 
+    if config and getattr(config, 'ivas_disponibles', None):
+        ivas_disponibles_json = _json.dumps(config.ivas_disponibles)
+    else:
+        ivas_disponibles_json = _json.dumps([16, 8, 0])
+
     context = {
         'proveedores': proveedores,
         'almacenes': almacenes,
         'config': config,
+        'ivas_disponibles_json': ivas_disponibles_json,
     }
     return render(request, 'inventory/compras.html', context)
 

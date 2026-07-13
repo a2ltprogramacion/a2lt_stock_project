@@ -140,6 +140,21 @@ precios/tasas.
 | FA3 | Función JS `injectToken()` con caret tracking (sobrescribe selección, restaura foco, no envía al servidor) | `c470093` | ✅ |
 | FA4 | 21 tests nuevos (4 clases) — de 213 a 234 tests | `c470093` | ✅ |
 
+### Iteración 1.1.1 — Refinamiento O1/O2/O3 (Compras + Ventas)
+
+**Decisión:** Atender 3 observaciones reales del cliente sobre los 
+módulos N1-C3 + Fichas, sin romper la arquitectura on-premise.
+
+| Sub | Descripción | Commit | Estado |
+|-----|-------------|--------|---------|
+| O1-backend | `DocumentoCompra.TIPO_DOCUMENTO_CHOICES` → `FACTURA_COMPRA`, `NOTA_ENTREGA_PROVEEDOR`, `REGISTRO_MENOR`. Migración 0013. Backend `registrar_compra_proveedor` valida 3 opciones + unicidad condicional. | (este commit) | ✅ |
+| O1-frontend | `compras.html` radio 3-opciones; `onPurchaseDocTypeChange()` cambia label/hint + obligatoriedad del campo #documento según selección. | (este commit) | ✅ |
+| O2-backend | `procesar_venta` y `registrar_compra_proveedor` aceptan `iva_porcentaje` por item, con prioridad sobre `Articulo.iva_porcentaje` (compat hacia atrás). | (este commit) | ✅ |
+| O2-frontend | `ventas.html` y `compras.html` columna "IVA %" con `<select>` por línea poblado de `ivas_disponibles_json` (fallback `[16, 8, 0]`). `processSale`/`processPurchase` reenvían `iva_porcentaje` por item. | (este commit) | ✅ |
+| O3-planific. | Notas de Crédito se separan como módulo aparte: TICKET #18 (planificado en BACKLOG, sin implementar). Choises `NOTA_CREDITO_COMPRA`/`ORDEN_COMPRA` eliminados. | (este commit) | ✅ |
+| Tests | +13 tests en 3 clases: `TestTipoDocumentoCompra3Opciones`, `TestIvaIndividualPorLinea`, `TestIVAConfiguracionIvasDisponibles`. | (este commit) | ✅ |
+| Doc | CHANGELOG 1.1.1 + OPERACION 1.1.1 + BACKLOG TICKET #18. | (este commit) | ✅ |
+
 ### Etapa F — Documentación
 
 | Sub | Descripción | Estado |
@@ -155,7 +170,7 @@ precios/tasas.
 
 1. **Toda feature o bugfix debe pasar 234+ tests** antes de commit 
    (157 en 1.0.0 + 56 añadidos en 1.1.0: 17 Emisión NE + 18 Compras + 
-   21 Fichas).
+   21 Fichas). Iteración 1.1.1 añade +13 → **247 tests verdes**.
 2. **Ningún commit toca `migrations/` sin identificarse** qué 
    migración → `manage.py makemigrations --name-ticket`.
 3. **`services.py` es la única vía para modificar stock**. 
@@ -208,12 +223,15 @@ precios/tasas.
 | C21 | Etapa N3-N5 | Template ventas + interlock UI + vista detalle + PDF | 6 |
 | C22 | Etapa C | Módulo Compras: vistas detalle/PDF + templates (TestRegistrarCompraProveedor + snapshot + multi-tenant) | 18 |
 | C23 | Etapa FA | Fichas Artículos: 4 precios cuádruple + 4to token + toolbar + JS injectToken | 21 |
+| C24 | Iteración 1.1.1 O1 | 3 tipos de documento de compra + rechazo de choices viejos en backend + UI 3 radios | 5 |
+| C25 | Iteración 1.1.1 O2 | IVA individual por línea (select en grilla) en ventas y compras | 6 |
+| C26 | Iteración 1.1.1 O2 | `ConfiguracionEmpresa.ivas_disponibles` y serialización en JSON | 2 |
 
 Otras suites sin código C: TestMovimientosBasicos, 
 TestRollbackAtomicidad (ADR-08), TestVentaExitosa, 
 TestCoberturaCritica (reversos notificados, correlativo por empresa), 
 TestProcesarVentaN2/N3/N4/N5, TestInterlockFacturaN4, 
-TestNotaEntregaFaseN5. **Suite total: 234 tests verdes en ~151s.**
+TestNotaEntregaFaseN5. **Suite total: 247 tests verdes en ~160s.**
 
 ## Documentos relacionados
 

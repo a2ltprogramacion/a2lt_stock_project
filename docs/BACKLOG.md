@@ -778,3 +778,57 @@ Implementar el script de mantenimiento operativo automatizado del sistema local 
 *   **Vistas nuevas:** `vista_detalle_nota`, `generar_pdf_nota`, `vista_detalle_compra`, `generar_pdf_compra`.
 *   **Templates nuevos:** `nota_detalle.html`, `compra_detalle.html`.
 *   **Templates ampliados:** `ventas.html` (radio NE/FACTURA + descuento + escapeHtml + spinners), `compras.html` (UI completa + escapeHtml + spinners), `catalogo.html` (+`data-precio-bs-base` + nuevo token), `articulos.html` (+2 toolbars + `injectToken` JS).
+---
+
+### ITERACIÓN 1.1.1 — Refinamiento O1/O2/O3 (2026-07-13)
+*   **Iniciado:** 2026-07-13
+*   **Commits:** (este commit).
+*   **Tests:** 234 → 247 (+13). Suite corre en ~160s.
+*   **Migraciones:** 0013 (tipo_documento 3-opciones en DocumentoCompra).
+*   **Resumen breve:**
+    *   **O1 — 3 tipos de documento de Compra:** FACTURA_COMPRA (antes predeterminada), NOTA_ENTREGA_PROVEEDOR (recibo), REGISTRO_MENOR (sin doc. físico). Elimina confusión con Nota de Crédito y Orden de Compra obsoletas.
+    *   **O2 — IVA individual por línea (PDT):** cada ítem del carrito (ventas/compras) lleva su propio iva_porcentaje configurable via <select> por línea. Backend procesar_venta y egistrar_compra_proveedor respetan el override sobre Articulo.iva_porcentaje.
+    *   **O3 — Notas de Crédito se separan como módulo aparte** (ver TICKET #18-NC abajo).
+*   **DoD (DoR):**
+    *   [x] Backend acepta las 3 nuevas opciones + rechaza choices viejos.
+    *   [x] Columna IVA % <select> en grilla de entas.html y compras.html.
+    *   [x] ivas_disponibles_json inyectado por vista (fallback [16, 8, 0] si config vacío).
+    *   [x] Grilla factura mixta 16%/8%/0% persiste y se desglosa en vista/PDF (tests OK).
+    *   [x] NOTA_CREDITO_COMPRA y ORDEN_COMPRA deprecadas (TICKET #18-NC).
+    *   [x] Tests O1 + O2 (13 tests) verdes; 247 tests totales.
+    *   [x] CHANGELOG 1.1.1 + OPERACION ampliado + README actualizado.
+
+---
+
+### TICKET #18-NC: Módulo de Notas de Crédito (Devoluciones de Mercancía) 📌 PLANIFICADO (2026-07-13)
+*   **Iniciado:** 2026-07-13
+*   **Origen:** Observación O3 del cliente en iteración 1.1.1 — las Notas de Crédito son devoluciones **totales o parciales** de uno o varios documentos de entrada (NotaEntrega/Factura en ventas o DocumentoCompra en compras). Requieren referenciar el documento original, listar items a devolver, generar contramovimientos de kardex y opcionalmente liberar seriales. No caben en un radio button de Compras; deben ser módulo aparte.
+*   **Alcance propuesto:**
+    *   **Sub A (Backend):**
+        *   Modelos NotaCredito y DetalleNotaCredito (FK al documento original NotaEntrega o DocumentoCompra + 	ipo_origen string 'VENTA'/'COMPRA' + cantidades_devueltas por item).
+        *   procesar_devolucion_venta(venta_id, items_a_devolver[], motivo, usuario=None, empresa_id=None) en services.py con @transaction.atomic + select_for_update.
+        *   procesar_devolucion_compra(compra_id, items_a_devolver[], motivo, ...) análoga.
+        *   Si aplica, liberar_serial (status: 'VENDIDO' → 'DISPONIBLE'; 'ANULADO_COMPRA' → estado original).
+    *   **Sub B (Form Wizard UI):**
+        *   Nueva URL /notas-credito/ + plantilla con wizard de 4 pasos:
+            1. Seleccionar origen (Venta o Compra).
+            2. Buscar y elegir documento (autocompleta por #doc o cliente/proveedor).
+            3. Seleccionar items a devolver (grilla con checkbox por línea + cantidad slider 1..cantidad_vendida).
+            4. Confirmar motivo + estado (ANULADO_TOTAL o DEVOLUCION_PARCIAL).
+    *   **Sub C (Reverso + Kardex):**
+        *   concepto_kardex='DEVOLUCION_VENTA' (entrada) o 'DEVOLUCION_COMPRA' (salida).
+        *   Reingreso de stock al almacén original del documento.
+        *   Auditoría de motivo en motivo_nota_credito de NotaCredito.
+    *   **Sub D (Vista + PDF):**
+        *   /notas-credito/<id>/ con detalle + /notas-credito/<id>/pdf/.
+        *   Link desde /reversos/ hacia la NC resultante.
+    *   **Sub E (Estado del documento original):**
+        *   Cuando NC > 0 sobre NotaEntrega o DocumentoCompra, agregar campo sin_devolver_total calculado en el detalle (cantidad_vendida − cantidad_devuelta_NC) para listar devoluciones parciales consecutivas.
+*   **DoR (sin implementar):**
+    *   [ ] Modelos NotaCredito y DetalleNotaCredito con migración.
+    *   [ ] procesar_devolucion_venta y procesar_devolucion_compra con rollback limpio.
+    *   [ ] 8-10 tests (TransactionTestCase): rollback si motivo vacío, NC total vs parcial, seriales liberados, kardex DEVOLUCION_*, trazabilidad desde origen, multi-tenant.
+    *   [ ] UI wizard /notas-credito/ con 4 pasos.
+    *   [ ] Vista detalle + PDF A4 portrait.
+    *   [ ] Conexión con /reversos/ para ver historial de NCs por documento origen.
+*   **Estado:** 📌 **PLANIFICADO**. Iteración 1.1.1 anterió la elección 'NOTA_CREDITO_COMPRA' del radio de Compras; ahora hay que construir el módulo completo en una iteración futura.
