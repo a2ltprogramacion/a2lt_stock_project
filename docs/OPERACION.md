@@ -92,16 +92,57 @@
 | URL | Módulo | Descripción |
 |-----|--------|-------------|
 | `/dashboard/` | Dashboard | KPIs live: valoración USD/VES, alertas de reposición, combos, notas del mes, última sincronización de tasa. |
-| `/catalogo/` | Catálogo | Lista de artículos activos con precios en USD/Bs ajustados por factor de cobertura. |
-| `/ventas/` | Notas de Entrega | Punto de venta. Emite NE correlativa única por empresa. |
-| `/compras/` | Compras | Registro de compra a proveedor con snapshot de tasa. |
+| `/catalogo/` | Catálogo | Lista de artículos activos con **4 precios calculados** (USD base, USD ajustado, Bs. base, Bs. ajustado). Botones para copiar `social_quick`, `social_cross` y `ficha_tecnica` con sustitución automática de tokens. |
+| `/ventas/` | Notas de Entrega / Facturas (1.1.0) | Punto de venta. Emite `NOTA_ENTREGA` o `FACTURA` (con `numero_factura` único por empresa). Soporta `descuento_global` (0-100 %) e `iva_porcentaje` por artículo. PDF descargable. |
+| `/ventas/<id>/` | Detalle NE/Factura (1.1.0) | Vista detallada de nota con desglose de 4 precios por líneas, IVA y descuento. |
+| `/ventas/<id>/pdf/` | PDF NE/Factura (1.1.0) | Descarga PDF A4 portrait con reportlab. |
+| `/compras/` | Compras a Proveedor (1.1.0) | Registro de compra con 4 snapshots de costo + IVA + descuento + seriales por artículo. |
+| `/compras/<id>/` | Detalle Compra (1.1.0) | Vista detallada con desglose de 4 costos por líneas. |
+| `/compras/<id>/pdf/` | PDF Compra (1.1.0) | Descarga PDF A4 portrait. |
 | `/reversos/` | Reversos | Listado de notas y compras; opción de anular con motivo. |
-| `/articulos/` | Fichas | CRUD de artículos (FISICO/COMBO). |
+| `/articulos/` | Fichas (1.1.0) | CRUD de artículos. **Toolbar con 4 botones** sobre `social_quick` y `social_cross` para insertar tokens de precio en la posición del cursor. |
 | `/carga/` | Carga Masiva | Upload de Excel para inventario inicial o ajustes. |
 | `/movimientos/` | Kardex Integrado | Listado de movimientos + registro manual de ajustes. |
 | `/contactos/` | Clientes y Proveedores | CRUD unificado. |
-| `/configuracion/` | Configuración | Tasa BCV, tasa mercado, factor cobertura, márgenes, API, cuarentena, cross-selling. |
+| `/configuracion/` | Configuración | Tasa BCV, tasa mercado, factor cobertura, márgenes, API, cuarentena, cross-selling, **ivas disponibles**, **prefijos y correlativos iniciales** para NE/Compras. |
 | `/reportes/` | Reportes | Índice de 8 reportes con export CSV/PDF. |
+
+### Tokens de variables de precio (1.1.0)
+
+Para redactar mensajes de mercadeo (WhatsApp, Instagram, Facebook) sin 
+reescribir cada vez que cambia el precio o la tasa cambiaria, los 
+textos `social_quick` (Respuesta Rápida Redes) y `social_cross` 
+(Mensaje de Cross-Selling) en **Fichas de Artículos** admiten 4 
+tokens que se sustituyen automáticamente al copiar el texto en el 
+catálogo:
+
+| Token | Significado | Fórmula (con `precio_divisa=10`, `factor=1.5`, `tasa_bcv=40`) |
+|---|---|---|
+| `$[PRECIO_USD]` | Precio en divisas (USD base) | `10.00` |
+| `$[PRECIO_BCV]` | USD ajustado (con factor de cobertura) | `15.00` |
+| `$[PRECIO_BS_BASE]` | Bs. base (sin factor) | `400.00` |
+| `$[PRECIO_BS]` | Bs. ajustado (con factor) | `600.00` |
+
+**Compatibilidad legacy:** se aceptan también los formatos antiguos 
+`[Precio_USD]`, `[Precio_BCV]`, `[Precio_BS_BASE]`, `[Precio_Bs]`.
+
+**Forma de uso:**
+1. En **Fichas de Artículos** → editar artículo.
+2. Sobre los textareas `Mensaje de Cross-Selling` y 
+   `Respuesta Rápida Completa` aparece una toolbar con 4 botones 
+   (USD, BCV, Bs.Base, Bs.Ajust.).
+3. Click en el botón inserta el token en la posición del cursor. 
+   Si hay texto seleccionado, se reemplaza; si no, se inserta en el 
+   caret. El foco se mantiene en el textarea.
+4. Guardar el artículo. El token se persiste como literal — el 
+   mensaje se ve igual en la BD.
+5. En **Catálogo**, los botones de copia sustituyen el token por el 
+   valor actual calculado con `tasa_bcv` y `factor_cobertura` del 
+   `ConfiguracionEmpresa` vigente. Cada modificación de tasas o 
+   precios se refleja al copiar sin editar el mensaje.
+
+**ADR-25** (Tokens de precio literales) y **ADR-26** (Toolbar caret 
+tracking sin servidor) formalizan el diseño.
 
 ### Reportes (Fase 4)
 
@@ -164,10 +205,12 @@ que ya gestiona esto.
 
 ### Tests lentos en Windows
 
-La suite de 157 tests toma ~120s. Es esperable en SQLite WAL con 
-migraciones completas cada vez. Para tests rápidos de un módulo:
+La suite de **234 tests toma ~151s** (1.1.0). Es esperable en SQLite 
+WAL con migraciones completas cada vez. Para tests rápidos de un 
+módulo:
 ```bash
 python manage.py test inventory.tests.TestDashboardLiveData -v 2
+python manage.py test inventory.tests.TestArticulosToolbarTokens -v 2  # Fichas (rápidos)
 ```
 
 ### BD corrupta / backup inválido
@@ -203,5 +246,19 @@ python manage.py createsuperuser
 3. **Antes de cualquier cambio en producción**, correr:
    ```bash
    python manage.py backup_db
-   python manage.py test inventory  # ~2min
+   python manage.py test inventory  # ~2.5min (234 tests)
    ```
+4. **Vistas detalle y PDF de documentos** (NE, Factura, Compra) 
+   DEBEN filtrar por `empresa_id=request.session.get('empresa_id')` 
+   en el `get_object_or_404()`. Esto evita leak multi-tenant 
+   (hallazgo C2 de la auditoría 1.1.0). Si se añade una nueva vista 
+   de detalle, respetar este patrón.
+5. **Tokens de precio** (`$[PRECIO_USD]`, `$[PRECIO_BCV]`, 
+   `$[PRECIO_BS_BASE]`, `$[PRECIO_BS]`) son literales en BD. Al 
+   actualizar precios o tasas vía `/configuracion/`, los mensajes 
+   ya redactados en `social_quick`/`social_cross` se actualizan 
+   automáticamente al copiar en `/catalogo/`. No requieren 
+   reescritura.
+6. **FACTURA** requiere `numero_factura` único por empresa (ADR-23). 
+   La UI deshabilita el botón "Confirmar Venta" si el tipo FACTURA 
+   está seleccionado pero el campo está vacío (interlock N4).

@@ -103,28 +103,32 @@ Toda otra vía es bug crítico. `registrar_movimiento()`:
 Tests ADR-08 (TransactionTestCase) validan rollback real ante stock 
 insuficiente o excepciones.
 
-## Snapshots inmutables (ADR-18)
+## Snapshots inmutables (ADR-18, ampliados ADR-24)
 
 Cada transacción financiera graba el estado del mundo en ese 
 instante. Estos campos son **inmutables** post-creación:
 
 | Modelo | Campo snapshot | Set cuando |
 |---|---|---|
-| `NotaEntrega` | `tasa_bcv_aplicada`, `factor_cobertura_aplicado` | Procesar venta |
-| `DetalleNotaEntrega` | `precio_unitario_usd`, `precio_unitario_bs`, `costo_unitario_snapshot` | Procesar venta |
-| `DocumentoCompra` | `tasa_bcv_aplicada`, `tasa_mercado_aplicada`, `factor_cobertura_aplicado`, `fuente_tasa`, `monto_total_bs_snapshot` | Registrar compra |
+| `NotaEntrega` | `tasa_bcv_aplicada`, `factor_cobertura_aplicado`, `tasa_mercado_aplicada` | Procesar venta (N1) |
+| `DetalleNotaEntrega` | `precio_base`, `precio_ajustado`, `precio_directo_bcv`, `precio_ajustado_bcv`, `iva_porcentaje`, `descuento_aplicado` | Procesar venta (N1) |
+| `DocumentoCompra` | `tasa_bcv_aplicada`, `tasa_mercado_aplicada`, `factor_cobertura_aplicado`, `fuente_tasa` | Registrar compra (C1) |
+| `DetalleDocumentoCompra` | `costo_directo`, `costo_ajustado`, `costo_directo_bcv`, `costo_ajustado_bcv`, `iva_porcentaje`, `descuento_aplicado` | Registrar compra (C1) |
 | `MovimientoKardex` | `cantidad`, `saldo_resultante`, `fecha_hora` (auto_now_add) | Cada movimiento |
 
 Esto garantiza que los reportes históricos (Fase 4) sean 
 determinísticos sin importar cambios posteriores en `ConfiguracionEmpresa`.
 
-## Modelo de datos (23 clases)
+## Modelo de datos (29 clases en 1.1.0)
 
 ### Núcleo multi-tenant
 
 - **Empresa** — raíz. Sin manager custom (es la entidad raíz).
 - **ConfiguracionEmpresa** — OneToOne(Empresa). Tasas, márgenes, 
-  API, cuarentena, cross-selling, offsets de impresión.
+  API, cuarentena, cross-selling, offsets de impresión. En 1.1.0 añade 
+  `prefijo_nota_entrega`, `correlativo_inicial_nota`, 
+  `prefijo_nota_entrega`, `correlativo_inicial_compra`, 
+  `ivas_disponibles` (lista JSON por defecto `[16, 8, 0]`).
 - **PerfilUsuario** — OneToOne(User). M2M `empresas_permitidas`, 
   FK `empresa_activa`. Define a qué comercios accede el usuario.
 
@@ -132,10 +136,12 @@ determinísticos sin importar cambios posteriores en `ConfiguracionEmpresa`.
 
 - **Almacen** — FK Empresa. `es_principal`, `activo`.
 - **Articulo** — PK `sku` (CharField, ADR implícita: no migrar). 
-  `tipo=FISICO|COMBO`, soft-delete `activo`. 
+  `tipo=FISICO|COMBO`, soft-delete `activo`. `iva_porcentaje` 
+  (default 16), `descripcion`, `ficha_tecnica`, `social_quick`, 
+  `social_cross` (TextField, literales con tokens `$[PRECIO_*]`).
 - **InventarioAlmacen** — tabla intermedia (Articulo, Almacen). 
-  `cantidad_disponible`, `stock_minimo`, `ubicacion_estante`. 
-  **Regla sagrada**: solo se muta via `services.registrar_movimiento()`.
+   `cantidad_disponible`, `stock_minimo`, `ubicacion_estante`. 
+   **Regla sagrada**: solo se muta via `services.registrar_movimiento()`.
 - **RecetaCombo** — define un `COMBO` con sus componentes físicos y 
   las cantidades requeridas. El stock del combo se calcula: 
   `min(floor(S(a_i)/q_i))` por componente en un almacén dado.
@@ -147,19 +153,41 @@ determinísticos sin importar cambios posteriores en `ConfiguracionEmpresa`.
 - **Contacto** — PK `identificacion` (CharField). `tipo=CLIENTE|PROVEEDOR`.
 - **Cliente**, **Proveedor** — proxy models con managers filtrados.
 
-### Transacciones
+### Transacciones de venta (Etapa N, 1.1.0)
 
 - **NotaEntrega** — documento de venta. Número correlativo por 
-  empresa (`unique_together`). Estado `PROCESADO|ANULADO`.
-- **DetalleNotaEntrega** — FK NotaEntrega. Contiene los snapshots 
-  de precio/costo (ADR-18).
+  empresa (`unique_together` empresa+numero). Campo `numero_nota` 
+  con formato `{prefijo}-{numero:08d}` (auto-generado). 
+  `tipo_documento`=`NOTA_ENTREGA`|`FACTURA` (N2, **ADR-23**). 
+  `numero_factura` (opcional para NE, obligatorio para FACTURA, 
+  único por empresa). `iva_check` (auto si algún detalle tiene 
+  `iva_porcentaje`>0), `iva_total`, `descuento_global` (0–100 %). 
+  Estado `PROCESADO|ANULADO`.
+- **DetalleNotaEntrega** — FK NotaEntrega. En 1.1.0 (ADR-24) contiene 
+  **4 snapshots de precio**: `precio_base`, `precio_ajustado`, 
+  `precio_directo_bcv`, `precio_ajustado_bcv` — inmutables post-creación. 
+  Más `iva_porcentaje` y `descuento_aplicado` (individual por línea).
+
+### Transacciones de compra (Etapa C, 1.1.0)
+
 - **DocumentoCompra** — cabecera de compra a proveedor. 
-  Snapshots de tasas (ADR-18).
+ _correlativo automático por empresa via signal `create_tenant_defaults` 
+  en `signals.py`. Snapshots de tasas (ADR-18). `tipo_documento` 
+  (FACTURA/NOTA_ENTREGA/Otros) + `observaciones` textuales. 
+  `reversar_documento_compra` marca estado `ANULADO` y produce 
+  contramovimientos de kardex.
+- **DetalleDocumentoCompra** — FK DocumentoCompra. En 1.1.0 (ADR-24) 
+  añade **4 snapshots de costo**: `costo_directo`, `costo_ajustado`, 
+  `costo_directo_bcv`, `costo_ajustado_bcv`, `iva_porcentaje`, 
+  `descuento_aplicado`. Soporta `cantidad` fraccional (Decimal).
+
+### Otros
+
 - **MovimientoKardex** — registro inmutable de cada 
   ENTRADA/SALIDA. Referencia el `almacen` y el `articulo` afectados. 
-  `concepto` es una lista cerrada (COMPRA, VENTA, AJUSTE_ENTRADA, 
-  AJUSTE_SALIDA, TRANSFERENCIA_ENTRADA, TRANSFERENCIA_SALIDA, 
-  DEVOLUCION, ANULACION_COMPRA, MERMA_DEFECTUOSO, REVERSO_*, etc.).
+   `concepto` es una lista cerrada (COMPRA, VENTA, AJUSTE_ENTRADA, 
+   AJUSTE_SALIDA, TRANSFERENCIA_ENTRADA, TRANSFERENCIA_SALIDA, 
+   DEVOLUCION, ANULACION_COMPRA, MERMA_DEFECTUOSO, REVERSO_*, etc.).
 - **AuditoriaTasa** — historial de variación de tasas. Usado por 
   el dashboard para mostrar "última sincronización".
 
@@ -188,20 +216,20 @@ determinísticos sin importar cambios posteriores en `ConfiguracionEmpresa`.
 | `procesar_carga_masiva_excel` | 469 | ADR-13: wrapper que parsea Excel y delega al anterior. |
 | `resolver_colision` | ~700 | Resuelve una colisión específica de carga (suma/sustituye). |
 | `revertir_carga_masiva` | ~750 | Reverso de lote completo (genera contramovimientos). |
-| `procesar_venta` | 1119 | Emite NotaEntrega + descuenta kardex + graba snapshots. |
-| `sincronizar_tasa_cambio` | ~1300 | Lee tasa de API externa (o simulada en Fase 5). |
-| `reversar_nota_entrega` | ~1400 | Anula NE + genera contramovimientos del kardex. |
-| `reversar_documento_compra` | ~1450 | Anula Compra + contramovimientos + seriales. |
+| `procesar_venta` | ~1158 | En 1.1.0 ampliado con `tipo_documento` (NE/FACTURA), `numero_factura` unique, `descuento_global` (0-100), `iva_porcentaje` por artículo y `iva_check` automático. 4 snapshots de precio por detalle (ADR-24). |
+| `sincronizar_tasa_cambio` | ~1450 | Lee tasa de API externa (o simulada en Fase 5). |
+| `reversar_nota_entrega` | ~2237 | Anula NE + genera contramovimientos del kardex. |
+| `reversar_documento_compra` | ~2270 | Anula DocumentoCompra + contramovimientos + seriales. |
 | `transferir_mercancia` | ~1520 | Movimientos de SALIDA y ENTRADA entre almacenes. |
 | `ejecutar_ajuste_manual` | ~1560 | Ajuste +/- manual con concepto. |
-| `registrar_compra_proveedor` | 1623 | Compra con validación multi-tenant de FKs (A10). |
+| `registrar_compra_proveedor` | ~1720 | En 1.1.0 ampliado con 4 snapshots de costo + IVA + descuento + seriales + multi-tenant FKs validation. DetalleDocumentoCompra. |
 | `exportar_datos_tenant` | 1802 | Snapshot JSON de tenant para respaldo lógico. |
 | `procesar_devolucion_venta` | 1869 | Nota de crédito + reingreso (normal o cuarentena). |
 
 (Las líneas pueden variar ligeramente tras commits; ver index 
 en `services.py` header para el mapa actualizado).
 
-## Migraciones (9 numeradas)
+## Migraciones (12 numeradas en 1.1.0)
 
 | # | Nombre | Descripción |
 |---|---|---|
@@ -214,15 +242,18 @@ en `services.py` header para el mapa actualizado).
 | 0007 | `add_observaciones_to_documento_compra` | Observaciones text en DocumentoCompra. |
 | 0008 | `make_factura_fields_optional` | `numero_factura` y `fecha_compra` nullable (cargas retroactivas). |
 | 0009 | `documentocompra_factor_cobertura_aplicado_and_more` | **Fase 3**: snapshots de tasas en DocumentoCompra + Moneda + TasaCambio. |
+| 0010 | `alter_notaentrega_unique_together_and_more` | **Etapa N1**: NotaEntrega/DetalleNotaEntrega con 4 precios snapshot, IVA, descuento; ConfiguracionEmpresa con prefijo/correlativo/ivas. |
+| 0011 | `detallecompra_iva_porcentaje_descuento_and_more` | **Etapa C1**: DetalleDocumentoCompra extendido con 4 snapshots de costo + IVA + descuento. |
+| 0012 | `documento_compra_serials_and_more` | **Etapa C2/C3**: serial Nikon trazabilidad + soporte PDFs. |
 
 **Política:** Toda migración nueva sigue el patrón `00NN_descripcion`. 
 El nombre corresponde a un ticket/ADR o fase.
 
-## Tests (157 verdes)
+## Tests (234 verdes en 1.1.0)
 
 Codificados por **C-series** (criterio de validación):
 
-| Cód | Etapa | Cobertura | Tests |e |
+| Cód | Etapa | Cobertura | Tests |
 |---|---|---|---|
 | C1 | A4 | Reverso idempotente de NotaEntrega | 1 |
 | C2 | A5 | `metodo_ganancia` (MARKUP/MARGIN) | 2 |
@@ -243,6 +274,10 @@ Codificados por **C-series** (criterio de validación):
 | C17 | Fase 4 | Dashboard KPIs live | 4 |
 | C18 | Fase 5 | API surface services.py | 2 |
 | C19 | Fase 6 | backup_db VACUUM INTO | 3 |
+| C20 | Etapa N1-N2 | Modelos + servicio Emisión NE/Factura (4 snapshots, IVA, descuento) | 17 |
+| C21 | Etapa N3-N5 | Template ventas + interlock UI + vista detalle + PDF | 6 |
+| C22 | Etapa C | Módulo Compras: vistas detalle/PDF + templates + multi-tenant + snapshots | 18 |
+| C23 | Etapa FA | Fichas Artículos: 4 precios cuádruple + 4to token + toolbar + JS injectToken | 21 |
 
 ### Otras suites sin código C pero activas
 
@@ -250,6 +285,10 @@ Codificados por **C-series** (criterio de validación):
 - `TestRollbackAtomicidad` — ADR-08 rollback real.
 - `TestVentaExitosa` — emisión nota + snapshots precios.
 - `TestCoberturaCritica` — reversos notificados + correlativo por empresa.
+- `TestProcesarVentaN2`, `TestNotaEntregaFaseN3`, `TestInterlockFacturaN4`, 
+  `TestNotaEntregaFaseN5` — pipeline completo de emisión.
+- `TestCatalogoPreciosCuadruple`, `TestCatalogoTemplateTokens`, 
+  `TestArticulosToolbarTokens`, `TestArticulosToolbarRender` — Fichas.
 
 ## Componentes externos
 
@@ -266,10 +305,17 @@ Codificados por **C-series** (criterio de validación):
 
 ## Patrones clave
 
-- **Snapshot immutability** — ver ADR-18.
+- **Snapshot immutability** — ver ADR-18 (1.0.0) y ADR-24 (1.1.0) 
+  para extensión 4-precios en DetalleNotaEntrega/DetalleDocumentoCompra.
 - **Multi-tenant via ContextVar** — ver ADR-17.
 - **Defense-in-depth en auth** — `TenantMiddleware` + `@login_required` 
   validan independientemente.
+- **Filtro multi-tenant en vistas detalle/PDF** — 
+  `get_object_or_404(Modelo, pk=id, empresa_id=session['empresa_id'])` 
+  (regla 7 de PLAN.md, anti-leak C2).
+- **Emisión NE/Factura unificada (ADR-23)** — un solo modelo 
+  `NotaEntrega` con `tipo_documento` despacha ambos casos desde 
+  `procesar_venta`. Evita modelo/tablas/vistas duplicadas.
 - **Lazy import en models** — `Articulo.get_stock_disponible()` 
   importa `services` de forma lazy para evitar el ciclo 
   `models ↔ services`. ADR-21 cabe aquí.
@@ -277,6 +323,18 @@ Codificados por **C-series** (criterio de validación):
   negocio no repite `filter(empresa_id=...)` en ningún lado.
 - **Vistas sin lógica de negocio** — `views.py` actúa como 
   adaptador HTTP → services, sin reglas propias.
+- **Tokens de precio literales (ADR-25, 1.1.0)** — los tokens 
+  `$[PRECIO_USD]`, `$[PRECIO_BCV]`, `$[PRECIO_BS_BASE]`, `$[PRECIO_BS]` 
+  se guardan en BD como texto literal en `social_quick`/`social_cross`. 
+  La sustitución ocurre en frontend (`catalogo.html`) al mostrar/copiar.
+- **Toolbar caret tracking sin servidor (ADR-26, 1.1.0)** — la 
+  toolbar de `articulos.html` inserta el token en la posición del 
+  caret vía JS `injectToken()`. No hay llamada fetch al servidor; 
+  el texto se persiste literal al guardar.
+- **Correlativos automáticos via signal (1.1.0)** — al crear 
+  una Empresa, `create_tenant_defaults` siembra ConfiguracionEmpresa 
+  con defaults para NE/Compras; al guardar DocumentoCompra, 
+  `Max('numero')+1` calcula el siguiente correlativo por empresa.
 
 ## Limitaciones aceptadas
 

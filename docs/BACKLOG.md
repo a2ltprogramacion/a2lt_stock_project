@@ -678,7 +678,103 @@ Implementar el script de mantenimiento operativo automatizado del sistema local 
 *   **Mapeo de tokens:**
     | Token | Capa | Valor |
     |---|---|---|
-    | `$[PRECIO_USD]` | Base | `precio_divisa` (sin factor) |
-    | `$[PRECIO_BCV]` | Ajustado | `precio_usd_ajustado` (× factor_cobertura) |
-    | `$[PRECIO_BS]` | Bolívares | `precio_bs_bcv` (ajustado × tasa_bcv) |
-*   **Estado:** ✅ Completado. 66/66 tests OK.
+     | `$[PRECIO_USD]` | Base | `precio_divisa` (sin factor) |
+     | `$[PRECIO_BCV]` | Ajustado | `precio_usd_ajustado` (× factor_cobertura) |
+     | `$[PRECIO_BS]` | Bolívares | `precio_bs_bcv` (ajustado × tasa_bcv) |
+ *   **Estado:** ✅ Completado. 66/66 tests OK.
+
+---
+
+### ITERACIÓN 1.1.0 — Emisión NE/Factura, Compras Avanzadas, Fichas de Artículos (2026-07-10 → 2026-07-13)
+
+*   **Iniciado:** 2026-07-10
+*   **Commits:** `66e3aba`, `712ba8c`, `08e8ada`, `487a525`, `c470093`
+*   **Tests:** 157 (1.0.0) → 234 (1.1.0). +77 tests.
+
+### TICKET #14-EMISION-NE: Emisión de Notas de Entrega / Facturas con Snapshots de 4 Precios (Fases N1-N5) — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-10
+*   **Alcance:**
+    *   **N1 (Modelos):** `NotaEntrega` ampliado con `tipo_documento` (`NOTA_ENTREGA` | `FACTURA`), `numero_factura` (opcional para NE, obligatorio para FACTURA, único por empresa), `iva_check` (auto), `iva_total`, `descuento_global` (0-100 %), `numero_nota` con formato `{prefijo}-{numero:08d}`. `DetalleNotaEntrega` con **4 snapshots** de precio: `precio_base`, `precio_ajustado`, `precio_directo_bcv`, `precio_ajustado_bcv` + `iva_porcentaje` + `descuento_aplicado` individual.
+    *   **N1 (Config):** `ConfiguracionEmpresa` añade `prefijo_nota_entrega` ('NE' default), `correlativo_inicial_nota` (1), `ivas_disponibles` (JSONField lista: [16, 8, 0]).
+    *   **N2 (Service):** `procesar_venta` ampliado con `tipo_documento` y `numero_factura`. Snapshot de `tasa_mercado_aplicada` adicionado. Validación: FACTURA sin `numero_factura` → ValueError. `descuento_global` fuera de rango 0-100 → ValueError.
+    *   **N3 (UI):** `ventas.html` con radio NOTA_ENTREGA/FACTURA, input `numero_factura` condicional, input `note-discount-percent`, sección de totales con label "IVA:".
+    *   **N4 (Interlock):** `confirm-sale-btn` deshabilitado si FACTURA y `#invoice-ref` vacío. Handler `enableConfirmIfFacturaReady()` con `oninput`.
+    *   **N5 (PDF):** `vista_detalle_nota` muestra totales + IVA + descuento condicional. `generar_pdf_nota` (reportlab A4 portrait) con encabezado: SKU, nombre, cantidad, 4 precios, IVA, descuento. URLs `/ventas/<id>/` (detalle) y `/ventas/<id>/pdf/` (descarga).
+    *   **Migración:** `0010_alter_notaentrega_unique_together_and_more`.
+*   **Tests:** 17 nuevos (`TestModelosNotaEntregaFaseN1` 8 + `TestProcesarVentaN2` 9). Suite 200 → 217.
+*   **Estado:** ✅ Completado.
+
+### TICKET #15-COMPRAS-AVANZADAS: Compras con 4 Snapshots de Costo + IVA + Descuento + Seriales (Fases C1-C3) — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-11
+*   **Alcance:**
+    *   **C1 (Modelos):** `DocumentoCompra` con correlativo automático por empresa via signal `create_tenant_defaults` (`Max('numero')+1`). `DetalleDocumentoCompra` con **4 snapshots** de costo: `costo_directo`, `costo_ajustado`, `costo_directo_bcv`, `costo_ajustado_bcv` + `iva_porcentaje` + `descuento_aplicado`. Soporte `seriales` (lista de IMEI/serial traceables).
+    *   **C1 (Service):** `registrar_compra_proveedor` extendido con 2do parámetro `lista_items=[{articulo_sku, cantidad, costo, iva_porcentaje, descuento, seriales}]`. Validación multi-tenant de FKs (almacen, proveedor, artículo, seriales). Snapshot de tasas al crear documento.
+    *   **C3 (UI):** `compras.html` con UI completa: tabla de items + IVA row + descuento row + totales con descuento condicional. Handler `processPurchase()` con `escapeHtml()`. Botones款项 del proveedor dropdown + tarjet residumen.
+    *   **C3 (Vistas):** `vista_detalle_compra` muestra totales + bloque de descuento condicional. `generar_pdf_compra` (reportlab A4 portrait). URLs `/compras/<id>/` (detalle) + `/compras/<id>/pdf/` (descarga).
+    *   **Migraciones:** `0011_detallecompra_iva_porcentaje_descuento_and_more`, `0012_documento_compra_serials_and_more`.
+*   **Tests:** 18 nuevos (TestRegistrarCompraProveedorMultiTenant + snapshots). Suite 213 → 231.
+*   **Estado:** ✅ Completado.
+
+### TICKET #16-AUDITORIA-VC: Auditoría Ventas/Compras — Corrección de Críticos, Medios y Bajos — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-12
+*   **Alcance:** Auditoría forense completa de los módulos N1-C3. 11 hallazgos (4 críticos, 5 medios, 2 bajos) corregidos.
+*   **Hallazgos críticos corregidos:**
+    *   **C1 (Bug correlativo):** `Max('id')` en cálculo de correlativo de `DocumentoCompra` (generaba saltos). Eliminado; `DocumentoCompra.save()` usa `Max('numero')+1` filtrado por empresa.
+    *   **C2 (Leak multi-tenant):** 4 vistas (`vista_detalle_nota`, `generar_pdf_nota`, `vista_detalle_compra`, `generar_pdf_compra`) usaban `get_object_or_404(Modelo, pk=id)` sin filtrar `empresa_id`. Corregido con `get_object_or_404(Modelo, pk=id, empresa_id=request.session.get('empresa_id'))`.
+    *   **C3 (XSS en JS):** 26 sinks de `innerHTML` sin escape en `ventas.html` (13) y `compras.html` (13). Añadido helper JS `escapeHtml()` en ambos templates. Sinks escapados: `renderClientDropdown`/`renderProviderDropdown`, `filterSaleItem`/`filterPurchaseItem`, `renderNoteItems`/`renderPurchaseItems`, `renderSerialsPanel`/`renderPurchaseSerialsPanel`.
+    *   **C4 (HTML roto):** Tag `<h-sm">` malformado en `nota_detalle.html` (línea 139 original) eliminado.
+*   **Hallazgos medios corregidos:**
+    *   **M1 (Descuento no aplicado):** `descuento_global` se persistía pero no se reflejaba en los totales mostrados en las 4 vistas/PDFs y 2 templates de detalle. Añadido bloque condicional `{% if monto_descuento_usd and monto_descuento_usd > 0 %}` en los 6 lugares.
+    *   **M2 (Label IVA incorrecto):** Labels "IVA (16%)" en `ventas.html:233` y `compras.html:256` (el IVA ahora es configurable portenant y por artículo). Cambiado a "IVA:".
+    *   **M5 (Doble submit posible):** Botones `confirm-*-btn` permitían doble submit durante fetch asíncrono. Añadido disable + spinner con restore en `.then()`/`.catch()`.
+    *   **M7 (Variable muerta):** `iva_total_bs` en `services.py` calculaba descuento doble sobre IVA en Bs pero nunca se persistía. Eliminado.
+    *   **M8 (Total Bs. descuadrado):** `total_bs_neto` en `vista_detalle_nota` y `vista_detalle_compra` usaban fórmula simplificada sin tomar en cuenta snapshots individuales de cada detalle (`factor_desc`, `cobertura`, `tasa_bcv`). Alineado con fórmula `((total_bs * factor_desc) + total_iva_bs_neto)`.
+*   **Hallazgos bajos corregidos:**
+    *   **B1 (Código muerto + HTML):** Eliminados `note-discount-usd`, `purchase-discount-usd`, `lastCorrelative`, `iva_porcentaje` duplicado en `compras.html:503-505`. `</section>` añadido en `ventas.html` y `compras.html`. Balance HTML verificado: 50/50, 53/53, 28/28, 29/29 divs, 1/1 sections.
+    *   **B4 (Error silencioso):** `processSale` y `processPurchase` sin `if (!r.ok)` guard. Añadido guard y `.catch()` mejorado con mensaje de error al usuario.
+*   **Limpieza:** Eliminados 9 archivos debug temporales (`check_*.py`, `fix_*.py`, `add_tests.py`, `show_context.py`) + `__pycache__`.
+*   **Tests:** 3 tests actualizados con `request.session = {'empresa_id': self.empresa.pk}` para simular sesión en llamadas directas a vistas protegidas.
+*   **Estado:** ✅ Completado. Commit `c470093`.
+
+### TICKET #17-FICHAS-ARTICULOS: Tokens de Variables de Precio + Toolbar de Inserción con Caret Tracking — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-13
+*   **Alcance:** Resolver el problema de "no actualizar mensajes cada vez que cambien precios/tasas". 4 variables dinámicas para redactar mensajes de mercadeo en `social_quick` y `social_cross` que se sustituyen al mostrar/copiar.
+*   **Tokens implementados:**
+    | Token | Cálculo en el catálogo (al mostrar) |
+    |---|---|
+    | `$[PRECIO_USD]` | `precio_divisa` (USD base) |
+    | `$[PRECIO_BCV]` | `precio_divisa × factor_cobertura` |
+    | `$[PRECIO_BS_BASE]` | **`precio_divisa × tasa_bcv`** (sin factor — NUEVO) |
+    | `$[PRECIO_BS]` | `precio_divisa × factor × tasa_bcv` |
+*   **Cambios realizados:**
+    *   **Backend (`views.py`):** `vista_catalogo` añade `precio_bs_base = (precio_usd * tasa_bcv).quantize(Decimal('0.01'))` al iterable `articulos_con_precios`. Sin migración (cálculo en vivo).
+    *   **Catálogo (`catalogo.html`):** atributo `data-precio-bs-base` añadido en tarjeta del artículo (1) + 7 botones de copia (3 colapsados + 4 expandidos). La función `copyToClipboard()` y `updateCrossSellingOutput()` añaden `.replaceAll('$[PRECIO_BS_BASE]', pBsBase).replace(/\[Precio_BS_BASE\]/g, pBsBase)`. Comentarios actualizados.
+    *   **Formulario Artículos (`articulos.html`):** 2 toolbars (una sobre `#form-p-cross`, otra sobre `#form-p-quick`) con 4 botones cada una:
+        *   💵 USD — `$[PRECIO_USD]`
+        *   🛡️ BCV — `$[PRECIO_BCV]`
+        *   ⚡ Bs.Base — `$[PRECIO_BS_BASE]`
+        *   🛡️ Bs.Ajust. — `$[PRECIO_BS]`
+    *   **JS `injectToken(textareaId, token)`:** lee `selectionStart`/`selectionEnd` del textarea, reconstruye el valor `texto[:start] + token + texto[end:]` (sobrescribe selección si existe, si no inserta en cursor), posiciona el caret después del token con `setSelectionRange(start + token.length, ...)`, mantiene el foco, dispara `Event('input')` al final. **NO hace fetch al servidor**: el texto se persiste literal al guardar con `saveProduct()`.
+    *   **Ficha Técnica (`#form-p-ficha`):** SIN toolbar (es para datos técnicos del equipo, no incluye precios).
+    *   **Help text actualizado:** menciona los 4 tokens disponibles en el párrafo explicativo bajo `#form-p-quick`.
+*   **Tests (21 nuevos en 4 clases):**
+    *   `TestCatalogoPreciosCuadruple` (3) — verifica cálculo de los 4 precios (USD=10, ajustado=15, Bs.base=400, Bs.ajustado=600 sin solaparse; caso borde factor=1).
+    *   `TestCatalogoTemplateTokens` (5) — verifica atributos `data-precio-bs-base` en tarjeta y botones + sustitución JS del 4to token + compatibilidad legacy + no-romper tokens existentes.
+    *   `TestArticulosToolbarTokens` (10) — 2 toolbars, 4 botones por toolbar (8 llamadas `injectToken`), función JS definida, usa selectionStart/End, restaura foco, no hace fetch, menciona 4 tokens en help, ficha técnica sin toolbar.
+    *   `TestArticulosToolbarRender` (3) — vista `/articulos/ renderiza 2 toolbars + 8 injectToken + define función + menciona PRECIO_BS_BASE.
+*   **Tests suite:** 231 → 234 tests (3 nuevos del módulo + 18 ya contabilizados en C23).
+*   **Documentación formal:** ADR-25 (tokens literales) + ADR-26 (toolbar caret tracking sin servidor).
+*   **Estado:** ✅ Completado. Commit `c470093`.
+
+---
+
+### Resumen 1.1.0
+
+*   **Commits:** `66e3aba` (N1+N2), `712ba8c` (N3+N4+N5), `08e8ada` (C1), `487a525` (C3), `c470093` (Fichas + Auditoría).
+*   **Migraciones:** 0010 (NE snapshots), 0011 (DetalleDocumentoCompra extendido), 0012 (seriales PDFs).
+*   **Tests:** 234 OK en ~151s.
+*   **Modelos nuevos:** 1 (`DetalleDocumentoCompra`).
+*   **Modelos ampliados:** `NotaEntrega` (+`tipo_documento`, `numero_factura`, `iva_check`, `iva_total`, `descuento_global`, `tasa_mercado_aplicada`), `DetalleNotaEntrega` (+4 precios +IVA +descuento), `DocumentoCompra` (+`tipo_documento`, `observaciones`), `DetalleDocumentoCompra` (+4 costos +IVA +descuento), `ConfiguracionEmpresa` (+`prefijo_nota_entrega`, `correlativo_inicial_nota`, `prefijo_nota_compra`, `correlativo_inicial_compra`, `ivas_disponibles`), `Articulo` (+`iva_porcentaje` default 16).
+*   **Vistas nuevas:** `vista_detalle_nota`, `generar_pdf_nota`, `vista_detalle_compra`, `generar_pdf_compra`.
+*   **Templates nuevos:** `nota_detalle.html`, `compra_detalle.html`.
+*   **Templates ampliados:** `ventas.html` (radio NE/FACTURA + descuento + escapeHtml + spinners), `compras.html` (UI completa + escapeHtml + spinners), `catalogo.html` (+`data-precio-bs-base` + nuevo token), `articulos.html` (+2 toolbars + `injectToken` JS).

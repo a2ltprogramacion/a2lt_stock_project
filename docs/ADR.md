@@ -214,6 +214,106 @@ estaba. `logs/` y `*.log` también se excluyen.
 **Consecuencias:** Cada ambiente on-premise mantiene sus propios 
 backups en disco; el repositorio queda limpio de artefactos.
 
+---
+
+## ADR-23: Emisión de Notas de Entrega y Facturas como un solo flujo (1.1.0)
+
+**Estado:** Aceptada  
+**Contexto:** El cliente opera PDV para clientes finales. 
+Originalmente, la NotaEntrega era un documento interno. Se requirió 
+emitir también Facturas con `numero_factura` único por empresa, 
+sin romper el resto del flujo (kardex, snapshots, reversos).  
+**Decisión:** Un solo modelo `NotaEntrega` con `tipo_documento` 
+(`NOTA_ENTREGA` | `FACTURA`) y `numero_factura` opcional (NE) 
+ u obligatorio (FACTURA), unique por empresa. El service 
+`procesar_venta` mantiene una firma única, despachando internamente 
+según `tipo_documento`. Correlativo por empresa via 
+`ConfiguracionEmpresa.prefijo_nota_entrega` + 
+`correlativo_inicial_nota`. `numero_nota` con formato 
+`{prefijo}-{numero:08d}` auto-generado en `save()`.  
+**Consecuencias:** Una sola tabla, una sola vista de detalle/PDF. 
+El campo `iva_check` (calculated property: True si algún detalle 
+tiene `iva_porcentaje>0`) reemplaza el toggle manual. La Validación 
+UI (interlock: `confirm-sale-btn` deshabilitado si FACTURA sin 
+`numero_factura`) se hace en `ventas.html` con `enableConfirmIfFacturaReady()`.  
+**Tests:** C20 (modelos), C21 (UI interlock + PDF).
+
+## ADR-24: 4 precios snapshot por detalle de venta y compra (1.1.0)
+
+**Estado:** Aceptada  
+**Contexto:** El sistema anterior sólo guardaba 2 precios 
+(`precio_unitario_usd`, `precio_unitario_bs`). El cliente requiere 
+tener precios con/sin factor de cobertura diferenciados para 
+ambos USD y Bs. en cada detalle (post-pago, ajustes de inventarios, 
+conciliaciones).  
+**Decisión:** `DetalleNotaEntrega` y `DetalleDocumentoCompra` 
+incluyen ahora 4 snapshots inmutables:
+- `precio_base` / `costo_directo` = precio neto base (USD).
+- `precio_ajustado` / `costo_ajustado` = base × factor (USD).
+- `precio_directo_bcv` / `costo_directo_bcv` = base × tasa_bcv (Bs. sin factor).
+- `precio_ajustado_bcv` / `costo_ajustado_bcv` = base × factor × tasa_bcv (Bs. con factor).
+
+Más `iva_porcentaje` y `descuento_aplicado` (individual por línea) 
+para que la línea sea reconstruible en el tiempo.  
+**Implementación:** Set dentro de `procesar_venta` y 
+`registrar_compra_proveedor`, atomic con el resto de la transacción.  
+**Consecuencias:** Usuarios pueden ver el desglose en PDFs; los 
+reportes históricos (Fase 4) quedan determinísticos. Tamaño de BD 
+crece levemente (4 cols Decimal extra por detalle).  
+**Tests:** C20 (creación de NE), C22 (creación de Compras).
+
+## ADR-25: Tokens de variables de precio como literales de texto (1.1.0)
+
+**Estado:** Aceptada  
+**Contexto:** Los textos de mercadeo (`social_quick`, `social_cross`) 
+se copian al portapapeles en el catálogo. Si el especialista 
+hardcodea precios, cada cambio de tasa/precio exige reescribir todos 
+los textos.  
+**Decisión:** 4 tokens de sustitución dinámica, persistidos 
+literalmente en BD:
+- `$[PRECIO_USD]` = `precio_divisa` (USD base)
+- `$[PRECIO_BCV]` = `precio_divisa × factor_cobertura` (USD ajustado)
+- `$[PRECIO_BS_BASE]` = `precio_divisa × tasa_bcv` (Bs. sin factor; nuevo token)
+- `$[PRECIO_BS]` = `precio_divisa × factor × tasa_bcv` (Bs. con factor)
+
+La sustitución se hace en frontend (`catalogo.html`) por 
+`copyToClipboard()` y `updateCrossSellingOutput()`, leyendo attrs 
+`data-precio-base`, `data-precio-ajustado`, `data-precio-bs-base`, 
+`data-precio-bs` ya presentes en la tarjeta. Compatibilidad legacy 
+con `[Precio_USD]`, `[Precio_BCV]`, `[Precio_BS_BASE]`, `[Precio_Bs]`.  
+**Consecuencias:** El especialista redacta una sola vez y los tokens 
+se actualizan solos con cada modificación de config / precio. No se 
+requiere ninguna migración (sólo un cálculo nuevo en 
+`vista_catalogo`).  
+**Tests:** C23 (4 precios cuádruples + atributos + sustitución).
+
+## ADR-26: Toolbar de inserción de tokens con caret tracking sin servidor (1.1.0)
+
+**Estado:** Aceptada  
+**Contexto:** Insertar manualmente tokens en los textareas 
+`social_quick` / `social_cross` es tedioso y propenso a errores.  
+Se podría implementar un editor WYSIWYG, pero el perfil del producto 
+no justifica añadir build JS ni dependencia pesada.  
+**Decisión:** 4 botones encima de cada textarea de marketing en 
+`articulos.html` (`#form-p-cross` y `#form-p-quick`). El JS 
+`injectToken(textareaId, token)`:
+1. Lee `selectionStart`/`selectionEnd` del textarea (caret position).
+2. Reconstruye el valor: `texto[:start] + token + texto[end:]`.
+   Esto sobrescribe la selección si existe (comportamiento estándar 
+   de editores); si no, inserta en la posición del cursor.
+3. Coloca el cursor justo después del token via 
+   `setSelectionRange(start + token.length, ...)`.
+4. Mantiene el foco y dispara `Event('input')` para frameworks que escuchan.
+
+**Crucial:** `injectToken` NO hace fetch al servidor. El texto se 
+persiste literal al guardar vía `saveProduct()` (con el token ya 
+insertado). Cumple ADR-25: los tokens son literales.  
+**Consecuencias:** Sin build JS, sin-state del lado del servidor 
+para el editor. La `#form-p-ficha` (Ficha Técnica) NO tiene toolbar 
+— es para datos técnicos del equipo, no incluye precios.  
+**Tests:** C23 (toolbar presencia + 4 botones × 2 textareas + función 
+`injectToken` definida + no-contiene-fetch + caret tracking).
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 
@@ -246,3 +346,7 @@ desarrollo formal en este archivo:
 | 18 | Snapshots inmutables | `DetalleNotaEntrega`, `DocumentoCompra` |
 | 21 | No partir services.py | `services.py` header + tests C18 |
 | 22 | Backups excluidos git | `.gitignore` |
+| 23 | Emisión NE/Factura unificada | `models.NotaEntrega.tipo_documento`, `services.procesar_venta`, `views.ventas` |
+| 24 | 4 precios snapshot por detalle | `DetalleNotaEntrega`, `DetalleDocumentoCompra`, migraciones 0010/0011 |
+| 25 | Tokens de precio literales | `Articulo.social_quick/social_cross`, `catalogo.html` JS |
+| 26 | Toolbar caret tracking sin servidor | `articulos.html` JS `injectToken()` |

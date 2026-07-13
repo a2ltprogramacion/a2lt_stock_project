@@ -14,10 +14,34 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
 - **Multi-tenant seguro** — cada comercio (empresa) tiene sus propios 
   datos, filtrados via ContextVar (no por schema ni tenant_id manual).
 - **Multi-moneda** — USD, VES y futuras. Cada compra/venta graba el 
-  snapshot de la tasa aplicada para auditoría histórica.
+  snapshot de la tasa aplicada para auditoría histírica.
 - **Kardex inmutable** — toda modifica de stock pasa por 
   `services.registrar_movimiento()`; el costo_unitario_snapshot de cada 
   detalle de venta es inalterable.
+- **Emisión de Notas de Entrega / Facturas** (1.1.0) — el servicio 
+  `procesar_venta` soporta `tipo_documento` (`NOTA_ENTREGA` | `FACTURA`), 
+  `numero_factura` único por empresa, `descuento_global` configurable, 
+  `iva_porcentaje` por artículo y `iva_check` automático. 
+  Cada `DetalleNotaEntrega` guarda **4 snapshots de precio** 
+  (`precio_base`, `precio_ajustado`, `precio_directo_bcv`, 
+  `precio_ajustado_bcv`) + `iva_porcentaje` + `descuento_aplicado`. 
+  PDF A4 portrait con reportlab. Vista detalle`/ventas/<id>/` + 
+  PDF descargable `/ventas/<id>/pdf/`.
+- **Módulo de Compras a proveedores** (1.1.0) — `DocumentoCompra` con 
+  correlativo automático por empresa via signal + 
+  `DetalleDocumentoCompra` con **4 snapshots de costo** + IVA + 
+  descuento + seriales. `registrar_compra_proveedor` valida FKs 
+  multi-tenant; `reversar_documento_compra` genera contramovimiento 
+  auditado. PDF + vista detalle `/compras/<id>/` + 
+  `/compras/<id>/pdf/`.
+- **Fichas de Artículos con tokens de precio** (1.1.0) — 4 variables 
+  dinámicas para redactar mensajes de mercadeo en `social_quick` y 
+  `social_cross` sin reescribir al cambiar precios/tasas: 
+  `$[PRECIO_USD]`, `$[PRECIO_BCV]`, `$[PRECIO_BS_BASE]` (Bs. sin 
+  factor, nuevo), `$[PRECIO_BS]` (Bs. con factor). Sustitución 
+  automática al copiar texto en catálogo. Toolbar con 4 botones en 
+  el formulario de artículos para insertar tokens en la posición del 
+  cursor (JS `injectToken()`, sin llamada al servidor).
 - **8 reportes operativos** — Kardex Valorizado, Inventario Valorizado, 
   Ventas por Período, Cuentas por Cobrar (CxC), Cuentas por Pagar (CxP), 
   Top Artículos Vendidos, Artículos Sin Movimiento (obsoletos), y 
@@ -25,7 +49,7 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
   y PDF (A4 landscape con reportlab).
 - **Dashboard con KPIs live** — valoración USD/VES del inventario, 
   volumen de ventas del mes, conteo de notas, alertas de reposición, 
-  disponibilidad de combos virtuales calculada en tiempo real, última 
+  disponibilidad de combos virtuales calculada en tiempo real, ǧltima 
   sincronización de tasa persistida.
 - **Backup atómico** — `manage.py backup_db` genera un snapshot 
   consistente via SQLite `VACUUM INTO` sin bloquear escrituras, con 
@@ -42,7 +66,8 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
 - **Frontend:** Tailwind CSS (CDN), Chart.js, FontAwesome. Sin build JS.
 - **PDF:** reportlab 5.0.
 - **Excel:** openpyxl 3.1.
-- **Tests:** Django TestCase/TransactionTestCase — 157 tests verdes.
+- **Tests:** Django TestCase/TransactionTestCase — 234 tests verdes 
+  en **~151s** (157 en 1.0.0 + 77 en 1.1.0).
 
 ## Instalación rápida
 
@@ -69,16 +94,27 @@ Abrir http://127.0.0.1:8000
 
 - `docs/AUDITORIA_INICIAL.md` — hallazgos previos a la Fase A.
 - `docs/PLAN.md` — plan de estabilización completo (Etapas A, B, 
-  Fase 3, 4, 5, 6 y reglas de calidad) + matriz de tests C1-C19.
-- `docs/ARQUITECTURA.md` — diagrama de capas, multi-tenant ContextVar, 
-  regla sagrada del kardex, snapshots inmutables, mapa de `services.py`, 
-  migraciones y lista de los 23 modelos.
-- `docs/ADR.md` — 16 Decisiones de Arquitectura formales (ADR-01 a ADR-22).
+  Fases 3-6 **+ Etapas N (Emisión NE/Factura), C (Compras), 
+  FA (Fichas Artículos)** y reglas de calidad) + matriz de tests 
+  C1-C23 (234 verdes).
+- `docs/ARQUITECTURA.md` — diagrama de capas, multi-tenant 
+  ContextVar, regla sagrada del kardex, **snapshots inmutables 
+  extendidos a 4 precios por detalle (ADR-24)**, mapa de 
+  `services.py`, 12 migraciones numeradas, 29 modelos y tests C1-C23.
+- `docs/ADR.md` — **20 Decisiones de Arquitectura** formales 
+  (ADR-01 a ADR-26 con saltos; ADR-23 a ADR-26 añaden Emisión 
+  NE/Factura, snapshots 4-precios, tokens de precio y toolbar 
+  caret tracking).
+- `docs/BACKLOG.md` — 30+ tickets de desarrollo con estado 
+  (incluye tickets #14-#17 iteración 1.1.0).
 - `docs/ROADMAP.md` — features post-100% (cuentas por cobrar/pagar, 
   factura electrónica Seniat, bitácora de auditoría).
 - `docs/OPERACION.md` — guía de instalación detallada, módulos, 
-  troubleshooting y reglas operativas.
-- `CHANGELOG.md` — registro de cambios por release (Keep a Changelog).
+  **tokens de variables de precio**, troubleshooting y reglas 
+  operativas.
+- `CHANGELOG.md` — registro de cambios por release (Keep a 
+  Changelog). **1.1.0 (2026-07-13) cubre Emisión NE/Factura, 
+  Compras Avanzadas, Fichas de Artículos y auditoría.**
 
 ## Producción
 
@@ -107,12 +143,26 @@ python manage.py test inventory.tests.TestDashboardLiveData -v 2    # rápidos
 2. **Tenant**: usar `get_current_empresa()` (ContextVar), nunca 
    `Empresa.objects.first()` ni `request.empresa`.
 3. **Snapshots**: los campos `tasa_bcv_aplicada`, 
-   `factor_cobertura_aplicado`, `costo_unitario_snapshot`, 
-   `precio_unitario_usd` y `precio_unitario_bs` grabados en cada 
-   compra/venta son inmutables post-factura.
+   `factor_cobertura_aplicado`, `tasa_mercado_aplicada` (1.1.0) y 
+   **los 4 snapshots de precio/costo** (`precio_base`, 
+   `precio_ajustado`, `precio_directo_bcv`, `precio_ajustado_bcv` — 
+   o `_costo_` en compras) grabados en cada compra/venta son 
+   inmutables post-factura (ADR-18 + ADR-24).
 4. **@login_required**: defense-in-depth junto a `TenantMiddleware` 
    que valida 5 condiciones (autenticación, perfil, empresa_id en 
    sesión, empresa activa, empresa permitida para el usuario).
+5. **Vistas detalle/PDF** (1.1.0, regla C2 — anti-leak multi-tenant): 
+   `vista_detalle_nota`, `generar_pdf_nota`, `vista_detalle_compra`, 
+   `generar_pdf_compra` deben hacer 
+   `get_object_or_404(Modelo, pk=id, empresa_id=session['empresa_id'])` 
+   — nunca simple `get_object_or_404(Modelo, pk=id)`.
+6. **Tokens de precio** (1.1.0, ADR-25): los tokens `$[PRECIO_USD]`, 
+   `$[PRECIO_BCV]`, `$[PRECIO_BS_BASE]`, `$[PRECIO_BS]` se persisten 
+   como texto literal en `social_quick`/`social_cross`. La 
+   sustitución ocurre solo en frontend (`catalogo.html`). La toolbar 
+   de `articulos.html` NO envía datos al servidor: `injectToken()` 
+   edita el texto localmente y `saveProduct()` persiste el token 
+   literal al guardar.
 
 ## Licencia
 

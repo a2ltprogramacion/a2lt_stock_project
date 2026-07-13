@@ -8,6 +8,137 @@ vez público.
 
 ---
 
+## [1.1.0] — 2026-07-13
+
+Iteración sobre el núcleo 1.0.0: añadido el flujo completo de Emisión 
+de Notas de Entrega/Facturas, el módulo de Compras a proveedores con 
+seriales+IVA+descuentos, el sistema de tokens de variables de precio 
+para redactar mensajes de mercadeo, y una ronda profunda de auditoría 
+(seguridad, descuentos, totales, JSXSS, dead code). Suite en 234 tests 
+verdes (~151s).
+
+### Added (Features nuevas)
+
+- **Emisión de Notas de Entrega / Facturas (Fases N1–N5):** el servicio 
+  `procesar_venta` ahora soporta `tipo_documento` (`NOTA_ENTREGA` o 
+  `FACTURA`), `numero_factura` único por empresa, `descuento_global` 
+  (0–100 %), `iva_porcentaje` por artículo y `iva_check` automático.
+  Cada `DetalleNotaEntrega` snapshot de los 4 precios 
+  (`precio_base`, `precio_ajustado`, `precio_directo_bcv` y 
+  `precio_ajustado_bcv`) + `iva_porcentaje` + `descuento_aplicado`.
+  ConfiguracionEmpresa añade `prefijo_nota_entrega` + 
+  `correlativo_inicial_nota` + `ivas_disponibles`.
+  Vistas `vista_detalle_nota`, `generar_pdf_nota` (reportlab) y URLs 
+  `/ventas/<id>/`, `/ventas/<id>/pdf/`.
+- **Módulo de Compras a proveedores (Fase C1–C3):** `DocumentoCompra` 
+  con correlativo automático + `DetalleDocumentoCompra` con 4 precios 
+  snapshot + IVA + descuento + seriales. 
+  `registrar_compra_proveedor` valida multi-tenant de FKs (almacen, 
+  proveedor, artículo) y dispara `registrar_movimiento ENTRADA`.
+  `reversar_documento_compra` genera contramovimiento auditado.
+  Vistas `vista_detalle_compra`, `generar_pdf_compra` (reportlab) 
+  con `/compras/<id>/`, `/compras/<id>/pdf/`.
+- **Fichas de Artículos con tokens de precio (NUEVO):** 4 variables 
+  dinámicas para redactar mensajes de mercadeo en `social_quick` y 
+  `social_cross` sin reescribir al cambiar precios/tasas:
+  | Token | Cálculo en el catálogo |
+  |---|---|
+  | `$[PRECIO_USD]` | `precio_divisa` (USD base) |
+  | `$[PRECIO_BCV]` | `precio_divisa × factor_cobertura` |
+  | `$[PRECIO_BS_BASE]` | `precio_divisa × tasa_bcv` (sin factor) |
+  | `$[PRECIO_BS]` | `precio_divisa × factor × tasa_bcv` |
+
+  Sustitución en `copyToClipboard` y `updateCrossSellingOutput` 
+  (`catalogo.html`), con compatibilidad legacy `[Precio_USD]`, 
+  `[Precio_BCV]`, `[Precio_BS_BASE]`, `[Precio_Bs]`.
+- **Toolbar de inserción de tokens en Formulario de Artículos:** 
+  `articulos.html` ahora expone 4 botones (USD/BCV/Bs.Base/Bs.Ajust.) 
+  sobre los textareas `form-p-cross` y `form-p-quick`. La función JS 
+  `injectToken(textareaId, token)` inserta el token en la posición del 
+  caret, sobrescribe la selección si existe, restaura el foco, y NO 
+  envía nada al servidor (el texto se persiste literal al guardar con 
+  `saveProduct()`).
+- **Tests (21 nuevos):** `TestCatalogoPreciosCuadruple` (3), 
+  `TestCatalogoTemplateTokens` (5), `TestArticulosToolbarTokens` (10),
+  `TestArticulosToolbarRender` (3). Suite pasa de 213 a 234 tests.
+
+### Fixed (Bug fixes — auditoría)
+
+**Críticos:**
+- **C1:** bug `Max('id')` en cálculo de correlativo de `DocumentoCompra` 
+  (generaba saltos). Eliminado; `save()` usa `Max('numero')` y signal 
+  `create_tenant_defaults` inicializa `correlativo_inicial_nota` y 
+  `correlativo_inicial_compra`.
+- **C2:** 4 vistas (`vista_detalle_nota`, `generar_pdf_nota`, 
+  `vista_detalle_compra`, `generar_pdf_compra`) no filtraban por 
+  `empresa_id` → leak multi-tenant. Ahora todas usan 
+  `get_object_or_404(Modelo, pk=id, empresa_id=session['empresa_id'])`.
+- **C3:** 26 sinks de `innerHTML` sin escape en `ventas.html` (13) y 
+  `compras.html` (13). Añadido helper JS `escapeHtml()` y todos los 
+  sinks escapados (`renderClientDropdown`/`renderProviderDropdown`, 
+  `filterSaleItem`/`filterPurchaseItem`, `renderNoteItems`/`renderPurchaseItems`, 
+  `renderSerialsPanel`/`renderPurchaseSerialsPanel`).
+- **C4:** tag roto `<h-sm">` en `nota_detalle.html` eliminado.
+
+**Medios:**
+- **M1:** `descuento_global` ahora se aplica a los totales en las 4 
+  vistas/PDFs y en los templates de detalle con bloque condicional.
+- **M2:** labels "IVA (16%)" → "IVA:" en `ventas.html` y `compras.html`.
+- **M5:** botones `confirm-*-btn` deshabilitados + spinner durante el 
+  fetch; restaurados en `.then()`/`.catch()` para evitar doble-submit.
+- **M7:** variable muerta `iva_total_bs` eliminada de `services.py` 
+  (calculaba descuento doble sobre IVA en Bs y no se persistía).
+- **M8:** `total_bs_neto` alineado en `vista_detalle_nota` y 
+  `vista_detalle_compra` usando snapshots por-detalle 
+  (`factor_desc`, `cobertura`, `tasa_bcv`).
+
+**Bajos:**
+- **B1:** código muerto eliminado (`note-discount-usd`, 
+  `purchase-discount-usd`, `lastCorrelative`, `iva_porcentaje` 
+  duplicado). Balance HTML verificado 50/50, 53/53, 28/28, 29/29 divs 
+  y 1/1 sections en los templates tocados.
+- **B4:** guard `if (!r.ok)` + `.catch()` mejorado en `processSale` 
+  y `processPurchase`.
+
+### Internal (Refactors)
+
+- **Limpieza:** eliminados 9 archivos de debug temporales 
+  (`check_*.py`, `fix_*.py`, `add_tests.py`, `show_context.py`) y 
+  `__pycache__`.
+- **Defaults Decimal:** todos los `DecimalField` default corrregidos 
+  de float a `Decimal('...')`.
+
+### Documentation (Documentación)
+
+- CHANGELOG.md (este archivo) ampliado con 1.1.0.
+- `docs/PLAN.md` ampliado con Etapa N + matriz tests C20+.
+- `docs/ARQUITECTURA.md` actualizado con nuevos modelos, services, 
+  migraciones, tests (234 verdes) y patterns.
+- `docs/ADR.md` añade ADR-23 (Emisión NE/Factura), ADR-24 (snapshots
+  4 precios en DetalleNotaEntrega/DetalleDocumentoCompra extendidos),
+  ADR-25 (tokens de variables de precio) y ADR-26 (toolbar caret 
+  tracking sin servidor).
+- `docs/BACKLOG.md` marca completados los tickets de Compras y añade 
+  TICKET #14 Fichas de Artículos (4 tokens + toolbar).
+- `docs/OPERACION.md` añade sección "Tokens de variables de precio" 
+  + tabla de reemplazos.
+- `README.md` actualiza el conteo de tests a 234 y añade módulos de 
+  Ventas/Compras/Fichas en features.
+
+### Estadísticas de la iteración
+
+- 4 commits desde `712ba8c` (N1+N2) hasta `c470093` (Fichas + 
+  auditoría).
+- Tests: 213 → 234 (+21).
+- Migraciones: 0010, 0011 y 0012 añadidas (siguen siendo numeradas).
+- Nuevos snapshots: `tasa_mercado_aplicada` en NotaEntrega; 
+  `factor_cobertura_aplicado`, `tasa_bcv_aplicada` en DocumentoCompra.
+- Nuevas plantillas: `nota_detalle.html`, `compra_detalle.html` 
+  y ampliación de `ventas.html`, `compras.html`, `catalogo.html`, 
+  `articulos.html`.
+
+---
+
 ## [1.0.0] — 2026-07-10
 
 Primera entrega completa del sistema. 28 commits desde el arranque de 
