@@ -135,6 +135,21 @@
                         </div>
                         <div>
                             <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Mensaje de Cross-Selling</label>
+                            <!-- Toolbar de tokens de precio -->
+                            <div class="flex flex-wrap gap-1 mb-1.5" role="toolbar" aria-label="Insertar variable de precio">
+                                <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_USD]')"
+                                    class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition"
+                                    title="Precio en divisas (USD base)"><i class="fa-solid fa-dollar-sign"></i> USD</button>
+                                <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_BCV]')"
+                                    class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/50 transition"
+                                    title="Precio ajustado con factor de cobertura (USD)"><i class="fa-solid fa-shield-halved"></i> BCV</button>
+                                <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_BS_BASE]')"
+                                    class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 rounded-md hover:bg-sky-100 dark:hover:bg-sky-900/50 transition"
+                                    title="Precio en Bs. a tasa BCV (sin factor de cobertura)"><i class="fa-solid fa-bolt"></i> Bs.Base</button>
+                                <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_BS]')"
+                                    class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition"
+                                    title="Precio en Bs. con factor de cobertura aplicado"><i class="fa-solid fa-shield-halved"></i> Bs.Ajust.</button>
+                            </div>
                             <textarea id="form-p-cross" rows="3"
                                 placeholder="🔧 Producto (SKU) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)&#10;✔️ Característica clave."
                                 class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
@@ -143,10 +158,25 @@
 
                     <div>
                         <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Respuesta Rápida Completa (WhatsApp / Redes)</label>
+                        <!-- Toolbar de tokens de precio -->
+                        <div class="flex flex-wrap gap-1 mb-1.5" role="toolbar" aria-label="Insertar variable de precio">
+                            <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_USD]')"
+                                class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition"
+                                title="Precio en divisas (USD base)"><i class="fa-solid fa-dollar-sign"></i> USD</button>
+                            <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_BCV]')"
+                                class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/50 transition"
+                                title="Precio ajustado con factor de cobertura (USD)"><i class="fa-solid fa-shield-halved"></i> BCV</button>
+                            <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_BS_BASE]')"
+                                class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 rounded-md hover:bg-sky-100 dark:hover:bg-sky-900/50 transition"
+                                title="Precio en Bs. a tasa BCV (sin factor de cobertura)"><i class="fa-solid fa-bolt"></i> Bs.Base</button>
+                            <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_BS]')"
+                                class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition"
+                                title="Precio en Bs. con factor de cobertura aplicado"><i class="fa-solid fa-shield-halved"></i> Bs.Ajust.</button>
+                        </div>
                         <textarea id="form-p-quick" rows="4"
                             placeholder="Hola 👋&#10;Disponible Producto (SKU)&#10;Precio: $[PRECIO_USD] Divisas / $[PRECIO_BCV] BCV"
                             class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
-                        <p class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 leading-normal"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Usa las variables <strong>$[PRECIO_USD]</strong> y <strong>$[PRECIO_BCV]</strong> para que se reemplacen dinámicamente con las tasas cambiarias vigentes.</p>
+                        <p class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 leading-normal"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Usa los botones superiores para insertar variables: <strong>$[PRECIO_USD]</strong> (divisas), <strong>$[PRECIO_BCV]</strong> (USD con factor), <strong>$[PRECIO_BS_BASE]</strong> (Bs. a tasa BCV) y <strong>$[PRECIO_BS]</strong> (Bs. con cobertura). Se reemplazan dinámicamente al mostrar/copiar el mensaje.</p>
                     </div>
                 </div>
             </div>
@@ -256,6 +286,22 @@ function saveProduct() {
     .catch(err => {
         alert('Error de red: ' + err);
     });
+}
+
+// ── Inyección de token en posición del cursor (sobrescribe selección si existe) ──
+function injectToken(textareaId, token) {
+    const ta = document.getElementById(textareaId);
+    if (!ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+    const before = ta.value.substring(0, start);
+    const after = ta.value.substring(end);
+    ta.value = before + token + after;
+    const newPos = start + token.length;
+    ta.focus();
+    ta.setSelectionRange(newPos, newPos);
+    // Dispara evento input para frameworks que escuchan cambios
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
 }
 </script>
 {% endblock %}

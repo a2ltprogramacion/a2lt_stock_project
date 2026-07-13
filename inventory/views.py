@@ -274,11 +274,13 @@ def catalogo(request):
     for a in articulos_page:
         precio_usd = a.precio_divisa
         precio_usd_ajustado = (precio_usd * factor).quantize(Decimal('0.01'))
+        precio_bs_base = (precio_usd * tasa_bcv).quantize(Decimal('0.01'))
         precio_bs_bcv = (precio_usd_ajustado * tasa_bcv).quantize(Decimal('0.01'))
         articulos_con_precios.append({
             'articulo': a,
             'precio_divisa': a.precio_divisa,
             'precio_usd_ajustado': precio_usd_ajustado,
+            'precio_bs_base': precio_bs_base,
             'precio_bs_bcv': precio_bs_bcv,
         })
 
@@ -722,11 +724,16 @@ def vista_imprimir_nota(request, nota_id):
 def vista_detalle_nota(request, nota_id):
     """Muestra el detalle de una Nota de Entrega o Factura con botón de impresión."""
     from .models import NotaEntrega, ConfiguracionEmpresa
-    nota = get_object_or_404(NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa'), pk=nota_id)
+    empresa_id = request.session.get('empresa_id')
+    nota = get_object_or_404(
+        NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa'),
+        pk=nota_id, empresa_id=empresa_id
+    )
     detalles = nota.detalles.select_related('articulo').all()
     config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
 
-    # Pre-calcular totales de línea para el template
+    # Pre-calcular totales de línea para el template.
+    # Se aplica descuento_global del documento al subtotal y al IVA.
     detalles_con_totales = []
     total_usd = Decimal('0')
     total_bs = Decimal('0')
@@ -743,14 +750,29 @@ def vista_detalle_nota(request, nota_id):
         d.line_bs = line_bs
         detalles_con_totales.append(d)
 
+    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
+    descuento_global = nota.descuento_global or Decimal('0')
+    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
+    subtotal_usd_neto = (total_usd * factor_desc).quantize(Decimal('0.01'))
+    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
+    monto_descuento_usd = (total_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
+    # Total en Bs: cada detalle ya trae precio_ajustado_bcv (con factor + tasa_bcv),
+    # por lo tanto total_bs es el subtotal en Bs sin IVA ni descuento_global.
+    # El descuento_global se aplica proporcionalmente al subtotal_bs (sin IVA)
+    # y al IVA en Bs que ya viene computado sobre cada detalle.
+    total_iva_bs_neto = (total_iva_bs * factor_desc).quantize(Decimal('0.01'))
+    total_bs_neto = ((total_bs * factor_desc) + total_iva_bs_neto).quantize(Decimal('0.01'))
+
     context = {
         'nota': nota,
         'detalles': detalles_con_totales,
         'config': config,
-        'total_usd': total_usd,
-        'total_bs': total_bs,
-        'total_iva_usd': total_iva_usd,
-        'total_iva_bs': total_iva_bs,
+        'total_usd': subtotal_usd_neto,
+        'total_bs': total_bs_neto,
+        'total_iva_usd': total_iva_usd_neto,
+        'total_iva_bs': total_iva_bs_neto,
+        'monto_descuento_usd': monto_descuento_usd,
+        'descuento_global': descuento_global,
         'print_url': f'/ventas/{nota_id}/pdf/',
     }
     return render(request, 'inventory/nota_detalle.html', context)
@@ -768,7 +790,11 @@ def generar_pdf_nota(request, nota_id):
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
-    nota = get_object_or_404(NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa'), pk=nota_id)
+    empresa_id = request.session.get('empresa_id')
+    nota = get_object_or_404(
+        NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa'),
+        pk=nota_id, empresa_id=empresa_id
+    )
     detalles = nota.detalles.select_related('articulo').all()
     config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
 
@@ -841,15 +867,23 @@ def generar_pdf_nota(request, nota_id):
     subtotal_usd = sum(d.cantidad * d.precio_base for d in detalles)
     total_iva_usd = sum(d.iva_usd for d in detalles)
     total_iva_bs = sum(d.iva_bs for d in detalles)
-    total_bs = subtotal_usd * nota.tasa_bcv_aplicada + total_iva_bs
+    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
+    descuento_global = nota.descuento_global or Decimal('0')
+    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
+    subtotal_usd_neto = (subtotal_usd * factor_desc).quantize(Decimal('0.01'))
+    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
+    monto_descuento_usd = (subtotal_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
+    total_bs = subtotal_usd_neto * nota.tasa_bcv_aplicada + total_iva_bs
 
     story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
-    story.append(Paragraph(f"Total IVA USD: ${total_iva_usd:.2f}", right_style))
+    if monto_descuento_usd > 0:
+        story.append(Paragraph(f"Descuento ({descuento_global:.2f}%): -${monto_descuento_usd:.2f}", right_style))
+    story.append(Paragraph(f"Total IVA USD: ${total_iva_usd_neto:.2f}", right_style))
     story.append(Paragraph(f"Total IVA Bs: {total_iva_bs:.2f} Bs", right_style))
     story.append(Spacer(1, 2*mm))
     story.append(HRFlowable(width="40%", thickness=0.5, color=colors.black))
     story.append(Spacer(1, 2*mm))
-    story.append(Paragraph(f"TOTAL USD: ${subtotal_usd + total_iva_usd:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
+    story.append(Paragraph(f"TOTAL USD: ${subtotal_usd_neto + total_iva_usd_neto:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
     story.append(Paragraph(f"TOTAL Bs: {total_bs:.2f} Bs", ParagraphStyle('TotalBs', parent=styles['Heading3'], fontSize=10, alignment=TA_RIGHT)))
     story.append(Spacer(1, 5*mm))
 
@@ -868,11 +902,16 @@ def vista_detalle_compra(request, compra_id):
     """Muestra el detalle de una Factura de Compra con botón de impresión."""
     from .models import DocumentoCompra, ConfiguracionEmpresa
     from decimal import Decimal
-    documento = get_object_or_404(DocumentoCompra.objects.select_related('proveedor', 'almacen', 'empresa'), pk=compra_id)
-    detalles = documento.detalles.select_related('articulo').all()
+    empresa_id = request.session.get('empresa_id')
+    documento = get_object_or_404(
+        DocumentoCompra.objects.select_related('proveedor', 'empresa'),
+        pk=compra_id, empresa_id=empresa_id
+    )
+    detalles = documento.detalles.select_related('articulo', 'almacen').all()
     config = ConfiguracionEmpresa.objects.get(empresa=documento.empresa)
 
-    # Pre-calcular totales de línea para el template
+    # Pre-calcular totales de línea para el template.
+    # Se aplica descuento_global del documento al subtotal y al IVA.
     detalles_con_totales = []
     total_usd = Decimal('0')
     total_bs = Decimal('0')
@@ -889,14 +928,28 @@ def vista_detalle_compra(request, compra_id):
         d.line_bs = line_bs
         detalles_con_totales.append(d)
 
+    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
+    descuento_global = documento.descuento_global or Decimal('0')
+    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
+    subtotal_usd_neto = (total_usd * factor_desc).quantize(Decimal('0.01'))
+    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
+    monto_descuento_usd = (total_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
+    # Total en Bs: cada detalle ya trae costo_ajustado_bcv (con factor + tasa_bcv),
+    # por lo tanto total_bs es el subtotal en Bs sin IVA ni descuento_global.
+    # El descuento_global se aplica proporcionalmente al subtotal_bs y al IVA en Bs.
+    total_iva_bs_neto = (total_iva_bs * factor_desc).quantize(Decimal('0.01'))
+    total_bs_neto = ((total_bs * factor_desc) + total_iva_bs_neto).quantize(Decimal('0.01'))
+
     context = {
         'documento': documento,
         'detalles': detalles_con_totales,
         'config': config,
-        'total_usd': total_usd,
-        'total_bs': total_bs,
-        'total_iva_usd': total_iva_usd,
-        'total_iva_bs': total_iva_bs,
+        'total_usd': subtotal_usd_neto,
+        'total_bs': total_bs_neto,
+        'total_iva_usd': total_iva_usd_neto,
+        'total_iva_bs': total_iva_bs_neto,
+        'monto_descuento_usd': monto_descuento_usd,
+        'descuento_global': descuento_global,
         'print_url': f'/compras/{compra_id}/pdf/',
     }
     return render(request, 'inventory/compra_detalle.html', context)
@@ -914,8 +967,12 @@ def generar_pdf_compra(request, compra_id):
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
-    documento = get_object_or_404(DocumentoCompra.objects.select_related('proveedor', 'almacen', 'empresa'), pk=compra_id)
-    detalles = documento.detalles.select_related('articulo').all()
+    empresa_id = request.session.get('empresa_id')
+    documento = get_object_or_404(
+        DocumentoCompra.objects.select_related('proveedor', 'empresa'),
+        pk=compra_id, empresa_id=empresa_id
+    )
+    detalles = documento.detalles.select_related('articulo', 'almacen').all()
     config = ConfiguracionEmpresa.objects.get(empresa=documento.empresa)
 
     response = HttpResponse(content_type='application/pdf')
@@ -949,7 +1006,8 @@ def generar_pdf_compra(request, compra_id):
     story.append(Spacer(1, 5*mm))
 
     story.append(Paragraph(f"Proveedor: {documento.proveedor.nombre}  |  ID: {documento.proveedor.identificacion or 'N/A'}", normal_style))
-    story.append(Paragraph(f"Almacén: {documento.almacen.nombre}", normal_style))
+    almacen_nombre = detalles.first().almacen.nombre if detalles.exists() else 'N/A'
+    story.append(Paragraph(f"Almacén: {almacen_nombre}", normal_style))
     story.append(Spacer(1, 4*mm))
 
     table_data = [['SKU', 'Artículo', 'Alm.', 'Cant.', 'Costo $', 'Total $', 'IVA%', 'IVA $', 'Total IVA Bs']]
@@ -957,7 +1015,7 @@ def generar_pdf_compra(request, compra_id):
         table_data.append([
             d.articulo.sku,
             d.articulo.nombre[:28],
-            documento.almacen.nombre[:10],
+            d.almacen.nombre[:10],
             str(d.cantidad),
             f'{d.costo_base:.2f}',
             f'{(d.cantidad * d.costo_base):.2f}',
@@ -987,15 +1045,23 @@ def generar_pdf_compra(request, compra_id):
     subtotal_usd = sum(d.cantidad * d.costo_base for d in detalles)
     total_iva_usd = sum(d.iva_usd for d in detalles)
     total_iva_bs = sum(d.iva_bs for d in detalles)
-    total_bs = subtotal_usd * documento.tasa_bcv_aplicada + total_iva_bs
+    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
+    descuento_global = documento.descuento_global or Decimal('0')
+    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
+    subtotal_usd_neto = (subtotal_usd * factor_desc).quantize(Decimal('0.01'))
+    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
+    monto_descuento_usd = (subtotal_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
+    total_bs = subtotal_usd_neto * documento.tasa_bcv_aplicada + total_iva_bs
 
     story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
-    story.append(Paragraph(f"Total IVA USD: ${total_iva_usd:.2f}", right_style))
+    if monto_descuento_usd > 0:
+        story.append(Paragraph(f"Descuento ({descuento_global:.2f}%): -${monto_descuento_usd:.2f}", right_style))
+    story.append(Paragraph(f"Total IVA USD: ${total_iva_usd_neto:.2f}", right_style))
     story.append(Paragraph(f"Total IVA Bs: {total_iva_bs:.2f} Bs", right_style))
     story.append(Spacer(1, 2*mm))
     story.append(HRFlowable(width="40%", thickness=0.5, color=colors.black))
     story.append(Spacer(1, 2*mm))
-    story.append(Paragraph(f"TOTAL USD: ${subtotal_usd + total_iva_usd:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
+    story.append(Paragraph(f"TOTAL USD: ${subtotal_usd_neto + total_iva_usd_neto:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
     story.append(Paragraph(f"TOTAL Bs: {total_bs:.2f} Bs", ParagraphStyle('TotalBs', parent=styles['Heading3'], fontSize=10, alignment=TA_RIGHT)))
     story.append(Spacer(1, 5*mm))
 

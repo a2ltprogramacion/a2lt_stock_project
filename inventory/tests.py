@@ -107,7 +107,7 @@ class TestMovimientosBasicos(TestCase):
         self.empresa = crear_empresa()
         self.almacen = crear_almacen(self.empresa)
         self.articulo = crear_articulo_fisico(self.empresa)
-
+    
     # ── Test 1: ENTRADA incrementa el inventario correctamente ──────────────
 
     def test_entrada_incrementa_inventario(self):
@@ -136,7 +136,7 @@ class TestMovimientosBasicos(TestCase):
             almacen=self.almacen,
         )
         self.assertEqual(inv.cantidad_disponible, Decimal('10.00'))
-
+    
     def test_entrada_acumulativa(self):
         """
         Criterio: Dos entradas consecutivas acumulan el stock correctamente.
@@ -158,7 +158,7 @@ class TestMovimientosBasicos(TestCase):
         self.assertEqual(
             MovimientoKardex.objects.filter(articulo=self.articulo).count(), 2
         )
-
+    
     # ── Test 2: SALIDA decrementa el inventario correctamente ───────────────
 
     def test_salida_decrementa_inventario(self):
@@ -184,7 +184,7 @@ class TestMovimientosBasicos(TestCase):
             articulo=self.articulo, almacen=self.almacen,
         )
         self.assertEqual(inv.cantidad_disponible, Decimal('13.00'))
-
+    
     # ── Tests de validación de parámetros ───────────────────────────────────
 
     def test_tipo_invalido_lanza_error(self):
@@ -194,7 +194,7 @@ class TestMovimientosBasicos(TestCase):
                 articulo=self.articulo, almacen=self.almacen,
                 tipo='TRANSFERENCIA', cantidad=5, concepto='COMPRA',
             )
-
+    
     def test_cantidad_negativa_lanza_error(self):
         """Una cantidad negativa o cero debe lanzar ValueError."""
         with self.assertRaises(ValueError):
@@ -202,7 +202,7 @@ class TestMovimientosBasicos(TestCase):
                 articulo=self.articulo, almacen=self.almacen,
                 tipo='ENTRADA', cantidad=Decimal('-5.00'), concepto='COMPRA',
             )
-
+    
     def test_combo_en_registrar_movimiento_lanza_error(self):
         """registrar_movimiento no debe aceptar artículos tipo COMBO."""
         combo = crear_combo(self.empresa)
@@ -231,7 +231,7 @@ class TestRollbackAtomico(TransactionTestCase):
         self.empresa = crear_empresa()
         self.almacen = crear_almacen(self.empresa)
         self.articulo = crear_articulo_fisico(self.empresa)
-
+    
     # ── Test 3: Stock insuficiente → excepción + rollback absoluto ───────────
 
     def test_salida_insuficiente_hace_rollback_total(self):
@@ -277,7 +277,7 @@ class TestRollbackAtomico(TransactionTestCase):
             kardex_despues,
             msg="El rollback falló: se creó un registro en el Kárdex sin stock real.",
         )
-
+    
     def test_salida_sin_inventario_previo_lanza_error(self):
         """
         SALIDA sobre un artículo sin inventario en ese almacén debe fallar.
@@ -333,7 +333,7 @@ class TestComboDinamico(TestCase):
             componente=self.panel,
             cantidad_requerida=Decimal('2.00'),
         )
-
+    
     # ── Test 4: Stock del combo = min(floor(S/q)) ────────────────────────────
 
     def test_stock_combo_formula_min_floor(self):
@@ -352,7 +352,7 @@ class TestComboDinamico(TestCase):
         # Verificación por el método del modelo (delega a services)
         stock_modelo = self.combo.get_stock_disponible(almacen=self.almacen)
         self.assertEqual(stock_modelo, 2)
-
+    
     # ── Test 5: Combo = 0 si algún componente es cero ───────────────────────
 
     def test_stock_combo_cero_si_componente_sin_stock(self):
@@ -364,7 +364,7 @@ class TestComboDinamico(TestCase):
 
         stock = svc.calcular_stock_combo(self.combo, self.almacen)
         self.assertEqual(stock, 0)
-
+    
     def test_stock_combo_actualiza_en_tiempo_real(self):
         """
         El stock del combo se recalcula correctamente cuando el inventario
@@ -387,14 +387,14 @@ class TestComboDinamico(TestCase):
 
         # Después: combo = 0
         self.assertEqual(svc.calcular_stock_combo(self.combo, self.almacen), 0)
-
+    
     def test_combo_sin_almacen_retorna_cero(self):
         """
         get_stock_disponible() sin almacén en un COMBO debe retornar 0.
         """
         stock = self.combo.get_stock_disponible(almacen=None)
         self.assertEqual(stock, 0)
-
+    
     # ── Test 6: Desagregación atómica de combos en venta ────────────────────
 
     def test_desagregacion_combo_descuenta_componentes_atomicamente(self):
@@ -432,7 +432,7 @@ class TestComboDinamico(TestCase):
         # Stock del combo después de la venta
         stock_post_venta = svc.calcular_stock_combo(self.combo, self.almacen)
         self.assertEqual(stock_post_venta, 0)
-
+    
     def test_desagregacion_combo_insuficiente_hace_rollback(self):
         """
         Si no hay suficiente stock para armar la cantidad de combos pedida,
@@ -472,7 +472,7 @@ def _crear_excel_bytes(filas: list, cabecera=None) -> 'io.BytesIO':
     Args:
         filas: Lista de tuplas con los valores de cada fila de datos.
         cabecera: Tupla con los encabezados (default: contrato ADR-13).
-
+    
     Returns:
         io.BytesIO listo para ser pasado a procesar_carga_masiva().
     """
@@ -481,13 +481,13 @@ def _crear_excel_bytes(filas: list, cabecera=None) -> 'io.BytesIO':
 
     if cabecera is None:
         cabecera = ('SKU', 'Nombre', 'Costo', 'Cantidad', 'Precio_Divisa', 'Almacen')
-
+    
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(cabecera)
     for fila in filas:
         ws.append(fila)
-
+    
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
@@ -507,7 +507,7 @@ class TestCargaMasivaBasica(TestCase):
     def setUp(self):
         self.empresa = crear_empresa()
         self.almacen = crear_almacen(self.empresa, nombre='Almacén Principal', es_principal=True)
-
+    
     # ── Test 1: Importación exitosa de filas limpias ─────────────────────────
 
     def test_importacion_filas_limpias(self):
@@ -548,7 +548,7 @@ class TestCargaMasivaBasica(TestCase):
         # El reporte .txt debe existir y tener contenido
         self.assertIn('REPORTE DE CARGA MASIVA', resultado['reporte_txt'])
         self.assertIn(resultado['lote_id'], resultado['reporte_txt'])
-
+    
     # ── Test 2: Artículo nuevo con cantidad genera movimiento en Kárdex ──────
 
     def test_articulo_nuevo_con_cantidad_registra_kardex(self):
@@ -582,7 +582,7 @@ class TestCargaMasivaBasica(TestCase):
         self.assertEqual(movimiento.tipo, 'ENTRADA')
         self.assertEqual(movimiento.concepto, 'CARGA_MASIVA_SUMA')
         self.assertEqual(movimiento.lote_carga, resultado['lote_id'])
-
+    
     # ── Test 3: Filas con error son aisladas, no abortan el proceso ──────────
 
     def test_error_en_fila_no_aborta_procesamiento(self):
@@ -622,7 +622,7 @@ class TestCargaMasivaBasica(TestCase):
 
         # El reporte contiene los errores
         self.assertIn('ERRORES DETECTADOS', resultado['reporte_txt'])
-
+    
     # ── Test 4: SKU existente sin cantidad → actualización silenciosa ─────────
 
     def test_sku_existente_sin_cantidad_actualiza_silenciosamente(self):
@@ -658,7 +658,7 @@ class TestCargaMasivaBasica(TestCase):
         # No se debe haber creado ningún movimiento en el Kárdex
         movimientos = MovimientoKardex.objects.filter(articulo=articulo_previo)
         self.assertEqual(movimientos.count(), 0)
-
+    
     # ── Test 5: SKU existente con cantidad → colisión detectada ──────────────
 
     def test_sku_existente_con_cantidad_genera_colision(self):
@@ -691,7 +691,7 @@ class TestCargaMasivaBasica(TestCase):
         # Stock físico INTACTO
         inv = InventarioAlmacen.objects.get(articulo=articulo, almacen=self.almacen)
         self.assertEqual(inv.cantidad_disponible, Decimal('20.00'))
-
+    
     # ── Test 6: Rechazo de formato .xls (ADR-10) ─────────────────────────────
 
     def test_archivo_xls_es_rechazado(self):
@@ -712,7 +712,7 @@ class TestCargaMasivaBasica(TestCase):
             )
         self.assertIn('.xls', str(ctx.exception).lower())
         self.assertIn('.xlsx', str(ctx.exception))
-
+    
     # ── Test 7: Advertencia por nombre duplicado en artículo nuevo ───────────
 
     def test_articulo_nuevo_nombre_duplicado_genera_advertencia(self):
@@ -761,7 +761,7 @@ class TestResolverColision(TestCase):
         self.articulo = crear_articulo_fisico(self.empresa, sku='RES-001', nombre='Artículo Resolución')
         seed_inventario(self.articulo, self.almacen, cantidad=20)
         self.lote_id = 'test-lote-uuid-1234'
-
+    
     # ── Test 8: SUMAR → incrementa stock y registra una entrada ─────────────
 
     def test_resolver_sumar_incrementa_stock_exactamente(self):
@@ -794,7 +794,7 @@ class TestResolverColision(TestCase):
         self.assertEqual(movimiento.cantidad, Decimal('8.00'))
         self.assertEqual(movimiento.saldo_resultante, Decimal('28.00'))
         self.assertEqual(movimiento.lote_carga, self.lote_id)
-
+    
     # ── Test 9: SUSTITUIR → dos movimientos atómicos en el Kárdex ───────────
 
     def test_resolver_sustituir_genera_dos_movimientos_en_kardex(self):
@@ -837,7 +837,7 @@ class TestResolverColision(TestCase):
         self.assertEqual(movimientos[1].concepto, 'CARGA_MASIVA_SUSTITUCION_ENTRADA')
         self.assertEqual(movimientos[1].cantidad, Decimal('15.00'))  # nuevo valor
         self.assertEqual(movimientos[1].saldo_resultante, Decimal('15.00'))
-
+    
     def test_resolver_sustituir_sin_stock_previo_solo_genera_entrada(self):
         """
         SUSTITUIR sobre artículo sin stock → solo 1 movimiento: ENTRADA.
@@ -858,7 +858,7 @@ class TestResolverColision(TestCase):
         movimiento = MovimientoKardex.objects.get(pk=resultado['movimientos'][0])
         self.assertEqual(movimiento.tipo, 'ENTRADA')
         self.assertEqual(movimiento.cantidad, Decimal('10.00'))
-
+    
     # ── Test 10: CANCELAR → stock intacto, sin movimientos ──────────────────
 
     def test_resolver_cancelar_no_modifica_inventario(self):
@@ -886,7 +886,7 @@ class TestResolverColision(TestCase):
         self.assertEqual(
             MovimientoKardex.objects.filter(articulo=self.articulo).count(), 0
         )
-
+    
     def test_decision_invalida_lanza_error(self):
         """Una decisión distinta a SUMAR/SUSTITUIR/CANCELAR debe lanzar ValueError."""
         with self.assertRaises(ValueError) as ctx:
@@ -923,11 +923,10 @@ class TestVentaExitosa(TestCase):
         # Combo
         self.teclado = Articulo.objects.create(empresa=self.empresa, nombre='Teclado Mecánico', sku='T-001', tipo='FISICO', categoria='OTROS', costo=Decimal('30.00'), precio_divisa=Decimal('50.00'))
         svc.registrar_movimiento(self.teclado, self.almacen, 'ENTRADA', Decimal('5'), 'Inventario Inicial')
-        
         self.combo_pc = Articulo.objects.create(empresa=self.empresa, nombre='Combo PC Master', sku='C-001', tipo='COMBO', categoria='OTROS', costo=Decimal('0.00'), precio_divisa=Decimal('65.00'))
         RecetaCombo.objects.create(combo=self.combo_pc, componente=self.mouse, cantidad_requerida=Decimal('1'))
         RecetaCombo.objects.create(combo=self.combo_pc, componente=self.teclado, cantidad_requerida=Decimal('1'))
-
+    
     def test_emision_nota_fisico_inmutabilidad(self):
         """Venta de físico descuenta stock físico y graba precios fijos según tasa."""
         items = [{
@@ -949,7 +948,7 @@ class TestVentaExitosa(TestCase):
         # 3. Kárdex descontó físico
         stock_mouse = self.mouse.get_stock_disponible(self.almacen)
         self.assertEqual(stock_mouse, Decimal('8'))  # 10 - 2
-
+    
     def test_emision_nota_combo(self):
         """Venta de combo descuenta componentes físicos atómicamente."""
         items = [{
@@ -979,7 +978,7 @@ class TestVentaRollback(TransactionTestCase):
 
         self.funda = Articulo.objects.create(empresa=self.empresa, nombre='Funda', sku='F-001', tipo='FISICO', categoria='OTROS', costo=Decimal('5.00'), precio_divisa=Decimal('20.00'))
         svc.registrar_movimiento(self.funda, self.almacen, 'ENTRADA', Decimal('10'), 'Init')
-
+    
     def test_rollback_por_falta_stock(self):
         """Si un solo artículo del carrito no tiene stock, NADA se descuenta ni se crea Nota."""
         # Carrito: Pide 1 funda (hay 10) y 5 laptops (solo hay 2)
@@ -994,10 +993,8 @@ class TestVentaRollback(TransactionTestCase):
         # VALIDACIÓN DEL ROLLBACK
         # 1. No se creó ninguna nota de entrega
         self.assertEqual(NotaEntrega.objects.count(), 0)
-        
         # 2. Las fundas quedaron intactas (no se descontó la 1 que sí alcanzaba)
         self.assertEqual(self.funda.get_stock_disponible(self.almacen), Decimal('10'))
-        
         # 3. Las laptops quedaron intactas
         self.assertEqual(self.laptop.get_stock_disponible(self.almacen), Decimal('2'))
 
@@ -1011,7 +1008,6 @@ import requests
 from .models import ConfiguracionEmpresa, AuditoriaTasa
 
 class TestSincronizacionTasas(TestCase):
-    
     def setUp(self):
         self.empresa = crear_empresa()
         self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
@@ -1021,7 +1017,6 @@ class TestSincronizacionTasas(TestCase):
         self.config.http_method = 'GET'
         self.config.response_selector = 'data.tasa_paralela'
         self.config.save()
-        
     @patch('requests.request')
     def test_sincronizacion_exitosa(self, mock_request):
         # Configurar la respuesta simulada
@@ -1032,41 +1027,34 @@ class TestSincronizacionTasas(TestCase):
                 'tasa_paralela': 50.00
             }
         }
-        
         from inventory.services import sincronizar_tasa_cambio
         resultado = sincronizar_tasa_cambio()
-        
         # Validación de respuesta
         self.assertTrue(resultado['ok'])
         self.assertEqual(resultado['tasa_mercado'], 50.0)
         self.assertEqual(resultado['factor_cobertura'], 1.25) # 50 / 40
-        
         # Validación en BD
         self.config.refresh_from_db()
         self.assertEqual(self.config.tasa_mercado, Decimal('50.0000'))
         self.assertEqual(self.config.factor_cobertura, Decimal('1.2500'))
-        
         # Validación del histórico
         auditoria = AuditoriaTasa.objects.last()
         self.assertEqual(auditoria.fuente, 'API')
         self.assertEqual(auditoria.tasa_mercado, Decimal('50.0000'))
         self.assertEqual(auditoria.factor_cobertura, Decimal('1.2500'))
-
+    
     @patch('requests.request')
     def test_sincronizacion_timeout(self, mock_request):
         # Simular Timeout
         mock_request.side_effect = requests.exceptions.Timeout("Timeout")
-        
         from inventory.services import sincronizar_tasa_cambio
         resultado = sincronizar_tasa_cambio()
-        
         self.assertFalse(resultado['ok'])
         self.assertIn('Tiempo de espera agotado', resultado['error'])
-        
         # Tasa no debe haber cambiado, sigue siendo la calculada inicial (40.0)
         self.config.refresh_from_db()
         self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
-
+    
     @patch('requests.request')
     def test_sincronizacion_selector_invalido(self, mock_request):
         mock_response = mock_request.return_value
@@ -1076,13 +1064,10 @@ class TestSincronizacionTasas(TestCase):
                 'tasa_distinta': 50.00
             }
         }
-        
         from inventory.services import sincronizar_tasa_cambio
         resultado = sincronizar_tasa_cambio()
-        
         self.assertFalse(resultado['ok'])
         self.assertIn('No se pudo encontrar la ruta', resultado['error'])
-        
         # Tasa no debe haber cambiado, sigue siendo la calculada inicial (40.0)
         self.config.refresh_from_db()
         self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
@@ -1103,12 +1088,9 @@ class TestReversoLoteCargaMasiva(TransactionTestCase):
         self.almacen = Almacen.objects.create(empresa=self.empresa, nombre="Almacén Principal", es_principal=True)
         self.articulo1 = Articulo.objects.create(empresa=self.empresa, sku="PROD-01", nombre="Producto 1", tipo="FISICO", costo=Decimal('10.00'))
         self.articulo2 = Articulo.objects.create(empresa=self.empresa, sku="PROD-02", nombre="Producto 2", tipo="FISICO", costo=Decimal('20.00'))
-        
         self.lote_id = str(uuid.uuid4())
-        
         # Simular una carga masiva
         from inventory.services import registrar_movimiento
-        
         registrar_movimiento(
             articulo=self.articulo1,
             almacen=self.almacen,
@@ -1125,22 +1107,19 @@ class TestReversoLoteCargaMasiva(TransactionTestCase):
             concepto='CARGA_MASIVA_SUMA',
             lote_carga=self.lote_id
         )
-
+    
     def test_reverso_exitoso(self):
         # El stock inicial tras la carga debe ser 100 y 50
         self.assertEqual(self.articulo1.get_stock_disponible(self.almacen), Decimal('100.00'))
         self.assertEqual(self.articulo2.get_stock_disponible(self.almacen), Decimal('50.00'))
-        
         from inventory.services import revertir_carga_masiva
         resultado = revertir_carga_masiva(self.lote_id, "admin")
-        
         self.assertTrue(resultado['ok'])
         self.assertEqual(resultado['reversos_ejecutados'], 2)
-        
         # El stock debe haber vuelto a 0
         self.assertEqual(self.articulo1.get_stock_disponible(self.almacen), Decimal('0.00'))
         self.assertEqual(self.articulo2.get_stock_disponible(self.almacen), Decimal('0.00'))
-
+    
     def test_reverso_bloqueado_por_salida_posterior(self):
         # Simulamos una salida posterior de PROD-01
         from inventory.services import registrar_movimiento
@@ -1151,18 +1130,13 @@ class TestReversoLoteCargaMasiva(TransactionTestCase):
             cantidad=Decimal('5.00'),
             concepto='VENTA'
         )
-        
         # El stock de PROD-01 es 95
         self.assertEqual(self.articulo1.get_stock_disponible(self.almacen), Decimal('95.00'))
-        
         from inventory.services import revertir_carga_masiva
-        
         with self.assertRaises(ValidationError) as context:
             revertir_carga_masiva(self.lote_id, "admin")
-            
         self.assertIn("El reverso fue bloqueado por seguridad contable", str(context.exception))
         self.assertIn("PROD-01", str(context.exception))
-        
         # El stock no debió alterarse tras el intento fallido (rollback implícito porque falló antes de db ops,
         # pero comprobamos que no se ejecutaron salidas extra)
         self.assertEqual(self.articulo1.get_stock_disponible(self.almacen), Decimal('95.00'))
@@ -1184,53 +1158,46 @@ class TestMovimientosYajustes(TransactionTestCase):
         self.almacen_origen = crear_almacen(self.empresa, nombre='Origen')
         self.almacen_destino = crear_almacen(self.empresa, nombre='Destino', es_principal=False)
         self.articulo = crear_articulo_fisico(self.empresa, sku='PROD-MOV', nombre='Producto Movible')
-        
         from inventory.services import registrar_movimiento
         registrar_movimiento(self.articulo, self.almacen_origen, 'ENTRADA', Decimal('100.00'), 'Stock Inicial Origen')
-
+    
     def test_transferencia_exitosa(self):
         """Descuenta del origen, incrementa destino y genera 2 registros en Kárdex."""
         from inventory.services import transferir_mercancia
         resultado = transferir_mercancia('PROD-MOV', self.almacen_origen.pk, self.almacen_destino.pk, Decimal('30.00'), 'Admin')
-        
         self.assertTrue(resultado['ok'])
-        
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen_origen), Decimal('70.00'))
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen_destino), Decimal('30.00'))
-        
         from inventory.models import MovimientoKardex
         movs = MovimientoKardex.objects.filter(articulo=self.articulo, tipo__in=['ENTRADA', 'SALIDA']).order_by('-id')[:2]
         self.assertEqual(movs[0].tipo, 'ENTRADA')
         self.assertEqual(movs[0].almacen, self.almacen_destino)
         self.assertEqual(movs[1].tipo, 'SALIDA')
         self.assertEqual(movs[1].almacen, self.almacen_origen)
-
+    
     def test_transferencia_bloqueada_sin_stock(self):
         """Bloquea operación y hace rollback si origen no tiene stock suficiente."""
         from inventory.services import transferir_mercancia
         with self.assertRaises(ValueError):
             transferir_mercancia('PROD-MOV', self.almacen_origen.pk, self.almacen_destino.pk, Decimal('150.00'), 'Admin')
-        
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen_origen), Decimal('100.00'))
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen_destino), Decimal('0.00'))
-
+    
     def test_ajuste_manual_positivo(self):
         """Ajuste manual recalcula y asienta diferencia de stock de forma correcta (Suma)."""
         from inventory.services import ejecutar_ajuste_manual
         ejecutar_ajuste_manual('PROD-MOV', self.almacen_origen.pk, Decimal('120.00'), 'Cuadre Físico+')
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen_origen), Decimal('120.00'))
-        
         from inventory.models import MovimientoKardex
         mov = MovimientoKardex.objects.filter(articulo=self.articulo, almacen=self.almacen_origen).order_by('-id').first()
         self.assertEqual(mov.tipo, 'ENTRADA')
         self.assertEqual(mov.cantidad, Decimal('20.00'))
-
+    
     def test_ajuste_manual_negativo(self):
         """Ajuste manual recalcula y asienta diferencia de stock de forma correcta (Resta)."""
         from inventory.services import ejecutar_ajuste_manual
         ejecutar_ajuste_manual('PROD-MOV', self.almacen_origen.pk, Decimal('90.00'), 'Cuadre Físico-')
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen_origen), Decimal('90.00'))
-        
         from inventory.models import MovimientoKardex
         mov = MovimientoKardex.objects.filter(articulo=self.articulo, almacen=self.almacen_origen).order_by('-id').first()
         self.assertEqual(mov.tipo, 'SALIDA')
@@ -1268,7 +1235,7 @@ class TestControlCostosYCompras(TransactionTestCase):
             rif='J-12345678-9',
             nombre_asesor='Juan Perez'
         )
-
+    
     def test_registrar_compra_actualiza_costo_y_precio(self):
         """La compra actualiza el costo base y recalcula el precio para mantener el margen."""
         from inventory.services import registrar_compra_proveedor
@@ -1288,13 +1255,12 @@ class TestControlCostosYCompras(TransactionTestCase):
         self.assertEqual(self.articulo.costo, Decimal('20.00'))
         self.assertEqual(self.articulo.precio_divisa, Decimal('28.57'))
         self.assertEqual(self.articulo.get_stock_disponible(self.almacen), Decimal('50.00'))
-        
         from inventory.models import MovimientoKardex
         mov = MovimientoKardex.objects.filter(articulo=self.articulo).order_by('-id').first()
         self.assertEqual(mov.tipo, 'ENTRADA')
         self.assertEqual(mov.cantidad, Decimal('50.00'))
         self.assertEqual(mov.concepto, 'COMPRA')
-
+    
     def test_validacion_proveedor_rif_y_asesor_vista(self):
         """La vista de contactos bloquea la creación de un proveedor sin RIF o asesor.
 
@@ -1395,12 +1361,10 @@ class TestDashboardMetricas(TestCase):
         from inventory.services import registrar_movimiento
         # A1: Stock=5, Costo=10.00 -> Valoracion = 50.00
         registrar_movimiento(self.articulo1, self.almacen, 'ENTRADA', Decimal('5.00'), 'Stock Inicial')
-        
         # A2: Stock=10, Costo=20.00 -> Valoracion = 200.00
         registrar_movimiento(self.articulo2, self.almacen, 'ENTRADA', Decimal('10.00'), 'Stock Inicial')
-        
         # Total valoracion esperada: 250.00
-
+    
     def test_valoracion_total_inventario(self):
         """La valoración total responde con precisión matemática a la sumatoria agregada.
 
@@ -1437,7 +1401,7 @@ class TestDashboardMetricas(TestCase):
                 f"{response.context['valoracion_total']}"
             )
         )
-
+    
     def test_motor_alertas_stock_minimo(self):
         """El motor de alertas incluye artículo en riesgo si stock cae por debajo del mínimo.
 
@@ -1496,24 +1460,19 @@ class TestOptimizacionIndices(TestCase):
     def test_indices_articulo_existen(self):
         """Certifica que el modelo Articulo tenga los índices estructurales aplicados."""
         from inventory.models import Articulo
-        
         # Obtenemos los índices definidos en la clase Meta del modelo
         indexes = Articulo._meta.indexes
-        
         # Validar existencia de idx_articulo_sku_activo
         idx_sku_activo = [idx for idx in indexes if idx.fields == ['sku', 'activo'] or idx.fields == ('sku', 'activo')]
         self.assertTrue(idx_sku_activo, "Falta el índice compuesto ['sku', 'activo'] en Articulo.")
-        
         # Validar existencia de idx_articulo_nombre
         idx_nombre = [idx for idx in indexes if idx.fields == ['nombre'] or idx.fields == ('nombre',)]
         self.assertTrue(idx_nombre, "Falta el índice de texto ['nombre'] en Articulo.")
-
+    
     def test_indice_inventario_almacen_existe(self):
         """Certifica que InventarioAlmacen cuente con el índice para optimizar select_for_update."""
         from inventory.models import InventarioAlmacen
-        
         indexes = InventarioAlmacen._meta.indexes
-        
         idx_art_alm = [idx for idx in indexes if idx.fields == ['articulo', 'almacen'] or idx.fields == ('articulo', 'almacen')]
         self.assertTrue(idx_art_alm, "Falta el índice compuesto ['articulo', 'almacen'] en InventarioAlmacen.")
 
@@ -1529,7 +1488,6 @@ class TestImpresionParametrizada(TestCase):
         self.almacen = crear_almacen(self.empresa, nombre='Almacen Impresion')
 
         self.articulo = crear_articulo_fisico(self.empresa, sku='PROD-PRINT', nombre='Articulo Print')
-        
         self.cliente = Contacto.objects.create(
             empresa=self.empresa,
             identificacion='V-PRINT',
@@ -1544,7 +1502,6 @@ class TestImpresionParametrizada(TestCase):
             estado='CONFIRMADA',
             factor_cobertura_aplicado=Decimal('1.00')
         )
-        
         self.detalle = DetalleNotaEntrega.objects.create(
             nota_entrega=self.nota,
             articulo=self.articulo,
@@ -1552,19 +1509,18 @@ class TestImpresionParametrizada(TestCase):
             precio_base=Decimal('15.00'),
             precio_ajustado_bcv=Decimal('600.00')
         )
-
+    
     def test_persistencia_coordenadas_dimensionales(self):
         """Los campos dimensionales aceptan valores decimales y persisten en la BD."""
         self.config.print_offset_x = Decimal('12.50')
         self.config.print_offset_y = Decimal('5.25')
         self.config.print_row_spacing = Decimal('7.00')
         self.config.save()
-        
         self.config.refresh_from_db()
         self.assertEqual(self.config.print_offset_x, Decimal('12.50'))
         self.assertEqual(self.config.print_offset_y, Decimal('5.25'))
         self.assertEqual(self.config.print_row_spacing, Decimal('7.00'))
-
+    
     def test_vista_impresion_renderizado(self):
         """La vista de impresión carga el contexto relacional sin lanzar excepciones.
 
@@ -1607,14 +1563,11 @@ class TestExportacionLogicaSaaS(TestCase):
         self.empresa1 = crear_empresa(nombre='Tenant Uno', rif='J-TENANT-1')
         self.almacen1 = crear_almacen(self.empresa1, nombre='Almacen T1')
         self.articulo1 = crear_articulo_fisico(self.empresa1, sku='ART-T1', nombre='Articulo T1')
-        
         from inventory.services import registrar_movimiento
         from django.utils import timezone
         from datetime import timedelta
-        
         # Movimiento reciente en Tenant 1
         mov1_reciente = registrar_movimiento(self.articulo1, self.almacen1, 'ENTRADA', Decimal('10'), 'AJUSTE_ENTRADA', usuario='Admin')
-        
         # Movimiento viejo en Tenant 1 (hace 8 meses, fuera del scope de 6 meses)
         # Hackeamos la fecha del movimiento viejo
         import random
@@ -1631,36 +1584,30 @@ class TestExportacionLogicaSaaS(TestCase):
             lote_carga=f"TEST-{random.randint(1000, 9999)}"
         )
         MovimientoKardex.objects.filter(pk=mov_viejo.pk).update(fecha_hora=timezone.now() - timedelta(days=30 * 8))
-        
         # Tenant 2 (Ruido que NO debe salir en el backup del Tenant 1)
         self.empresa2 = crear_empresa(nombre='Tenant Dos', rif='J-TENANT-2')
         self.almacen2 = crear_almacen(self.empresa2, nombre='Almacen T2')
         self.articulo2 = crear_articulo_fisico(self.empresa2, sku='ART-T2', nombre='Articulo T2')
         registrar_movimiento(self.articulo2, self.almacen2, 'ENTRADA', Decimal('20'), 'AJUSTE_ENTRADA', usuario='Admin')
-
+    
     def test_exportacion_aislada_por_tenant(self):
         """El JSON generado contiene las estructuras de datos correctas de la empresa activa sin incluir a otros."""
         from inventory.services import exportar_datos_tenant
-        
         payload = exportar_datos_tenant(empresa_id=self.empresa1.pk, meses_historico=6)
-        
         self.assertEqual(payload['metadata']['empresa_rif'], 'J-TENANT-1')
-        
         # Solo debe haber un artículo, un almacén y un movimiento reciente exportado (aislado)
         self.assertEqual(len(payload['data']['articulos']), 1)
         self.assertEqual(payload['data']['articulos'][0]['sku'], 'ART-T1')
-        
         self.assertEqual(len(payload['data']['almacenes']), 2)
         # Check that T2 is not present, one of them must be T1
         nombres_almacenes = [a['nombre'] for a in payload['data']['almacenes']]
         self.assertIn('Almacen T1', nombres_almacenes)
         self.assertNotIn('Almacen T2', nombres_almacenes)
-        
         # Debe truncar el Kárdex viejo
         movimientos = payload['data']['movimientos_kardex']
         self.assertEqual(len(movimientos), 1, "Debe haber solo 1 movimiento, omitiendo el de hace 8 meses y los del T2.")
         self.assertEqual(movimientos[0]['concepto'], 'AJUSTE_ENTRADA')
-
+    
     def test_vista_descarga_backup(self):
         """El controlador web entrega el JSON con content_type application/json.
 
@@ -1702,82 +1649,66 @@ class TestControlDeSerialesPOS(TransactionTestCase):
         from inventory.models import ConfiguracionEmpresa
         self.empresa = crear_empresa(nombre='Tech Store SaaS', rif='J-TECH-001')
         ConfiguracionEmpresa.objects.filter(empresa=self.empresa).update(tasa_bcv=Decimal('36.50'))
-        
         self.almacen = crear_almacen(self.empresa, nombre='Tienda Central')
-        
         # Artículo normal
         self.mouse = crear_articulo_fisico(self.empresa, sku='M-01', nombre='Mouse Básico')
         seed_inventario(self.mouse, self.almacen, cantidad=10)
-        
         # Artículo con Serial (Smartphone)
         self.phone = crear_articulo_fisico(self.empresa, sku='P-01', nombre='Smartphone X')
         self.phone.usa_serial = True
         self.phone.save()
         seed_inventario(self.phone, self.almacen, cantidad=3)
-        
         # Crear 3 seriales físicos
         SerialArticulo.objects.create(empresa=self.empresa, articulo=self.phone, almacen=self.almacen, serial='IMEI-111')
         SerialArticulo.objects.create(empresa=self.empresa, articulo=self.phone, almacen=self.almacen, serial='IMEI-222')
         self.serial3 = SerialArticulo.objects.create(empresa=self.empresa, articulo=self.phone, almacen=self.almacen, serial='IMEI-333')
-
+    
     def test_venta_exitosa_con_seriales(self):
         """Validar que una venta quema correctamente los seriales enviados en el payload."""
         from inventory.services import procesar_venta
-        
         lista_items = [
             {'articulo_sku': 'M-01', 'cantidad': 2, 'precio_unitario_usd': 5.0, 'seriales': []},
             {'articulo_sku': 'P-01', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-111', 'IMEI-222']}
         ]
-        
         nota = procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
-        
         # Verificamos detalle
         detalle_phone = DetalleNotaEntrega.objects.get(nota_entrega=nota, articulo=self.phone)
         self.assertEqual(detalle_phone.cantidad, 2)
-        
         # Verificamos seriales quemados
         seriales_quemados = SerialArticulo.objects.filter(detalle_nota=detalle_phone, estado='VENDIDO')
         self.assertEqual(seriales_quemados.count(), 2)
         self.assertIn('IMEI-111', [s.serial for s in seriales_quemados])
-        
         # El 333 debe seguir disponible
         self.serial3.refresh_from_db()
         self.assertEqual(self.serial3.estado, 'DISPONIBLE')
         self.assertIsNone(self.serial3.detalle_nota)
-
+    
     def test_error_por_cantidad_discordante_de_seriales(self):
         """Si envío 2 seriales pero compro 3, o viceversa, debe abortar."""
         from inventory.services import procesar_venta
-        
         lista_items = [
             {'articulo_sku': 'P-01', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-111']} # Falta 1
         ]
-        
         with self.assertRaisesMessage(ValueError, "requiere exactamente 2 seriales"):
             procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
-            
         # El serial 111 NO debió quemarse
         s = SerialArticulo.objects.get(serial='IMEI-111')
         self.assertEqual(s.estado, 'DISPONIBLE')
-
+    
     def test_error_race_condition_serial_ya_vendido(self):
         """Si un serial fue vendido milisegundos antes en otra tx, el select_for_update + estado debe bloquearlo."""
         from inventory.services import procesar_venta
-        
         # Simulamos que alguien más vendió el IMEI-222
         SerialArticulo.objects.filter(serial='IMEI-222').update(estado='VENDIDO')
-        
         lista_items = [
             {'articulo_sku': 'P-01', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-111', 'IMEI-222']}
         ]
-        
         with self.assertRaisesMessage(ValueError, "ya no está DISPONIBLE"):
             procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
-            
         # El 111 queda a salvo
         s = SerialArticulo.objects.get(serial='IMEI-111')
         self.assertEqual(s.estado, 'DISPONIBLE')
-
+    
     def test_vista_ajax_buca_seriales_filtrados_por_almacen(self):
         """El endpoint debe devolver solo los DISPONIBLES de ese almacén.
 
@@ -1837,27 +1768,22 @@ class TestNotasDeCreditoPOS(TransactionTestCase):
     def setUp(self):
         from inventory.models import ConfiguracionEmpresa, DetalleNotaEntrega
         from inventory.services import procesar_venta
-        
         self.empresa = crear_empresa(nombre='Tech Refund SaaS', rif='J-REF-001')
         self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
         self.config.tasa_bcv = Decimal('36.50')
         self.config.save()
-        
         self.almacen = crear_almacen(self.empresa, nombre='Tienda Central')
-        
         # Artículo normal
         self.mouse = crear_articulo_fisico(self.empresa, sku='M-REF', nombre='Mouse Reembolsable')
         self.mouse.costo = Decimal('2.00')
         self.mouse.save()
         seed_inventario(self.mouse, self.almacen, cantidad=10)
-        
         # Artículo con Serial
         self.phone = crear_articulo_fisico(self.empresa, sku='P-REF', nombre='Smartphone Reembolsable')
         self.phone.usa_serial = True
         self.phone.costo = Decimal('100.00')
         self.phone.save()
         seed_inventario(self.phone, self.almacen, cantidad=3)
-        
         # Crear 2 seriales físicos
         self.serial1 = SerialArticulo.objects.create(empresa=self.empresa, articulo=self.phone, almacen=self.almacen, serial='IMEI-R1')
         self.serial2 = SerialArticulo.objects.create(empresa=self.empresa, articulo=self.phone, almacen=self.almacen, serial='IMEI-R2')
@@ -1868,99 +1794,77 @@ class TestNotasDeCreditoPOS(TransactionTestCase):
             {'articulo_sku': 'P-REF', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-R1', 'IMEI-R2']}
         ]
         self.nota_venta = procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
-        
     def test_devolucion_parcial_exitosa_costo_historico(self):
         """Test de devolución parcial de 2 mouses a costo histórico, sin cuarentena."""
         from inventory.services import procesar_devolucion_venta
         from inventory.models import MovimientoKardex
-        
         items_devolucion = [
             {'articulo_sku': 'M-REF', 'cantidad': 2, 'es_defectuoso': False}
         ]
-        
         res = procesar_devolucion_venta(self.nota_venta.id, items_devolucion, tipo_costo='HISTORICO', usuario='DevSys')
         self.assertTrue(res['ok'])
-        
         # Verificamos NC
         nc = NotaCredito.objects.get(id=res['nota_credito_id'])
         self.assertEqual(nc.monto_total_reembolso, Decimal('10.00')) # 2 * 5.00
-        
         # Verificamos Kárdex (Entrada al almacén original)
         kardex = MovimientoKardex.objects.filter(articulo=self.mouse, tipo='ENTRADA').last()
         self.assertEqual(kardex.almacen, self.almacen)
         self.assertEqual(kardex.cantidad, Decimal('2.00'))
-        
         # Verificamos Stock Actual (Empezamos en 10, vendimos 4 = 6. Devolvemos 2 = 8)
         self.assertEqual(self.mouse.get_stock_disponible(self.almacen), Decimal('8.00'))
-
+    
     def test_desvio_cuarentena_activado(self):
         """Si cuarentena está ON, la mercancía devuelta va a Servicio Técnico."""
         from inventory.services import procesar_devolucion_venta
-        
         self.config.usa_almacen_cuarentena = True
         self.config.save()
-        
         items_devolucion = [
             {'articulo_sku': 'M-REF', 'cantidad': 1, 'es_defectuoso': False}
         ]
-        
         procesar_devolucion_venta(self.nota_venta.id, items_devolucion, tipo_costo='ACTUAL', usuario='DevSys')
-        
         almacen_cuarentena = Almacen.objects.get(empresa=self.empresa, nombre='Servicio Técnico/Cuarentena')
         self.assertEqual(self.mouse.get_stock_disponible(almacen_cuarentena), Decimal('1.00'))
-        
         # El almacén central sigue con 6 (10 - 4 vendidos)
         self.assertEqual(self.mouse.get_stock_disponible(self.almacen), Decimal('6.00'))
-
+    
     def test_reverso_estado_seriales(self):
         """Devolver 1 celular con serial IMEI-R1 debe ponerlo DISPONIBLE."""
         from inventory.services import procesar_devolucion_venta
-        
         self.serial1.refresh_from_db()
         self.assertEqual(self.serial1.estado, 'VENDIDO')
-        
         items_devolucion = [
             {'articulo_sku': 'P-REF', 'cantidad': 1, 'seriales': ['IMEI-R1'], 'es_defectuoso': False}
         ]
-        
         procesar_devolucion_venta(self.nota_venta.id, items_devolucion, tipo_costo='HISTORICO', usuario='DevSys')
-        
         self.serial1.refresh_from_db()
         self.assertEqual(self.serial1.estado, 'DISPONIBLE')
         self.assertIsNone(self.serial1.detalle_nota)
-        
         # El IMEI-R2 sigue VENDIDO
         self.serial2.refresh_from_db()
         self.assertEqual(self.serial2.estado, 'VENDIDO')
-
+    
     def test_compensacion_automatica_por_dano(self):
         """Si cuarentena es False y el ítem es defectuoso, se debe crear una ENTRADA y una SALIDA automática."""
         from inventory.services import procesar_devolucion_venta
         from inventory.models import MovimientoKardex
-        
         self.config.usa_almacen_cuarentena = False
         self.config.save()
-        
         items_devolucion = [
             {'articulo_sku': 'M-REF', 'cantidad': 1, 'es_defectuoso': True}
         ]
-        
         procesar_devolucion_venta(self.nota_venta.id, items_devolucion, tipo_costo='HISTORICO', usuario='DevSys')
-        
         # Deben haber 2 movimientos para el mouse en este proceso: ENTRADA de NC y SALIDA de Merma
         movs = MovimientoKardex.objects.filter(
             articulo=self.mouse, 
             concepto='DEVOLUCION_ENTRADA'
         )
         self.assertTrue(movs.exists())
-        
         salida_merma = MovimientoKardex.objects.filter(
             articulo=self.mouse,
             concepto='MERMA_DEFECTUOSO'
         )
         self.assertTrue(salida_merma.exists())
         self.assertEqual(salida_merma.first().cantidad, Decimal('1.00'))
-        
         # El stock sigue en 6 porque entró 1 y salió 1 instantáneamente
         self.assertEqual(self.mouse.get_stock_disponible(self.almacen), Decimal('6.00'))
 
@@ -1984,49 +1888,41 @@ class TestSaneamientoYVulnerabilidadesSaaS(TransactionTestCase):
 
         from inventory.services import registrar_movimiento
         registrar_movimiento(self.articulo, self.almacen, 'ENTRADA', Decimal('10.00'), 'CARGA_MASIVA_SUMA')
-
+    
     def test_aislamiento_hermetico_sin_contexto(self):
         """Si get_current_empresa() devuelve None, EmpresaManager retorna 0 registros (C-01/ADR-17)."""
         from inventory.managers import set_current_empresa, reset_current_empresa
-        
         # Con contexto activo, debería retornar el artículo
         token = set_current_empresa(self.empresa.id)
         self.assertEqual(Articulo.objects.count(), 1)
-        
         # Limpiamos el contexto para simular ejecución fuera de request o error
         set_current_empresa(None)
         self.assertEqual(Articulo.objects.count(), 0)
 
         # Restauramos por si acaso
         reset_current_empresa(token)
-
+    
     def test_costo_historico_snapshot_venta_vs_actual(self):
         """Devolución HISTORICO usa costo_unitario_snapshot y ACTUAL usa costo mutado (C-04/ADR-18)."""
         from inventory.services import procesar_venta, procesar_devolucion_venta
         from inventory.models import DetalleNotaCredito
-        
         # 1. Vendemos cuando el costo era 100.00
         items_venta = [{'articulo_sku': 'PROD-SEC', 'cantidad': 2, 'precio_unitario_usd': Decimal('150.00')}]
         nota_venta = procesar_venta(None, items_venta, self.almacen.pk, 'Admin')
-        
         # 2. Mutamos el costo actual del catálogo a 200.00 (ej: inflación o nueva compra)
         self.articulo.costo = Decimal('200.00')
         self.articulo.save()
-        
         # 3. Devolvemos 1 unidad a costo HISTORICO
         items_devolucion_hist = [{'articulo_sku': 'PROD-SEC', 'cantidad': 1}]
         procesar_devolucion_venta(nota_venta.id, items_devolucion_hist, tipo_costo='HISTORICO', usuario='Admin')
-        
         nc_hist = DetalleNotaCredito.objects.order_by('-id').first()
         self.assertEqual(nc_hist.costo_aplicado, Decimal('100.00'), "El costo histórico debe ser 100.00 grabado en el snapshot")
-        
         # 4. Devolvemos 1 unidad a costo ACTUAL
         items_devolucion_act = [{'articulo_sku': 'PROD-SEC', 'cantidad': 1}]
         procesar_devolucion_venta(nota_venta.id, items_devolucion_act, tipo_costo='ACTUAL', usuario='Admin')
-        
         nc_act = DetalleNotaCredito.objects.order_by('-id').first()
         self.assertEqual(nc_act.costo_aplicado, Decimal('200.00'), "El costo actual debe ser 200.00 leído del catálogo mutado")
-
+    
     def test_prevencion_contaminacion_multi_pestana(self):
         """Payload con empresa_id discordante al contextvars es rechazado por seguridad."""
         from inventory.services import procesar_venta, registrar_compra_proveedor
@@ -2141,7 +2037,7 @@ class TestCoberturaCritica(TransactionTestCase):
         self.config.save()
         self.almacen = crear_almacen(self.empresa, nombre='Almacén Coverage')
         self.articulo = crear_articulo_fisico(self.empresa, sku='COV-001', nombre='Artículo Coverage')
-
+    
     def test_reversar_nota_entrega_valida_kardex(self):
         """
         Emite una venta con 2 unidades + 1 serial, reversa la nota y certifica:
@@ -2198,7 +2094,7 @@ class TestCoberturaCritica(TransactionTestCase):
         self.assertEqual(serial_2.estado, 'DISPONIBLE')
         self.assertIsNone(serial_1.detalle_nota)
         self.assertIsNone(serial_2.detalle_nota)
-
+    
     def test_reversar_documento_compra_valida_kardex(self):
         """
         Ingresa una compra de 5 unidades + 2 seriales, reversa y certifica:
@@ -2255,7 +2151,7 @@ class TestCoberturaCritica(TransactionTestCase):
         s2 = SerialArticulo.objects.get(serial='SN-COMP-2')
         self.assertEqual(s1.estado, 'ANULADO_COMPRA')
         self.assertEqual(s2.estado, 'ANULADO_COMPRA')
-
+    
     def test_salida_kardex_ejecuta_expresion_f_correctamente(self):
         """
         Verifica que registrar_movimiento tipo SALIDA descuente mediante F()
@@ -2276,7 +2172,7 @@ class TestCoberturaCritica(TransactionTestCase):
         inv = InventarioAlmacen.objects.get(articulo=self.articulo, almacen=self.almacen)
         self.assertEqual(inv.cantidad_disponible, Decimal('70.00'))
         self.assertEqual(movimiento.saldo_resultante, Decimal('70.00'))
-
+    
     def test_correlativo_nota_entrega_aislado_por_empresa(self):
         """
         Dos empresas distintas deben poder tener NotaEntrega #1 cada una
@@ -2349,7 +2245,7 @@ class TestCargaMasivaExcelAtomica(TransactionTestCase):
     def setUp(self):
         self.empresa = crear_empresa(nombre='BulkLoad', rif='J-BULK-001')
         self.almacen = crear_almacen(self.empresa, nombre='Bodega Bulk')
-
+    
     def _crear_excel(self, filas, cabecera=None):
         import io
         import openpyxl
@@ -2364,7 +2260,7 @@ class TestCargaMasivaExcelAtomica(TransactionTestCase):
         wb.save(buf)
         buf.seek(0)
         return buf
-
+    
     def test_carga_masiva_atomica_y_kardex(self):
         """Carga 2 artículos: 1 nuevo + 1 existente. Verifica stock, Kárdex, atomicidad."""
         from inventory.models import InventarioAlmacen, MovimientoKardex, Articulo
@@ -2424,7 +2320,7 @@ class TestCargaMasivaExcelAtomica(TransactionTestCase):
             lote_carga=resultado['lote_id'],
         )
         self.assertEqual(entradas.count(), 2)
-
+    
     def test_carga_masiva_rollback_por_error(self):
         """Un archivo con datos inválidos en la fila 3 debe hacer rollback TOTAL."""
         from inventory.models import Articulo, InventarioAlmacen
@@ -2449,7 +2345,7 @@ class TestCargaMasivaExcelAtomica(TransactionTestCase):
         # Verificar rollback: no se creó ningún artículo nuevo ni movimiento
         self.assertEqual(Articulo.objects.count(), pre_count)
         self.assertEqual(InventarioAlmacen.objects.count(), 0)
-
+    
     def test_carga_masiva_rechaza_almacen_ajeno(self):
         """Almacén que pertenece a otra empresa es rechazado."""
         from inventory.services import procesar_carga_masiva_excel
@@ -2488,7 +2384,7 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
             costo=Decimal('10.00'), precio_divisa=Decimal('25.00'),
             tipo='FISICO', categoria='OTROS'
         )
-
+    
     def test_cliente_proxy_filtro_tipo(self):
         from inventory.models import Cliente, Proveedor, Contacto
         from inventory.managers import set_current_empresa
@@ -2503,21 +2399,21 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
         self.assertEqual(proveedores_qs.first().nombre, 'Proveedor A')
         self.assertEqual(Proveedor.objects.filter(identificacion='V-CLI-001').count(), 0)
         self.assertEqual(Cliente.objects.filter(identificacion='J-PROV-001').count(), 0)
-
+    
     def test_cliente_proxy_save_autoset_tipo(self):
         from inventory.models import Cliente, Contacto
         c = Cliente(empresa=self.empresa, identificacion='V-AUTO', nombre='Auto Cliente')
         c.save()
         c.refresh_from_db()
         self.assertEqual(c.tipo, 'CLIENTE')
-
+    
     def test_proveedor_proxy_save_autoset_tipo(self):
         from inventory.models import Proveedor
         p = Proveedor(empresa=self.empresa, identificacion='J-AUTO', nombre='Auto Proveedor')
         p.save()
         p.refresh_from_db()
         self.assertEqual(p.tipo, 'PROVEEDOR')
-
+    
     def test_observaciones_nota_entrega_persiste(self):
         from inventory.models import Contacto, NotaEntrega
         from inventory.services import procesar_venta, registrar_movimiento
@@ -2536,7 +2432,7 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
         )
         nota.refresh_from_db()
         self.assertEqual(nota.observaciones, 'Entrega urgente del cliente A')
-
+    
     def test_observaciones_documento_compra_persiste(self):
         from inventory.models import Contacto, DocumentoCompra
         from inventory.services import registrar_compra_proveedor, registrar_movimiento
@@ -2585,7 +2481,7 @@ class TestReversoIdempotencia(TransactionTestCase):
             self.empresa, sku='IDEMP-001', nombre='Artículo Idempotencia'
         )
         seed_inventario(self.articulo, self.almacen, cantidad=100)
-
+    
     def test_doble_reverso_lanza_error_y_no_infla_stock(self):
         """
         Criterio: La segunda llamada a reversar_nota_entrega() debe lanzar
@@ -2709,7 +2605,7 @@ class TestMetodoGananciaCompras(TransactionTestCase):
         self.articulo_margin.metodo_ganancia = 'MARGIN'
         self.articulo_margin.margen_ind = Decimal('30.00')
         self.articulo_margin.save()
-
+    
     def _comprar(self, sku, costo_factura, numero_factura):
         """Helper: ejecuta registrar_compra_proveedor para un sku dado."""
         from inventory.services import registrar_compra_proveedor
@@ -2726,7 +2622,7 @@ class TestMetodoGananciaCompras(TransactionTestCase):
             }],
             usuario='Admin'
         )
-
+    
     def test_markup_calcula_precio_correcto(self):
         """
         MARKUP 30% con costo 100.00 -> precio 130.00 (no 142.86)
@@ -2738,7 +2634,7 @@ class TestMetodoGananciaCompras(TransactionTestCase):
             self.articulo_markup.precio_divisa, Decimal('130.00'),
             msg="MARKUP 30% sobre costo 100 debe dar 130.00 (no 142.86 que es MARGIN)."
         )
-
+    
     def test_margin_calcula_precio_correcto(self):
         """
         MARGIN 30% con costo 100.00 -> precio 142.86 (preserva formula de margen real).
@@ -2749,7 +2645,7 @@ class TestMetodoGananciaCompras(TransactionTestCase):
             self.articulo_margin.precio_divisa, Decimal('142.86'),
             msg="MARGIN 30% sobre costo 100 debe dar 142.86."
         )
-
+    
     def test_markup_y_margin_producen_precios_distintos(self):
         """
         Regresión clave: MARKUP y MARGIN con mismo margen deben producir precios
@@ -2818,7 +2714,7 @@ class TestBaseHtmlCsrfYExtraJs(TestCase):
         session = self.client.session
         session['empresa_id'] = self.empresa.id
         session.save()
-
+    
     def test_base_html_define_getCookie_global(self):
         """
         Criterio: renderizar cualquier pagina que herede de base.html debe
@@ -2832,7 +2728,7 @@ class TestBaseHtmlCsrfYExtraJs(TestCase):
             msg_prefix="base.html debe definir globalmente function getCookie(name). "
                        "Sin esto, carga.html y otros templates lanzan ReferenceError al hacer fetch."
         )
-
+    
     def test_base_html_define_bloque_extra_js(self):
         """
         Criterio: base.html debe declarar {% block extra_js %}{% endblock %}
@@ -2909,7 +2805,7 @@ class TestArticulosViewMultiTenant(TestCase):
         session = self.client.session
         session['empresa_id'] = self.empresa_a.id
         session.save()
-
+    
     def test_vista_no_tiene_csrf_exempt_que_la_bypase(self):
         """
         Criterio: articulos_view NO debe tener @csrf_exempt aplicado.
@@ -2931,7 +2827,7 @@ class TestArticulosViewMultiTenant(TestCase):
                 "Quita @csrf_exempt para que Django CSRF middleware pueda validar tokens."
             )
         )
-
+    
     def test_vista_usa_get_current_empresa_en_lugar_de_empresa_first(self):
         """
         Criterio: el codigo fuente de articulos_view debe importar y usar
@@ -2961,7 +2857,7 @@ class TestArticulosViewMultiTenant(TestCase):
                 "Debe usar get_current_empresa() en su lugar."
             )
         )
-
+    
     def test_post_asigna_articulo_a_empresa_del_contextvar(self):
         """
         Criterio end-to-end: con sesion activa y empresa_id, la logica de
@@ -3033,7 +2929,7 @@ class TestContactosYRespaldoMultiTenant(TestCase):
         )
         self.client.login(username='noone', password='pw1234')  # placeholder
         # downstream tests sobrescriben con su propio User/login.
-
+    
     def test_contactos_usa_contextvar_no_request_empresa(self):
         """
         Criterio: vista contactos (POST y GET) debe usar get_current_empresa()
@@ -3075,7 +2971,7 @@ class TestContactosYRespaldoMultiTenant(TestCase):
                 "contactos view debe llamar get_current_empresa() para resolver la empresa."
             )
         )
-
+    
     def test_vista_exportar_respaldo_usa_contextvar(self):
         """
         Criterio: vista_exportar_respaldo debe usar get_current_empresa()
@@ -3103,7 +2999,7 @@ class TestContactosYRespaldoMultiTenant(TestCase):
             source,
             msg="vista_exportar_respaldo debe llamar get_current_empresa()."
         )
-
+    
     def test_vista_exportar_respaldo_sin_empresa_retorna_403_o_302(self):
         """
         Criterio funcional: usuario autenticado sin empresa_id en sesion
@@ -3195,7 +3091,7 @@ class TestVistaCrearVentaCSRF(TestCase):
                 "Quita @csrf_exempt para que Django CSRF middleware valide tokens."
             )
         )
-
+    
     def test_frontend_ventas_envia_csrf_token_al_endpoint(self):
         """
         Criterio: ventas.html debe enviar 'X-CSRFToken': csrftoken en el
@@ -3284,7 +3180,7 @@ class TestRegistrarCompraProveedorMultiTenant(TransactionTestCase):
         # Setear ContextVar a victima
         from inventory.managers import set_current_empresa as _set
         _set(self.empresa_victima.pk)
-
+    
     def test_rechaza_almacen_de_otra_empresa(self):
         """
         Criterio: pasar almacen_id de OTRA empresa debe lanzar ValueError,
@@ -3315,7 +3211,7 @@ class TestRegistrarCompraProveedorMultiTenant(TransactionTestCase):
             'almacen', str(ctx.exception).lower(),
             msg="El error debe mencionar que el almacen no pertenece a la empresa."
         )
-
+    
     def test_rechaza_proveedor_de_otra_empresa(self):
         """
         Criterio: pasar proveedor_id de OTRA empresa debe lanzar ValueError,
@@ -3338,7 +3234,7 @@ class TestRegistrarCompraProveedorMultiTenant(TransactionTestCase):
             'proveedor', str(ctx.exception).lower(),
             msg="El error debe mencionar que el proveedor no pertenece a la empresa."
         )
-
+    
     def test_rechaza_articulo_de_otra_empresa(self):
         """
         Criterio: pasar sku de OTRA empresa debe lanzar ValueError,
@@ -3368,7 +3264,7 @@ class TestRegistrarCompraProveedorMultiTenant(TransactionTestCase):
             'articulo', str(ctx.exception).lower(),
             msg="El error debe mencionar que el articulo no pertenece a la empresa."
         )
-
+    
     def test_documentocompra_se_crea_en_empresa_del_contexto(self):
         """
         Criterio funcional: cuando los datos SI pertenecen a la empresa
@@ -3472,7 +3368,7 @@ class TestProcesarVentaAlmacenMultiTenant(TransactionTestCase):
 
         # Setup contra Santander para todos
         set_current_empresa(self.empresa_victima.pk)
-
+    
     def test_almacen_de_otra_empresa_es_rechazado(self):
         """
         Criterio: pasar almacen_id de OTRA empresa debe lanzar ValueError
@@ -3497,7 +3393,7 @@ class TestProcesarVentaAlmacenMultiTenant(TransactionTestCase):
             'almacen', str(ctx.exception).lower(),
             msg="El error debe mencionar 'almacen' (no pertence a la empresa)."
         )
-
+    
     def test_venta_usa_configuracion_de_la_empresa_activa(self):
         """
         Criterio funcional: si la venta se ejecuta con la empresa activa
@@ -3538,7 +3434,7 @@ class TestProcesarVentaAlmacenMultiTenant(TransactionTestCase):
                 f"Got: {nota.factor_cobertura_aplicado}"
             )
         )
-
+    
     def test_falla_si_almacen_no_existe(self):
         """
         Criterio: almacen_id que NO existe debe lanzar ValueError, no explotar.
@@ -3581,7 +3477,7 @@ class TestCalcularStockComboDecimal(TestCase):
         self.empresa = crear_empresa(nombre='ComboDecimal', rif='J-CDC-001')
         self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
         self.almacen = crear_almacen(self.empresa, nombre='Almacen Decimal')
-
+    
     def test_calculo_basico_con_decimales_exactos(self):
         """
         Criterio: 100 unidades stock / 3 por combo = 33 combos (floor).
@@ -3599,7 +3495,7 @@ class TestCalcularStockComboDecimal(TestCase):
             calcular_stock_combo(combo, self.almacen), 33,
             msg="100 stock / 3 por combo = 33 combos (floor sin precision loss)."
         )
-
+    
     def test_precision_decimal_sin_perdida_flotante(self):
         """
         Criterio de precision: operaciones con stocks/recetas fraccionales
@@ -3631,7 +3527,7 @@ class TestCalcularStockComboDecimal(TestCase):
                 f"el cociente. Got: {resultado}"
             )
         )
-
+    
     def test_varios_componentes_toma_el_minimo(self):
         """
         Criterio: para 3 ingredientes la función toma min() del floor de
@@ -3697,7 +3593,7 @@ class TestComprasNoValidaStockDeVentas(TestCase):
         self.articulo = crear_articulo_fisico(
             self.empresa, sku='COMPRABLE-001', nombre='Articulo Comprable'
         )
-
+    
     def test_compras_html_no_llama_validar_stock_en_instruccion(self):
         """
         Criterio estructural: el codigo JavaScript de compras.html
@@ -3729,7 +3625,7 @@ class TestComprasNoValidaStockDeVentas(TestCase):
                 "Debe usar /catalogo/buscar/ como hace tras el fix A13."
             )
         )
-
+    
     def test_compras_html_usa_endpoint_catalogo_buscar(self):
         """
         Criterio: el JS de compras.html DEBE hacer fetch a /catalogo/buscar/.
@@ -3746,7 +3642,7 @@ class TestComprasNoValidaStockDeVentas(TestCase):
                 "que el SKU existe. Tras A13 este es el endpoint correcto."
             )
         )
-
+    
     def test_endpoint_catalogo_buscar_no_exige_stock_previo(self):
         """
         Comprobacion funcional via directo GET al endpoint: el SKU
@@ -3833,7 +3729,7 @@ class TestVentasOfferPrintURL(TestCase):
         perfil.empresas_permitidas.add(self.empresa)
         perfil.empresa_activa = self.empresa
         perfil.save()
-
+    
     def test_ventas_html_ofrece_imprimir_nota_con_window_open(self):
         """
         Criterio estructural: ventas.html debe hacer:
@@ -3873,7 +3769,7 @@ class TestVentasOfferPrintURL(TestCase):
                 "ver el documento tras registrar la venta (pregunta en confirm)."
             )
         )
-
+    
     def test_vista_imprimir_nota_responde_200(self):
         """
         Criterio funcional: existe el endpoint /ventas/<nota_id>/imprimir/
@@ -3983,7 +3879,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
         session = self.client.session
         session['empresa_id'] = self.empresa.id
         session.save()
-
+    
     def _csrf_post(self, payload_dict):
         """Helper: GET csrf cookie desde /movimientos/ y POST con CSRF."""
         from urllib.parse import urlparse
@@ -4003,7 +3899,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
             content_type='application/json',
             HTTP_X_CSRFTOKEN=token
         )
-
+    
     def _login_csrf_client(self):
         """Devuelve un Client con csrf fortificado para tests que prueban rechazo."""
         from django.test import Client
@@ -4013,7 +3909,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
         session['empresa_id'] = self.empresa.id
         session.save()
         return c
-
+    
     def test_endpoint_existe_y_requiere_metodo_post(self):
         """
         GET a /movimientos/registrar/ debe ser 405 Method Not Allowed
@@ -4022,7 +3918,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
         from django.urls import reverse
         response = self.client.get('/movimientos/registrar/')
         self.assertEqual(response.status_code, 405)
-
+    
     def test_movimientos_renderiza_articulos_en_contexto(self):
         """
         La vista /movimientos/ debe inyectar articulos en el contexto
@@ -4041,7 +3937,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
             response, self.articulo_atacante.sku,
             msg_prefix="Solo articulos del Tenant activo deben aparecer."
         )
-
+    
     def test_registra_movimiento_entrada_ok(self):
         """
         Happy path: registrar ENTRADA + articulo + almacen + concepto.
@@ -4107,7 +4003,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
         # Verificar stock = 5 + 10 = 15
         inv.refresh_from_db()
         self.assertEqual(inv.cantidad_disponible, Decimal('15.00'))
-
+    
     def test_rechaza_almacen_de_otra_empresa(self):
         """
         Criterio multi-tenant: pasar almacen_id de OTRA empresa emite 404.
@@ -4141,7 +4037,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
             response.status_code, [404, 400],
             f"Fuga detectada: status={response.status_code} content={response.content!r}"
         )
-
+    
     def test_rechaza_concepto_vacio(self):
         """El concepto es obligatorio para auditoria."""
         import json as _json
@@ -4172,7 +4068,7 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
             response.status_code, 400,
             "Detalle/concepto vacio debe rechazarse con 400."
         )
-
+    
     def test_template_movimientos_tiene_registerManualMovement_JS(self):
         """
         Criterio estructural: movimientos.html debe definir la funcion
@@ -4244,7 +4140,7 @@ class TestSettingsHardening(TestCase):
         with open(path, encoding='utf-8') as f:
             source = f.read()
         return ast.parse(source)
-
+    
     def test_secret_key_no_es_el_placeholder_insecure(self):
         """
         El SECRET_KEY default NO debe ser el placeholder original
@@ -4272,7 +4168,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="SECRET_KEY debe cargarse via os.environ.get('SECRET_KEY', ...)"
         )
-
+    
     def test_debug_es_boolean_desde_env_no_legacy_true(self):
         """
         DEBUG debe leerse via os.environ.get y compararse con 'true'
@@ -4303,7 +4199,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="DEBUG debe estar presente en settings.py"
         )
-
+    
     def test_allowed_hosts_desde_env(self):
         """
         ALLOWED_HOSTS debe leerse desde env (comma-separated), con un
@@ -4318,7 +4214,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="ALLOWED_HOSTS debe leerse desde variable de entorno"
         )
-
+    
     def test_sqlite_wal_y_timeout(self):
         """
         SQLite debe tener OPTIONS['init_command'] con PRAGMA journal_mode=WAL
@@ -4338,7 +4234,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="DATABASES[OPTIONS] debe incluir 'timeout' para SQLite (>=5s)"
         )
-
+    
     def test_logging_dict_presente_y_completo(self):
         """
         LOGGING debe estar correctamente configurado:
@@ -4359,7 +4255,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="LOGGING debe usar RotatingFileHandler para evitar disco lleno"
         )
-
+    
     def test_security_headers_en_no_debug(self):
         """
         Si DEBUG=False, los headers de seguridad (HSTS, SECURE cookies)
@@ -4387,7 +4283,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="X_FRAME_OPTIONS debe configurarse (clickjacking protection)"
         )
-
+    
     def test_admin_y_admin_email_listos(self):
         """
         ADMINS debe estar configurado para AdminEmailHandler (notif 500).
@@ -4403,7 +4299,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="ADMIN_EMAIL debe ser os.environ.get para configurar ADMINS"
         )
-
+    
     def test_static_y_media_root_definidos(self):
         """
         STATIC_ROOT y MEDIA_ROOT deben existir (requeridos para
@@ -4417,7 +4313,7 @@ class TestSettingsHardening(TestCase):
         self.assertIn('MEDIA_ROOT', source)
         self.assertIn('MEDIA_URL', source)
         self.assertIn('STATIC_URL', source)
-
+    
     def test_tenant_middleware_sigue_presente(self):
         """
         Garantiza que TenantMiddleware sigue incluido (no se modifico
@@ -4432,7 +4328,7 @@ class TestSettingsHardening(TestCase):
             source,
             msg="TenantMiddleware debe seguir registrado en MIDDLEWARE"
         )
-
+    
     def test_sincronizacion_con_tests(self):
         """
         Criterio de integracion: tras todo el hardening, manage.py
@@ -4493,12 +4389,12 @@ class TestTenantMiddlewareAuthorization(TestCase):
         self.perfil.save()
 
         self.client.login(username='middleware_user', password='pw1234')
-
+    
     def _set_session(self, empresa_id):
         s = self.client.session
         s['empresa_id'] = empresa_id
         s.save()
-
+    
     def test_sin_autenticacion_redirige_a_login(self):
         """
         Sin user.is_authenticated (caso anonimo), el middleware ahora
@@ -4534,7 +4430,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
             redirect_url.startswith('/?next=') or redirect_url.startswith('http://testserver/?next='),
             msg=f"Login URL debe ser la raiz. got {redirect_url}"
         )
-
+    
     def test_sin_autenticacion_inyecta_mensaje_warning(self):
         """
         El redirect a /login/ debe inyectar un messages.warning en
@@ -4562,7 +4458,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
             # Si get_messages requiere request y no estamos en uno,
             # re-fetch el response y verificamos manualmente.
             pass
-
+    
     def test_sin_empresa_en_sesion_retorna_403(self):
         """
         Usuario autenticado pero sin empresa_id en sesion: 403.
@@ -4570,7 +4466,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
         # session vacia, sin empresa_id
         resp = self.client.get('/dashboard/')
         self.assertEqual(resp.status_code, 403)
-
+    
     def test_empresa_inexistente_retorna_403(self):
         """
         empresa_id en sesion apuntando a empresa borrada: 403.
@@ -4578,7 +4474,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
         self._set_session(99999)  # id que no existe
         resp = self.client.get('/dashboard/')
         self.assertEqual(resp.status_code, 403)
-
+    
     def test_empresa_inactiva_retorna_403(self):
         """
         Empresa desactivada en BD: 403 (no se deja entrar).
@@ -4588,7 +4484,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
         self._set_session(self.empresa.id)
         resp = self.client.get('/dashboard/')
         self.assertEqual(resp.status_code, 403)
-
+    
     def test_empresa_no_permitida_para_usuario_retorna_403(self):
         """
         Casos multi-tenant atacantes: la sesion dice empresa_atacante
@@ -4603,7 +4499,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
             b'no tiene permiso', resp.content.lower(),
             msg="El mensaje de 403 debe mencionar permiso denegado."
         )
-
+    
     def test_usuario_con_permiso_pasa_happy_path(self):
         """
         Happy path: usuario autenticado, empresa en sesion, empresa
@@ -4615,7 +4511,7 @@ class TestTenantMiddlewareAuthorization(TestCase):
             resp.status_code, 200,
             f"Login + sesion + permiso debe autorizar. got {resp.status_code}"
         )
-
+    
     def test_rutas_exentas_no_piden_sesion(self):
         """
         Rutas exentas (/, /static/, /admin/) deben responder sin
@@ -4687,7 +4583,7 @@ class TestMultimonedaModelos(TestCase):
             Decimal('84.000000'),
             f"Esperado 60.0 bcv * 1.4 cobertura. got {tasas_iniciales[0].tasa}"
         )
-
+    
     def test_solo_una_moneda_base_por_tenant(self):
         """
         Moneda.save() garantiza unica moneda base por tenant via
@@ -4715,7 +4611,7 @@ class TestMultimonedaModelos(TestCase):
                 "guardar eur.es_base=True"
             )
         )
-
+    
     def test_tasa_cambio_obtener_tasa_resuelve_la_mas_reciente(self):
         """
         TasaCambio.obtener_tasa() retorna la tasa mas reciente <= fecha.
@@ -4894,7 +4790,7 @@ class TestReportesFase4(TestCase):
             lista_items=[{'sku': 'REP-ART-1', 'cantidad': Decimal('3'), 'costo_factura': Decimal('10.00')}],
             usuario='test',
         )
-
+    
     # ── Reporte 1: Kardex ────────────────────────────────────────────────────
     def test_reporte_kardex(self):
         from .reports import reporte_kardex
@@ -4908,21 +4804,21 @@ class TestReportesFase4(TestCase):
         # Totales
         self.assertIn('entradas_usd', r['totals'])
         self.assertIn('salidas_usd', r['totals'])
-
+    
     def test_reporte_kardex_filtro_articulo(self):
         from .reports import reporte_kardex
         r = reporte_kardex(self.empresa.pk, articulo_sku='REP-ART-1')
         # Todos los movimientos son de este articulo
         for row in r['rows']:
             self.assertEqual(row['articulo_sku'], 'REP-ART-1')
-
+    
     def test_reporte_kardex_filtro_almacen(self):
         from .reports import reporte_kardex
         r = reporte_kardex(self.empresa.pk, almacen_id=self.almacen.pk)
         # Todos los movimientos son de este almacen
         for row in r['rows']:
             self.assertEqual(row['almacen'], self.almacen.nombre)
-
+    
     # ── Reporte 2: Inventario valorizado ────────────────────────────────────
     def test_reporte_inventario_valorizado(self):
         from .reports import reporte_inventario_valorizado
@@ -4933,7 +4829,7 @@ class TestReportesFase4(TestCase):
         # Stock inicial 10 + 3 compra - 2 venta = 11, costo 10 → 110
         self.assertEqual(Decimal(r['totals']['total_valor_usd']), Decimal('110.0000'))
         self.assertEqual(Decimal(r['totals']['total_unidades']), Decimal('11.00'))
-
+    
     # ── Reporte 3: Ventas por periodo ───────────────────────────────────────
     def test_reporte_ventas_periodo(self):
         from .reports import reporte_ventas_periodo
@@ -4943,7 +4839,7 @@ class TestReportesFase4(TestCase):
         self.assertEqual(r['rows'][0]['numero'], f'NE-{self.nota.numero:05d}')
         # Subtotal USD = 2 * 20 = 40
         self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('40.00'))
-
+    
     # ── Reporte 4: Cuentas por cobrar ───────────────────────────────────────
     def test_reporte_cuentas_por_cobrar(self):
         from .reports import reporte_cuentas_por_cobrar
@@ -4954,16 +4850,16 @@ class TestReportesFase4(TestCase):
         # Como hay 1 venta PROCESADO, debe listarse
         self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('40.00'))
 
-    # ── Reporte 5: Cuentas por pagar ────────────────────────────────────────
+# ── Reporte 5: Cuentas por pagar ────────────────────────────────────────
     def test_reporte_cuentas_por_pagar(self):
         from .reports import reporte_cuentas_por_pagar
         r = reporte_cuentas_por_pagar(self.empresa.pk)
         self.assertEqual(r['meta']['titulo'], 'Cuentas por Pagar')
         self.assertGreaterEqual(len(r['rows']), 1)
         self.assertIn('total_usd', r['totals'])
-        # 1 compra de 30 USD (3 * 10)
-        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('30.0000'))
-
+        # 1 compra de 3 * 10 = 30 USD + 16% IVA = 34.80
+        self.assertEqual(Decimal(r['totals']['total_usd']), Decimal('34.8000'))
+    
     # ── Reporte 6: Top vendidos ─────────────────────────────────────────────
     def test_reporte_top_vendidos(self):
         from .reports import reporte_top_vendidos
@@ -4973,7 +4869,7 @@ class TestReportesFase4(TestCase):
         self.assertEqual(r['rows'][0]['sku'], 'REP-ART-1')
         self.assertEqual(Decimal(r['rows'][0]['cantidad_total']), Decimal('2.00'))
         self.assertEqual(Decimal(r['rows'][0]['monto_usd']), Decimal('40.00'))
-
+    
     # ── Reporte 7: Obsoletos ───────────────────────────────────────────────
     def test_reporte_obsoletos(self):
         from .reports import reporte_obsoletos
@@ -4982,7 +4878,7 @@ class TestReportesFase4(TestCase):
         # Articulo con movimientos recientes no debe figurar
         for row in r['rows']:
             self.assertNotEqual(row['sku'], 'REP-ART-1')
-
+    
     def test_reporte_obsoletos_ventana_alta(self):
         """Con ventana muy alta, TODOS los articulos con mov recientes
         quedan excluidos, asi que la lista debe estar vacia."""
@@ -4993,7 +4889,7 @@ class TestReportesFase4(TestCase):
         r = reporte_obsoletos(self.empresa.pk, dias_sin_movimiento=9999)
         skus = [row['sku'] for row in r['rows']]
         self.assertNotIn('REP-ART-1', skus)
-
+    
     def test_reporte_obsoletos_ventana_nula(self):
         """Con 0 días, ningún SKU tiene 'movimiento en los últimos 0 días'
         por lo que todos los activos figuran como obsoletos."""
@@ -5001,7 +4897,7 @@ class TestReportesFase4(TestCase):
         r = reporte_obsoletos(self.empresa.pk, dias_sin_movimiento=0)
         skus = [row['sku'] for row in r['rows']]
         self.assertIn('REP-ART-1', skus)
-
+    
     # ── Reporte 8: Estado de resultados ─────────────────────────────────────
     def test_reporte_estado_resultados(self):
         from .reports import reporte_estado_resultados
@@ -5017,13 +4913,13 @@ class TestReportesFase4(TestCase):
         # Margen 50%
         margen = Decimal(r['totals']['margen_bruto_pct'])
         self.assertEqual(margen, Decimal('50.00'))
-
+    
     # ── Dispatcher (REGISTRO + obtener_reporte) ──────────────────────────────
     def test_obtener_reporte_invalido(self):
         from .reports import obtener_reporte
         with self.assertRaises(ValueError):
             obtener_reporte('inexistente', self.empresa.pk)
-
+    
     def test_obtener_reporte_dispatcher(self):
         from .reports import obtener_reporte, REGISTRO
         for key in REGISTRO.keys():
@@ -5031,7 +4927,7 @@ class TestReportesFase4(TestCase):
             self.assertIn('columns', r)
             self.assertIn('rows', r)
             self.assertIn('meta', r)
-
+    
     # ── MULTI-TENANT: otra empresa no ve mis datos ─────────────────────────
     def test_reportes_multi_tenant(self):
         """Empresa B no debe ver datos de Empresa A en reportes."""
@@ -5085,7 +4981,7 @@ class TestVistasReportes(TestCase):
         session = self.client.session
         session['empresa_id'] = self.empresa.pk
         session.save()
-
+    
     def test_vista_reportes_index(self):
         """GET /reportes/ renderiza índice con 8 reportes."""
         # Middleware activa empresa via sesión, aquí set_current_empresa
@@ -5095,12 +4991,12 @@ class TestVistasReportes(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Reportes Gerenciales')
         self.assertContains(r, 'Kardex Valorizado')
-
+    
     def test_vista_reporte_detalle(self):
         r = self.client.get('/reportes/kardex/')
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, 'Kardex Valorizado')
-
+    
     def test_vista_export_csv(self):
         from .reports import reporte_kardex
         r = self.client.get('/reportes/kardex/?format=csv')
@@ -5109,7 +5005,7 @@ class TestVistasReportes(TestCase):
         self.assertIn('attachment', r['Content-Disposition'])
         # BOM debe aparecer
         self.assertTrue(r.content.startswith(b'\xef\xbb\xbf') or 'fecha' in r.content.decode('utf-8-sig').lower())
-
+    
     def test_vista_export_pdf(self):
         r = self.client.get('/reportes/kardex/?format=pdf')
         self.assertEqual(r.status_code, 200)
@@ -5117,11 +5013,11 @@ class TestVistasReportes(TestCase):
         self.assertIn('attachment', r['Content-Disposition'])
         # El contenido debe empezar con %PDF
         self.assertTrue(r.content.startswith(b'%PDF'))
-
+    
     def test_vista_reporte_inexistente_redirige(self):
         r = self.client.get('/reportes/no_existe/')
         self.assertEqual(r.status_code, 302)
-
+    
     def test_vista_reportes_requiere_login(self):
         """Sin login, el middleware (Opcion B) redirige a /?next=
         (la raiz '/' es la pantalla de login efectiva) en lugar de
@@ -5215,7 +5111,7 @@ class TestDashboardLiveData(TestCase):
         session = self.client.session
         session['empresa_id'] = self.empresa.pk
         session.save()
-
+    
     def test_dashboard_valoracion_ves_es_valor_inventario_x_tasa(self):
         """valoracion_ves debe ser valoracion_total (40) * tasa_bcv (40) = 1600.
         Tras la venta de 1u queda 4 stock * 10 costo = 40 USD,
@@ -5224,7 +5120,7 @@ class TestDashboardLiveData(TestCase):
         self.assertEqual(r.status_code, 200)
         # El valor 1600 debe aparecer (con o sin separador de miles)
         self.assertContains(r, '1600')
-
+    
     def test_dashboard_notas_mes_es_conteo_no_usd(self):
         """notas_mes debe ser 1 (conteo), no el monto en USD."""
         r = self.client.get('/dashboard/')
@@ -5233,14 +5129,14 @@ class TestDashboardLiveData(TestCase):
         # El numero 1 debe aparecer como conteo (no 20 que seria el monto USD)
         # Buscamos el span con id=dash-sales-count tenga contenido '1'
         self.assertContains(r, 'id="dash-sales-count">1<')
-
+    
     def test_dashboard_combos_poblados(self):
         """El panel de combos debe contener el combo COMBO-D con su stock."""
         r = self.client.get('/dashboard/')
         self.assertContains(r, 'Combo Dash')
         # Stock combo = floor(4 / 1) = 4 (queda 4 tras la venta de 1 unidad de DASH-1)
         self.assertContains(r, '4 u.')
-
+    
     def test_dashboard_ultima_sync_real(self):
         """ultima_sync debe mostrar la fecha de la AuditoriaTasa, no 'Hoy'."""
         r = self.client.get('/dashboard/')
@@ -5297,7 +5193,7 @@ class TestServicesAPISurface(TestCase):
                 callable(fn),
                 msg=f"services.{name} debe ser callable."
             )
-
+    
     def test_registrar_movimiento_firma(self):
         """registrar_movimiento debe aceptar (articulo, almacen, tipo,
         cantidad, concepto) como argumentos posicionales minimos."""
@@ -5331,12 +5227,12 @@ class TestBackupVacioInto(TestCase):
     def setUp(self):
         # Directorio temporal para backups
         self.bk_dir = tempfile.mkdtemp(prefix='a2lt_backup_test_')
-
+    
     def tearDown(self):
         # Limpieza
         if os.path.isdir(self.bk_dir):
             shutil.rmtree(self.bk_dir, ignore_errors=True)
-
+    
     def test_backup_db_genera_archivo_valido(self):
         from django.core.management import call_command
         from io import StringIO
@@ -5365,7 +5261,7 @@ class TestBackupVacioInto(TestCase):
                           msg='El backup debe contener la tabla inventory_articulo')
         finally:
             conn.close()
-
+    
     def test_backup_db_check_dry_run(self):
         from django.core.management import call_command
         from io import StringIO
@@ -5376,7 +5272,7 @@ class TestBackupVacioInto(TestCase):
         self.assertEqual(len(archivos), 0, 'dry-run no debe generar archivos')
         # Debe imprimir (dry-run)
         self.assertIn('dry-run', out.getvalue())
-
+    
     def test_backup_db_retention_elimina_viejos(self):
         import time
         from django.core.management import call_command
@@ -5464,7 +5360,7 @@ class TestCatalogoPaginacion(TestCase):
         session = self.client.session
         session['empresa_id'] = self.empresa.id
         session.save()
-
+    
     # ── G1: Paginación server-side ────────────────────────────────────
 
     def test_g1_default_page_size_25_devuelve_200(self):
@@ -5473,7 +5369,7 @@ class TestCatalogoPaginacion(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['page_size'], 25)
         self.assertEqual(response.context['page_obj'].number, 1)
-
+    
     def test_g1_page_size_whitelist_10_25_50_75_100(self):
         """Cada valor de la whitelist debe ser aceptado (status 200)."""
         for size in (10, 25, 50, 75, 100):
@@ -5482,7 +5378,7 @@ class TestCatalogoPaginacion(TestCase):
             self.assertEqual(response.status_code, 200,
                              msg=f'page_size={size} debe ser válido (200)')
             self.assertEqual(response.context['page_size'], size)
-
+    
     def test_g1_page_size_fuera_de_whitelist_devuelve_400(self):
         """page_size no whitelisted (ej. 7, 200, abc) -> HttpResponseBadRequest."""
         for invalid in (7, 200, 0, -1, 'abc'):
@@ -5490,7 +5386,7 @@ class TestCatalogoPaginacion(TestCase):
                 reverse('inventory:catalogo'), {'page_size': invalid})
             self.assertEqual(response.status_code, 400,
                              msg=f'page_size={invalid!r} debe ser rechazado (400)')
-
+    
     def test_g1_page_menor_que_1_devuelve_400(self):
         """page < 1 (0, -5, 'xyz') -> HttpResponseBadRequest."""
         for invalid in (0, -5, 'xyz'):
@@ -5498,14 +5394,14 @@ class TestCatalogoPaginacion(TestCase):
                 reverse('inventory:catalogo'), {'page': invalid})
             self.assertEqual(response.status_code, 400,
                              msg=f'page={invalid!r} debe ser rechazado (400)')
-
+    
     def test_g1_page_fuera_de_rango_devuelve_400(self):
         """page > paginator.num_pages -> HttpResponseBadRequest (no EmptyPage 500)."""
         response = self.client.get(
             reverse('inventory:catalogo'),
             {'page_size': 10, 'page': 9999})
         self.assertEqual(response.status_code, 400)
-
+    
     def test_g1_paginacion_page_2_devuelve_siguiente_pagina(self):
         """Con page_size=10 y 12 articulos, page=2 devuelve 2 articulos."""
         response = self.client.get(
@@ -5515,7 +5411,7 @@ class TestCatalogoPaginacion(TestCase):
         self.assertEqual(response.context['page_obj'].number, 2)
         self.assertEqual(len(response.context['articulos_con_precios']), 2)
         self.assertEqual(response.context['paginator'].count, 12)
-
+    
     def test_g1_filtro_categoria_valido_filtra_subset(self):
         """categoria=HOGAR devuelve solo 6 articulos (HOGAR)."""
         response = self.client.get(
@@ -5524,14 +5420,14 @@ class TestCatalogoPaginacion(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context['paginator'].count, 6)
         self.assertEqual(response.context['categoria_actual'], 'HOGAR')
-
+    
     def test_g1_filtro_categoria_invalida_devuelve_400(self):
         """categoria=INEXISTENTE -> HttpResponseBadRequest."""
         response = self.client.get(
             reverse('inventory:catalogo'),
             {'categoria': 'INEXISTENTE'})
         self.assertEqual(response.status_code, 400)
-
+    
     def test_g1_controles_paginacion_presentes_en_html(self):
         """El HTML de respuesta debe incluir los controles (selector page_size)."""
         response = self.client.get(
@@ -5540,7 +5436,7 @@ class TestCatalogoPaginacion(TestCase):
         self.assertEqual(response.status_code, 200)
         # El selector de page_size siempre está presente (en _paginator.html)
         self.assertContains(response, 'name="page_size"')
-
+    
     # ── G2: Estados colapsado/desplegado + layout horizontal ──────────
 
     def test_g2_boton_resposta_redes_presente(self):
@@ -5550,7 +5446,7 @@ class TestCatalogoPaginacion(TestCase):
             {'page_size': 25, 'page': 1})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Respuesta Redes')
-
+    
     def test_g2_boton_remarketing_presente(self):
         """El botón 'Remarketing' debe estar en el HTML renderizado."""
         response = self.client.get(
@@ -5558,7 +5454,7 @@ class TestCatalogoPaginacion(TestCase):
             {'page_size': 25, 'page': 1})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Remarketing')
-
+    
     def test_g2_boton_ficha_tecnica_presente(self):
         """El botón 'Ficha Técnica' debe estar en el HTML renderizado."""
         response = self.client.get(
@@ -5566,7 +5462,7 @@ class TestCatalogoPaginacion(TestCase):
             {'page_size': 25, 'page': 1})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Ficha Técnica')
-
+    
     def test_g2_toggle_colapsado_desplegado_presente(self):
         """El header clickable (toggle-detalle) y la flecha deben existir."""
         response = self.client.get(
@@ -5575,7 +5471,7 @@ class TestCatalogoPaginacion(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'toggle-detalle')
         self.assertContains(response, 'toggle-arrow')
-
+    
     def test_g2_estado_colapsado_y_expandido_coexisten(self):
         """Ambos estados (collapsed + expanded) deben renderizarse en HTML."""
         response = self.client.get(
@@ -5584,7 +5480,7 @@ class TestCatalogoPaginacion(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'detalle-collapsed')
         self.assertContains(response, 'detalle-expanded')
-
+    
     # ── G3: 4 textareas en vista desplegada + botones de copia ────────
 
     def test_g3_textarea_descripcion_presente(self):
@@ -5596,7 +5492,7 @@ class TestCatalogoPaginacion(TestCase):
         # Descripción aparece como label y como textarea (id desc-)
         self.assertContains(response, 'Descripción')
         self.assertContains(response, 'desc-SKU-01')
-
+    
     def test_g3_boton_copiar_oferta_consolidada_presente(self):
         """El botón 'Copiar Oferta Consolidada' debe estar visible en el HTML."""
         response = self.client.get(
@@ -5604,7 +5500,7 @@ class TestCatalogoPaginacion(TestCase):
             {'page_size': 25, 'page': 1})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Copiar Oferta Consolidada')
-
+    
     def test_g3_paleta_corporate_definida_en_base_html(self):
         """
         Bypass test: valida que base.html define la paleta `corporate` en
@@ -5638,7 +5534,7 @@ class TestModelosNotaEntregaFaseN1(TestCase):
 
     def setUp(self):
         self.empresa = crear_empresa(nombre='FaseN1 Corp', rif='J-N1-001')
-
+    
     def test_n1_articulo_tiene_iva_porcentaje_default_16(self):
         """Articulo.iva_porcentaje debe existir y defaultear a 16.00."""
         art = Articulo.objects.create(
@@ -5647,19 +5543,19 @@ class TestModelosNotaEntregaFaseN1(TestCase):
             costo=Decimal('10.00'), precio_divisa=Decimal('20.00'),
         )
         self.assertEqual(art.iva_porcentaje, Decimal('16.00'))
-
+    
     def test_n1_configuracion_tiene_prefijo_y_correlativo_inicial(self):
         """ConfiguracionEmpresa debe tener prefijo_nota_entrega y
         correlativo_inicial_nota con defaults sane."""
         config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
         self.assertEqual(config.prefijo_nota_entrega, 'NE')
         self.assertEqual(config.correlativo_inicial_nota, 1)
-
+    
     def test_n1_configuracion_ivas_disponibles_es_json_lista(self):
         """ivas_disponibles debe ser una lista (JSONField)."""
         config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
         self.assertIsInstance(config.ivas_disponibles, list)
-
+    
     def test_n1_nota_entrega_tiene_tipo_documento_default_nota_entrega(self):
         """NotaEntrega.tipo_documento debe defaultear a NOTA_ENTREGA."""
         from inventory.models import NotaEntrega, Almacen
@@ -5672,7 +5568,7 @@ class TestModelosNotaEntregaFaseN1(TestCase):
         self.assertEqual(nota.iva_total, Decimal('0.0000'))
         self.assertEqual(nota.descuento_global, Decimal('0.00'))
         self.assertEqual(nota.numero_factura, '')
-
+    
     def test_n1_nota_entrega_numero_nota_se_genera_con_prefijo_configurado(self):
         """Al guardar, numero_nota debe tomar el formato {prefijo}-{numero:08d}."""
         from inventory.models import NotaEntrega, Almacen
@@ -5683,7 +5579,7 @@ class TestModelosNotaEntregaFaseN1(TestCase):
         nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
         expected = f'A2LT-B17-{nota.numero:08d}'
         self.assertEqual(nota.numero_nota, expected)
-
+    
     def test_n1_nota_entrega_correlativo_respeta_inicial_configurado(self):
         """Si no hay notas previas, el numero arranca en correlativo_inicial_nota."""
         from inventory.models import NotaEntrega, Almacen
@@ -5694,7 +5590,7 @@ class TestModelosNotaEntregaFaseN1(TestCase):
         nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
         self.assertEqual(nota.numero, 100)
         self.assertEqual(nota.numero_nota, f'NE-{100:08d}')
-
+    
     def test_n1_numero_factura_unique_por_empresa(self):
         """Dos notas con mismo numero_factura en la misma empresa deben fallar."""
         from inventory.models import NotaEntrega, Almacen
@@ -5709,7 +5605,7 @@ class TestModelosNotaEntregaFaseN1(TestCase):
                 empresa=self.empresa, numero=2, almacen=alm,
                 numero_factura='F-001',
             )
-
+    
     def test_n1_detalle_tiene_4_precios_snapshot_e_iva(self):
         """DetalleNotaEntrega debe tener precio_base, precio_ajustado,
         precio_directo_bcv, precio_ajustado_bcv e iva_porcentaje."""
@@ -5745,7 +5641,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
 
     def setUp(self):
         self.empresa = crear_empresa(nombre='FaseN2 Corp', rif='J-N2-001')
-
+    
     def test_n2_nota_entrega_tiene_propiedades_subtotal_y_total(self):
         """NotaEntrega debe tener propiedades subtotal_usd, subtotal_bs, total_iva_bs, total_documento_bs."""
         from inventory.models import NotaEntrega, Almacen
@@ -5757,7 +5653,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         self.assertTrue(hasattr(nota, 'subtotal_bs'))
         self.assertTrue(hasattr(nota, 'total_iva_bs'))
         self.assertTrue(hasattr(nota, 'total_documento_bs'))
-
+    
     def test_n2_subtotal_nota_sin_detalles_es_cero(self):
         """subtotal_usd de una nota sin detalles debe ser Decimal('0')."""
         from inventory.models import NotaEntrega, Almacen
@@ -5766,7 +5662,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         self.assertEqual(nota.subtotal_usd, Decimal('0'))
         self.assertEqual(nota.total_iva_bs, Decimal('0'))
         self.assertEqual(nota.total_documento_bs, Decimal('0'))
-
+    
     def test_n2_subtotal_nota_suma_detalles_correctamente(self):
         """subtotal_usd de nota con 2 detalles debe ser la suma de sus subtotales."""
         from inventory.models import NotaEntrega, DetalleNotaEntrega, Almacen, Articulo
@@ -5794,7 +5690,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         )
         self.assertEqual(nota.subtotal_usd, Decimal('50.00'))  # 1*10 + 2*20
         self.assertEqual(nota.subtotal_bs, Decimal('550.00'))  # 1*110 + 2*220
-
+    
     def test_n2_descuento_aplicado_float_corregido_a_decimal(self):
         """descuento_aplicado default debe ser Decimal('0.00'), no float 0.0."""
         from inventory.models import DetalleNotaEntrega, NotaEntrega, Almacen, Articulo
@@ -5812,7 +5708,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         )
         self.assertIsInstance(det.descuento_aplicado, Decimal)
         self.assertEqual(det.descuento_aplicado, Decimal('0.00'))
-
+    
     def test_n2_descuento_individual_afecta_subtotales(self):
         """Un descuento_aplicado de 10% debe reducir el subtotal_usd un 10%."""
         from inventory.models import DetalleNotaEntrega, NotaEntrega, Almacen, Articulo
@@ -5831,7 +5727,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         )
         self.assertEqual(det.subtotal_usd, Decimal('900.00'))  # 1000 * 0.90
         self.assertEqual(det.subtotal_bs, Decimal('9900.00'))  # 11000 * 0.90
-
+    
     def test_n2_iva_check_refleja_iva_porcentaje_del_articulo(self):
         """iva_check=True si al menos un artículo tiene iva_porcentaje>0, verificado via procesar_venta."""
         from inventory.services import procesar_venta, registrar_movimiento
@@ -5862,7 +5758,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         )
         self.assertTrue(nota_con_iva.iva_check)
         self.assertGreater(nota_con_iva.iva_total, Decimal('0'))
-
+    
     def test_n2_propiedad_total_iva_bs_con_iva_check_true(self):
         """Con iva_check=True, total_iva_bs suma los iva_bs de cada detalle."""
         from inventory.models import DetalleNotaEntrega, NotaEntrega, Almacen, Articulo
@@ -5893,7 +5789,7 @@ class TestProcesarVentaN2(TestCase):
         self.alm = crear_almacen(self.empresa, 'Almacén N2Svc')
         self.art = crear_articulo_fisico(self.empresa, sku='N2-SVC-01', nombre='Art Svc')
         registrar_movimiento(self.art, self.alm, 'ENTRADA', Decimal('1000'), 'Stock Inicial Test')
-
+    
     def test_n2_procesar_venta_tipo_documento_default_nota_entrega(self):
         """Por default, procesar_venta crea tipo_documento=NOTA_ENTREGA."""
         from inventory.services import procesar_venta
@@ -5902,7 +5798,7 @@ class TestProcesarVentaN2(TestCase):
             almacen_id=self.alm.pk,
         )
         self.assertEqual(nota.tipo_documento, 'NOTA_ENTREGA')
-
+    
     def test_n2_procesar_venta_tipo_factura_requiere_numero_factura(self):
         """tipo_documento=FACTURA sin numero_factura debe fallar con ValueError."""
         from inventory.services import procesar_venta
@@ -5912,7 +5808,7 @@ class TestProcesarVentaN2(TestCase):
                 almacen_id=self.alm.pk,
                 tipo_documento='FACTURA',
             )
-
+    
     def test_n2_procesar_venta_factura_crea_con_numero_factura(self):
         """tipo_documento=FACTURA con numero_factura válido crea la nota."""
         from inventory.services import procesar_venta
@@ -5924,7 +5820,7 @@ class TestProcesarVentaN2(TestCase):
         )
         self.assertEqual(nota.tipo_documento, 'FACTURA')
         self.assertEqual(nota.numero_factura, 'F-N2-001')
-
+    
     def test_n2_procesar_venta_numero_factura_duplicate_falla(self):
         """No se puede crear dos facturas con el mismo numero_factura para la misma empresa."""
         from inventory.services import procesar_venta
@@ -5941,7 +5837,7 @@ class TestProcesarVentaN2(TestCase):
                 tipo_documento='FACTURA',
                 numero_factura='F-N2-002',
             )
-
+    
     def test_n2_procesar_venta_articulo_con_iva_calcula_iva_total(self):
         """Si el artículo tiene iva_porcentaje>0, iva_total debe ser > 0 e iva_check=True."""
         from inventory.services import procesar_venta
@@ -5953,7 +5849,7 @@ class TestProcesarVentaN2(TestCase):
         )
         self.assertTrue(nota.iva_check)
         self.assertGreater(nota.iva_total, Decimal('0'))
-
+    
     def test_n2_procesar_venta_articulo_sin_iva_check_false(self):
         """Si ningún artículo tiene iva_porcentaje>0, iva_check debe ser False."""
         from inventory.services import procesar_venta
@@ -5965,7 +5861,7 @@ class TestProcesarVentaN2(TestCase):
         )
         self.assertFalse(nota.iva_check)
         self.assertEqual(nota.iva_total, Decimal('0.0000'))
-
+    
     def test_n2_procesar_venta_snapshot_tasa_mercado_aplicada(self):
         """tasa_mercado_aplicada debe guardarse como snapshot."""
         from inventory.services import procesar_venta
@@ -5978,7 +5874,7 @@ class TestProcesarVentaN2(TestCase):
             almacen_id=self.alm.pk,
         )
         self.assertEqual(nota.tasa_mercado_aplicada, Decimal('58.5000'))
-
+    
     def test_n2_procesar_venta_descuento_global_se_persiste(self):
         """descuento_global del documento debe guardarse en la cabecera."""
         from inventory.services import procesar_venta
@@ -5988,7 +5884,7 @@ class TestProcesarVentaN2(TestCase):
             descuento_global=Decimal('5.00'),
         )
         self.assertEqual(nota.descuento_global, Decimal('5.00'))
-
+    
     def test_n2_procesar_venta_descuento_global_invalido_falla(self):
         """descuento_global fuera de rango 0-100 debe fallar."""
         from inventory.services import procesar_venta
@@ -5998,7 +5894,7 @@ class TestProcesarVentaN2(TestCase):
                 almacen_id=self.alm.pk,
                 descuento_global=Decimal('150'),
             )
-
+    
     def test_n2_procesar_venta_4_precios_snapshot_en_detalle(self):
         """Cada detalle debe tener los 4 precios snapshot y iva_porcentaje."""
         from inventory.services import procesar_venta
@@ -6023,24 +5919,24 @@ class TestNotaEntregaFaseN3(TestCase):
         self.user = User.objects.create_user('testn3', 'n3@test.com', 'test123')
         self.empresa = crear_empresa(nombre='FaseN3 Corp', rif='J-N3-001')
         self.alm = crear_almacen(self.empresa, 'Almacen N3')
-
+    
     def test_n3_ventas_template_tiene_radio_tipo_documento(self):
         from pathlib import Path
         content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
         self.assertIn('name="doc-type"', content)
         self.assertIn('value="NOTA_ENTREGA"', content)
         self.assertIn('value="FACTURA"', content)
-
+    
     def test_n3_ventas_template_sin_contenedor_iva_check(self):
         from pathlib import Path
         content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
         self.assertNotIn('id="iva-check-container"', content)
-
+    
     def test_n3_ventas_template_tiene_descuento_global_input(self):
         from pathlib import Path
         content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
         self.assertIn('id="note-discount-percent"', content)
-
+    
     def test_n3_articulo_sin_iva_iva_total_cero(self):
         from inventory.services import procesar_venta, registrar_movimiento
         art = crear_articulo_fisico(self.empresa, sku='N3-FAC-01', nombre='Art Fac')
@@ -6066,17 +5962,17 @@ class TestInterlockFacturaN4(TestCase):
         self.alm = crear_almacen(self.empresa, 'Almacén N4')
         self.art = crear_articulo_fisico(self.empresa, sku='N4-INT-01', nombre='Art Interlock')
         registrar_movimiento(self.art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
-
+    
     def test_n4_template_confirm_button_tiene_id(self):
         from pathlib import Path
         content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
         self.assertIn('id="confirm-sale-btn"', content)
-
+    
     def test_n4_template_invoice_ref_oninput_handler(self):
         from pathlib import Path
         content = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
         self.assertIn('oninput="enableConfirmIfFacturaReady()"', content)
-
+    
     def test_n4_factura_sin_numero_factura_falla(self):
         from inventory.services import procesar_venta
         with self.assertRaisesMessage(ValueError, 'numero_factura es obligatorio'):
@@ -6085,7 +5981,7 @@ class TestInterlockFacturaN4(TestCase):
                 almacen_id=self.alm.pk,
                 tipo_documento='FACTURA',
             )
-
+    
     def test_n4_nota_entrega_permite_sin_numero_factura(self):
         from inventory.services import procesar_venta
         nota = procesar_venta(
@@ -6095,7 +5991,7 @@ class TestInterlockFacturaN4(TestCase):
         )
         self.assertEqual(nota.tipo_documento, 'NOTA_ENTREGA')
         self.assertEqual(nota.numero_factura, '')
-
+    
     def test_n4_factura_con_numero_ok(self):
         from inventory.services import procesar_venta
         nota = procesar_venta(
@@ -6116,7 +6012,7 @@ class TestNotaEntregaFaseN5(TestCase):
         self.alm = crear_almacen(self.empresa, 'Almacén N5')
         self.art = crear_articulo_fisico(self.empresa, sku='N5-PDF-01', nombre='Art PDF')
         registrar_movimiento(self.art, self.alm, 'ENTRADA', Decimal('100'), 'Stock Test')
-
+    
     def test_n5_template_detalle_nota_existe(self):
         from pathlib import Path
         content = Path('inventory/templates/inventory/nota_detalle.html').read_text(encoding='utf-8')
@@ -6124,7 +6020,7 @@ class TestNotaEntregaFaseN5(TestCase):
         self.assertIn('Imprimir PDF', content)
         self.assertIn('Interno:', content)
         self.assertIn('IVA%', content)
-
+    
     def test_n5_pdf_genera_bytes_pdf(self):
         """Test que la función generar_pdf_nota genera bytes PDF válidos."""
         from inventory.views import generar_pdf_nota
@@ -6144,17 +6040,16 @@ class TestNotaEntregaFaseN5(TestCase):
         request = HttpRequest()
         request.method = 'GET'
         request.user = User.objects.create_user('testpdf', 'pdf@test.com', 'test123')
-        
+        request.session = {'empresa_id': self.empresa.pk}
         # Llamar la vista directamente (sin middleware)
         response = generar_pdf_nota(request, nota.pk)
-        
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
         content = response.content
         self.assertTrue(content.startswith(b'%PDF'))
         # Verificar que es un PDF válido con contenido
         self.assertGreater(len(content), 1000)
-
+    
     def test_n5_pdf_nota_entrega_tambien_funciona(self):
         """Test que el PDF funciona para Nota de Entrega también."""
         from inventory.views import generar_pdf_nota
@@ -6171,16 +6066,15 @@ class TestNotaEntregaFaseN5(TestCase):
         request = HttpRequest()
         request.method = 'GET'
         request.user = User.objects.create_user('testpdf2', 'pdf2@test.com', 'test123')
-        
+        request.session = {'empresa_id': self.empresa.pk}
         response = generar_pdf_nota(request, nota.pk)
-        
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Type'], 'application/pdf')
         content = response.content
         self.assertTrue(content.startswith(b'%PDF'))
         self.assertGreater(len(content), 1000)
         self.assertIn(str(nota.numero).encode(), content)
-
+    
     def test_n5_vista_detalle_nota_usa_template_correcto(self):
         """Test que la vista usa el template correcto."""
         from inventory.views import vista_detalle_nota
@@ -6198,12 +6092,302 @@ class TestNotaEntregaFaseN5(TestCase):
         request = HttpRequest()
         request.method = 'GET'
         request.user = User.objects.create_user('testdet', 'det@test.com', 'test123')
-        
+        request.session = {'empresa_id': self.empresa.pk}
         # Llamar vista directamente
         response = vista_detalle_nota(request, nota.pk)
-        
         self.assertEqual(response.status_code, 200)
         # Verificar que el contenido incluye elementos del template
         self.assertIn(b'Imprimir PDF', response.content)
 
+# -*- coding: utf-8 -*-
+# Test additions for Compras module
+
+# -*- coding: utf-8 -*-
+# Test additions for Compras module
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEST: Fichas de Artículos — Toolbar de tokens + 4to token PRECIO_BS_BASE
+#
+# Valida:
+#   T1: La vista catalogo calcula los 4 precios distintos (USD, ajustado,
+#       Bs. base, Bs. ajustado) con la fórmula correcta.
+#   T2: El template catalogo.html incluye el atributo data-precio-bs-base
+#       en la tarjeta del artículo y en los botones de copia.
+#   T3: El template catalogo.html contiene la sustitución JS para los 4
+#       tokens ($[PRECIO_USD], $[PRECIO_BCV], $[PRECIO_BS_BASE], $[PRECIO_BS]).
+#   T4: El template articulos.html contiene la toolbar con 4 botones de
+#       inserción de tokens sobre form-p-cross y form-p-quick.
+#   T5: El template articulos.html define la funcion JS injectToken() para
+#       inyectar el token en la posicion del cursor.
+#   T6: La función injectToken() NO envía datos al servidor (los tokens se
+#       persisten como parte del texto literal del textarea).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCatalogoPreciosCuadruple(TestCase):
+    """Verifica que la vista catálogo calcula los 4 valores de precio:
+       USD, USD ajustado, Bs. base y Bs. ajustado, sin solaparse."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.empresa = crear_empresa(nombre='FichaArt Corp', rif='J-FA-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        # tasa_bcv = 40, factor = 1.5 → tasa_mercado = 60
+        self.config.tasa_bcv = Decimal('40.00')
+        self.config.factor_cobertura = Decimal('1.5000')
+        self.config.save()
+
+        self.user = User.objects.create_user('ficha_user', password='test1234')
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+
+        # 1 artículo con precio_divisa = 10
+        Articulo.objects.create(
+            empresa=self.empresa,
+            sku='FA-01',
+            nombre='Artículo Ficha 01',
+            categoria='HOGAR',
+            tipo='FISICO',
+            precio_divisa=Decimal('10.00'),
+            costo=Decimal('5.00'),
+            activo=True,
+            social_quick='Precio: $[PRECIO_USD] / $[PRECIO_BCV] / $[PRECIO_BS_BASE] / $[PRECIO_BS]',
+            social_cross='Oferta: [Precio_USD] | [Precio_BCV] | [Precio_BS_BASE] | [Precio_BS]',
+        )
+
+        self.client.login(username='ficha_user', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+    def test_catalogo_calcula_4_precios_distintos_y_coherentes(self):
+        """Los 4 precios deben ser distintos y seguir la fórmula:
+           USD=10, ajustado=10*1.5=15, Bs.base=10*40=400, Bs.ajustado=15*40=600."""
+        response = self.client.get(reverse('inventory:catalogo'))
+        self.assertEqual(response.status_code, 200)
+        items = response.context['articulos_con_precios']
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item['precio_divisa'], Decimal('10.00'))
+        self.assertEqual(item['precio_usd_ajustado'], Decimal('15.00'))
+        self.assertEqual(item['precio_bs_base'], Decimal('400.00'))
+        self.assertEqual(item['precio_bs_bcv'], Decimal('600.00'))
+        # Validación de no solapamiento: Bs.base != Bs.ajustado (factor != 1)
+        self.assertNotEqual(item['precio_bs_base'], item['precio_bs_bcv'])
+        # Bs.base es siempre <= Bs.ajustado cuando factor >= 1
+        self.assertLessEqual(item['precio_bs_base'], item['precio_bs_bcv'])
+
+    def test_catalogo_bs_base_es_nuevo_campo_no_existente_antes(self):
+        """Asegura que el nuevo campo 'precio_bs_base' está presente en el
+           contexto del template (si no estuviera, KeyError en el test setUp)."""
+        response = self.client.get(reverse('inventory:catalogo'))
+        self.assertIn('precio_bs_base', response.context['articulos_con_precios'][0])
+
+    def test_catalogo_factor_uno_iguala_bs_base_y_bs_ajustado(self):
+        """Con factor_cobertura=1.0, Bs.base == Bs.ajustado (caso borde)."""
+        self.config.factor_cobertura = Decimal('1.0000')
+        self.config.save()
+        response = self.client.get(reverse('inventory:catalogo'))
+        items = response.context['articulos_con_precios']
+        item = items[0]
+        self.assertEqual(item['precio_bs_base'], item['precio_bs_bcv'])
+        self.assertEqual(item['precio_bs_base'], Decimal('400.00'))
+        # Pero USD y USD ajustado también son iguales
+        self.assertEqual(item['precio_divisa'], item['precio_usd_ajustado'])
+
+
+class TestCatalogoTemplateTokens(TestCase):
+    """Verifica que catalogo.html expone el atributo data-precio-bs-base
+       en tarjeta y botones, y contiene la lógica de sustitución JS del
+       nuevo token."""
+
+    def setUp(self):
+        from pathlib import Path
+        self.template_path = Path(
+            'inventory/templates/inventory/catalogo.html'
+        )
+        self.content = self.template_path.read_text(encoding='utf-8')
+
+    def test_data_precio_bs_base_en_tarjeta(self):
+        """La tarjeta del artículo debe tener data-precio-bs-base."""
+        self.assertIn('data-precio-bs-base=', self.content)
+
+    def test_data_precio_bs_base_en_boton_quick(self):
+        """El botón quick ('Respuesta Redes') debe llevar data-precio-bs-base."""
+        # Buscar todos los botones btn-copy y verificar que incluyen el attr
+        # (es la forma más robusta — en el template actual todos los btn-copy
+        #  comparten el patrón de los 4 attrs).
+        import re
+        btns = re.findall(r'<button[^>]*btn-copy[^>]*>', self.content)
+        self.assertGreater(len(btns), 0, msg='Debe haber al menos un btn-copy')
+        for btn in btns:
+            self.assertIn('data-precio-bs-base=', btn,
+                          msg='btn-copy debe llevar data-precio-bs-base')
+
+    def test_sustitucion_js_token_bs_base_existe(self):
+        """La función JS copyToClipboard debe sustituir $[PRECIO_BS_BASE]."""
+        self.assertIn("$[PRECIO_BS_BASE]", self.content)
+
+    def test_sustitucion_js_legacy_bs_base_existe(self):
+        """La función JS también debe soportar el formato legacy [Precio_BS_BASE].
+           Como el regex /[Precio_BS_BASE]/g usa corchetes escapados en el
+           source (\\[Precio_BS_BASE\\]), buscamos la versión con escape."""
+        self.assertIn(r"\[Precio_BS_BASE\]", self.content)
+
+    def test_sustitucion_js_no_rompe_tokens_existentes(self):
+        """Los 3 tokens preexistentes deben seguir presentes."""
+        self.assertIn("$[PRECIO_USD]", self.content)
+        self.assertIn("$[PRECIO_BCV]", self.content)
+        self.assertIn("$[PRECIO_BS]", self.content)
+
+
+class TestArticulosToolbarTokens(TestCase):
+    """Verifica que articulos.html contiene la toolbar con 4 botones de
+       inserción de tokens sobre los textareas form-p-cross y form-p-quick,
+       y que define la función JS injectToken()."""
+
+    def setUp(self):
+        from pathlib import Path
+        self.template_path = Path(
+            'inventory/templates/inventory/articulos.html'
+        )
+        self.content = self.template_path.read_text(encoding='utf-8')
+
+    def test_toolbar_form_p_cross_existe(self):
+        """Debe existir una toolbar con role=toolbar antes del textarea
+           form-p-cross."""
+        # Buscar occurrencias de toolbar en el archivo
+        self.assertGreaterEqual(
+            self.content.count('role="toolbar"'), 2,
+            msg='Debe haber al menos 2 toolbars (una por textarea de marketing)'
+        )
+
+    def test_toolbar_form_p_quick_existe(self):
+        """Debe existir una toolbar antes del textarea form-p-quick."""
+        # Buscar por posición relativa: la toolbar antes de form-p-quick
+        idx_quick = self.content.find('id="form-p-quick"')
+        self.assertGreater(idx_quick, 0,
+                           msg='textarea form-p-quick debe existir')
+        # Buscar la última toolbar antes de ese textarea
+        last_toolbar_before = self.content.rfind('role="toolbar"', 0, idx_quick)
+        self.assertGreater(last_toolbar_before, 0,
+                           msg='Debe haber una toolbar antes de form-p-quick')
+
+    def test_4_botones_por_toolbar(self):
+        """Cada toolbar debe tener 4 botones (USD, BCV, BS_BASE, BS)."""
+        import re
+        toolbars = re.findall(r'role="toolbar".*?</div>', self.content, re.DOTALL)
+        # Safer approach: contar ocurrencias de injectToken en botones
+        # (4 botones × 2 textareas = 8 llamadas injectToken)
+        calls = re.findall(r"onclick=\"injectToken\('form-p-(?:cross|quick)',\s*"
+                           r"'(\$\[PRECIO_\w+\])'\)\"", self.content)
+        self.assertEqual(len(calls), 8,
+                         msg=f'Debe haber 8 botones (4×2), encontrados: {len(calls)}')
+        # Verificar que aparecen los 4 tokens distintos
+        unique = set(calls)
+        self.assertEqual(unique, {
+            '$[PRECIO_USD]', '$[PRECIO_BCV]',
+            '$[PRECIO_BS_BASE]', '$[PRECIO_BS]'
+        }, msg=f'Deben aparecer los 4 tokens únicos, encontrados: {unique}')
+
+    def test_funcion_inject_token_definida(self):
+        """La función JS injectToken() debe estar definida en el template."""
+        self.assertIn('function injectToken(', self.content)
+
+    def test_inject_token_usa_selection_start_end(self):
+        """La función debe usar selectionStart/selectionEnd para caret tracking."""
+        self.assertIn('selectionStart', self.content)
+        self.assertIn('selectionEnd', self.content)
+
+    def test_inject_token_restaura_foco(self):
+        """La función debe hacer focus() en el textarea tras inyectar."""
+        self.assertIn('.focus()', self.content)
+
+    def test_inject_token_no_envia_al_servidor(self):
+        """injectToken NO debe usar fetch() — el texto se persiste como
+           literal al guardar con saveProduct() (lo que cumple el punto 4
+           de la spec)."""
+        import re
+        # Buscar el cuerpo de la función
+        match = re.search(
+            r'function injectToken\(.*?\}.*?\n\}',
+            self.content, re.DOTALL)
+        if match:
+            body = match.group(0)
+            self.assertNotIn('fetch(', body,
+                              msg='injectToken no debe contener fetch()')
+
+    def test_help_text_menciona_4_tokens(self):
+        """El help text debe mencionar los 4 tokens disponibles."""
+        # La línea de help debe contener los 4 tokens
+        self.assertIn('$[PRECIO_USD]', self.content)
+        self.assertIn('$[PRECIO_BCV]', self.content)
+        self.assertIn('$[PRECIO_BS_BASE]', self.content)
+        self.assertIn('$[PRECIO_BS]', self.content)
+
+    def test_ficha_tecnica_sin_toolbar(self):
+        """El textarea form-p-ficha NO debe tener toolbar de tokens de precio
+           (la ficha técnica es para datos técnicos, no marketing)."""
+        idx_ficha = self.content.find('id="form-p-ficha"')
+        self.assertGreater(idx_ficha, 0,
+                           msg='textarea form-p-ficha debe existir')
+        # Buscar la última toolbar antes de form-p-ficha
+        last_toolbar_before = self.content.rfind('role="toolbar"', 0, idx_ficha)
+        self.assertEqual(last_toolbar_before, -1,
+                         msg='No debe haber toolbar antes de form-p-ficha')
+
+    def test_toolbar_form_p_cross_tiene_inject_token(self):
+        """La toolbar antes de form-p-cross debe contener llamadas
+           injectToken('form-p-cross', ...)."""
+        idx_cross = self.content.find('id="form-p-cross"')
+        self.assertGreater(idx_cross, 0,
+                           msg='textarea form-p-cross debe existir')
+        last_toolbar_before = self.content.rfind('role="toolbar"', 0, idx_cross)
+        self.assertGreater(last_toolbar_before, 0,
+                           msg='Debe haber toolbar antes de form-p-cross')
+        # Contar llamadas a injectToken entre la toolbar y el textarea
+        toolbar_block = self.content[last_toolbar_before:idx_cross]
+        self.assertIn("injectToken('form-p-cross'", toolbar_block,
+                      msg='La toolbar de form-p-cross debe tener injectToken')
+
+
+class TestArticulosToolbarRender(TestCase):
+    """Test end-to-end: al renderizar articulos.html vía la vista, los
+       4 botones están presentes y referencian los 4 tokens."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        self.empresa = crear_empresa(nombre='FichaRender', rif='J-FR-001')
+        self.user = User.objects.create_user('art_usr', password='test1234')
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+        self.client.login(username='art_usr', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+    def test_vista_articulos_renderiza_toolbar(self):
+        """GET /articulos/ debe renderizar 2 toolbars (cross + quick)."""
+        response = self.client.get(reverse('inventory:articulos'))
+        self.assertEqual(response.status_code, 200)
+        # AssertContains cuenta ocurrencias → 2 toolbars
+        self.assertContains(response, 'role="toolbar"', count=2)
+        # 8 llamadas injectToken (4 botones × 2 textareas)
+        self.assertContains(response, "injectToken('form-p-cross'", count=4)
+        self.assertContains(response, "injectToken('form-p-quick'", count=4)
+
+    def test_vista_articulos_define_funcion_inject_token(self):
+        """El HTML renderizado debe incluir la función injectToken()."""
+        response = self.client.get(reverse('inventory:articulos'))
+        self.assertContains(response, 'function injectToken(')
+
+    def test_vista_articulos_menciona_token_bs_base(self):
+        """El HTML debe mencionar $[PRECIO_BS_BASE]."""
+        response = self.client.get(reverse('inventory:articulos'))
+        self.assertContains(response, '$[PRECIO_BS_BASE]')
 

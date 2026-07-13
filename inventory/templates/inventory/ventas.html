@@ -204,12 +204,6 @@
                                     <span class="text-slate-800 dark:text-slate-200 font-bold"
                                         id="note-subtotal-usd">$0.00</span>
                                 </div>
-                                <div class="flex justify-between items-center text-xs">
-                                    <span class="text-slate-500 dark:text-slate-400">Descuento Aplicado:</span>
-                                    <!-- Rojo para salidas o deducciones -->
-                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
-                                        id="note-discount-usd">-$0.00</span>
-                                </div>
                                 <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
                                 <div class="flex justify-between items-center text-xs">
                                     <span class="text-slate-500 dark:text-slate-400">Descuento Global:</span>
@@ -230,7 +224,7 @@
                                     <span class="font-bold" id="note-total-bcv-usd">$0.00</span>
                                 </div>
                                 <div id="iva-row" class="hidden flex justify-between items-center text-xs text-amber-600 dark:text-amber-400">
-                                    <span>IVA (16%):</span>
+                                    <span>IVA:</span>
                                     <span class="font-bold" id="note-iva-amount">$0.00</span>
                                 </div>
                                 <div
@@ -265,11 +259,21 @@
                         </div>
                     </div>
                 </div>
+    </section>
 
 <script>
     let globalFactor = Number("{{ config.factor_cobertura|stringformat:'.4f'|default:'1.0000' }}");
     let globalBCV = Number("{{ config.tasa_bcv|stringformat:'.4f'|default:'0.0000' }}");
-    let lastCorrelative = 1;
+
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&')
+            .replace(/</g, '<')
+            .replace(/>/g, '>')
+            .replace(/"/g, '"')
+            .replace(/'/g, '&#39;');
+    }
 
     let clientDataset = [
         {id: '', nombre: 'Consumidor Final', identificacion: '', telefono: '', direccion: ''},
@@ -342,7 +346,7 @@
         items.forEach(c => {
             const div = document.createElement('div');
             div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs";
-            div.innerHTML = `<span class="font-bold text-slate-800 dark:text-slate-200">${c.nombre}</span> <span class="text-slate-500 dark:text-slate-400 ml-2 font-mono text-[10px]">${c.identificacion}</span>`;
+            div.innerHTML = `<span class="font-bold text-slate-800 dark:text-slate-200">${escapeHtml(c.nombre)}</span> <span class="text-slate-500 dark:text-slate-400 ml-2 font-mono text-[10px]">${escapeHtml(c.identificacion)}</span>`;
             div.onclick = () => selectClient(c);
             dropdown.appendChild(div);
         });
@@ -412,7 +416,7 @@
                 data.results.forEach(item => {
                     const div = document.createElement('div');
                     div.className = "p-2 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 cursor-pointer text-xs flex justify-between";
-                    div.innerHTML = `<span class="font-bold text-indigo-600">${item.sku}</span> <span class="text-slate-800 dark:text-slate-300">${item.nombre}</span> <span class="font-bold text-emerald-600">$${item.precio}</span>${item.usa_serial ? '<span class="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30 px-1 py-0.5 rounded ml-1">Serial</span>' : ''}`;
+                    div.innerHTML = `<span class="font-bold text-indigo-600">${escapeHtml(item.sku)}</span> <span class="text-slate-800 dark:text-slate-300">${escapeHtml(item.nombre)}</span> <span class="font-bold text-emerald-600">$${escapeHtml(item.precio)}</span>${item.usa_serial ? '<span class="text-[9px] bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30 px-1 py-0.5 rounded ml-1">Serial</span>' : ''}`;
                     div.onclick = () => {
                         document.getElementById('sale-item-search').value = item.nombre;
                         document.getElementById('sale-item-selected-sku').value = item.sku;
@@ -512,9 +516,9 @@
             const row = document.createElement('tr');
             row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
             row.innerHTML = `
-                <td class="py-3 px-2 text-slate-500 dark:text-slate-400 font-bold">${item.sku}</td>
+                <td class="py-3 px-2 text-slate-500 dark:text-slate-400 font-bold">${escapeHtml(item.sku)}</td>
                 <td class="py-3 px-2 text-slate-800 dark:text-slate-200 font-medium">
-                    ${item.nombre}
+                    ${escapeHtml(item.nombre)}
                     ${item.tipo === 'COMBO' ? '<span class="text-[9px] bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30 px-1 py-0.5 rounded ml-1">Combo</span>' : ''}
                 </td>
                 <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
@@ -624,7 +628,7 @@
             section.className = "bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl p-3 space-y-2";
 
             let html = `<div class="flex justify-between items-center">
-                <span class="font-bold text-xs text-slate-800 dark:text-slate-200">${item.nombre} <span class="font-mono text-[10px] text-slate-500">(${item.sku})</span></span>
+                <span class="font-bold text-xs text-slate-800 dark:text-slate-200">${escapeHtml(item.nombre)} <span class="font-mono text-[10px] text-slate-500">(${escapeHtml(item.sku)})</span></span>
                 <span class="text-[10px] font-bold px-2 py-0.5 rounded ${completado ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'}">${completado ? 'Completo' : 'Pendiente'} — ${progreso}</span>
             </div>`;
 
@@ -636,8 +640,8 @@
                     const checked = seleccionados.includes(s.serial);
                     const disabled = !checked && completado;
                     html += `<label class="flex items-center gap-2 text-[10px] p-1.5 rounded-lg cursor-pointer transition ${checked ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800/40' : disabled ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'}">
-                        <input type="checkbox" class="serial-checkbox accent-indigo-600" data-item-sku="${item.sku}" data-item-almacen="${item.almacen}" data-serial="${s.serial}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="toggleSerial(this)">
-                        <span class="font-mono font-bold text-slate-800 dark:text-slate-200">${s.serial}</span>
+                        <input type="checkbox" class="serial-checkbox accent-indigo-600" data-item-sku="${escapeHtml(item.sku)}" data-item-almacen="${item.almacen}" data-serial="${escapeHtml(s.serial)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="toggleSerial(this)">
+                        <span class="font-mono font-bold text-slate-800 dark:text-slate-200">${escapeHtml(s.serial)}</span>
                     </label>`;
                 });
                 html += `</div>`;
@@ -703,6 +707,11 @@
             }))
         };
 
+        const confirmBtn = document.getElementById('confirm-sale-btn');
+        const originalHtml = confirmBtn.innerHTML;
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+
         fetch('/ventas/crear/', {
             method: 'POST',
             headers: { 
@@ -711,7 +720,12 @@
             },
             body: JSON.stringify(payload)
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) {
+                return r.json().catch(() => ({ ok: false, error: 'Error interno del servidor.' }));
+            }
+            return r.json();
+        })
         .then(data => {
             if(data.ok) {
                 const notaId = data.nota_id;
@@ -724,10 +738,14 @@
                 }
             } else {
                 alert(`Error: ${data.error}`);
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = originalHtml;
             }
         })
         .catch(err => {
             alert("Error de conexión con el servidor.");
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = originalHtml;
         });
     }
 </script>

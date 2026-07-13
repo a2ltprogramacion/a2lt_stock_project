@@ -41,7 +41,7 @@
                     </div>
                     <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400 mt-1">
                         <span><i class="fa-solid fa-calendar mr-1"></i>{{ documento.fecha_compra|date:"d/m/Y" }}</span>
-                        <span><i class="fa-solid fa-warehouse mr-1"></i>{{ documento.almacen.nombre }}</span>
+                        <span><i class="fa-solid fa-warehouse mr-1"></i>{{ detalles.first.almacen.nombre }}</span>
                     </div>
                 </div>
 
@@ -52,8 +52,8 @@
                     </div>
                     <div class="text-slate-800 dark:text-slate-200">{{ documento.proveedor.nombre }}</div>
                     <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400">
-                        <span><i class="fa-solid fa-phone mr-1"></i>{{ documento.proveedor.telefono or '--' }}</span>
-                        <span><i class="fa-solid fa-location-dot mr-1"></i>{{ documento.proveedor.direccion or '--' }}</span>
+                        <span><i class="fa-solid fa-phone mr-1"></i>{{ documento.proveedor.telefono|default:"--" }}</span>
+                        <span><i class="fa-solid fa-location-dot mr-1"></i>{{ documento.proveedor.direccion|default:"--" }}</span>
                     </div>
                 </div>
 
@@ -64,6 +64,12 @@
                         <span class="text-slate-500 dark:text-slate-400">Subtotal Divisas ($):</span>
                         <span class="text-slate-800 dark:text-slate-200 font-bold">${{ total_usd|floatformat:2 }}</span>
                     </div>
+                    {% if monto_descuento_usd and monto_descuento_usd > 0 %}
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-rose-500 dark:text-rose-400">Descuento ({{ descuento_global|floatformat:2 }}%):</span>
+                        <span class="text-rose-600 dark:text-rose-400 font-bold">-${{ monto_descuento_usd|floatformat:2 }}</span>
+                    </div>
+                    {% endif %}
                     <div class="flex justify-between items-center text-xs">
                         <span class="text-slate-500 dark:text-slate-400">Total IVA USD:</span>
                         <span class="text-amber-600 dark:text-amber-400 font-bold">${{ total_iva_usd|floatformat:2 }}</span>

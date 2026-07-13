@@ -1831,18 +1831,6 @@ def registrar_compra_proveedor(
         tasa_mercado_snap = config_tasa.tasa_mercado
         factor_snap = config_tasa.factor_cobertura
 
-        # Generar correlativo interno (numero_interno) = prefijo + número secuencial
-        prefijo = config_tasa.prefijo_factura_compra or 'FC'
-        # Buscar el último número usado para esta empresa
-        from django.db.models import Max
-        max_num = DocumentoCompra.global_objects.filter(
-            empresa_id=empresa_id_int
-        ).aggregate(max_num=Max('id'))['max_num'] or 0
-        # Usar el correlativo inicial configurado
-        correlativo_inicial = config_tasa.correlativo_inicial_factura_compra or 1
-        numero_secuencial = max(max_num + 1, correlativo_inicial)
-        numero_interno = f"{prefijo}-{numero_secuencial:08d}"
-
         # Validar unicidad de numero_factura si es FACTURA_COMPRA
         if tipo_documento == 'FACTURA_COMPRA':
             if DocumentoCompra.global_objects.filter(
@@ -1854,12 +1842,13 @@ def registrar_compra_proveedor(
                     "para esta empresa. No se pueden duplicar facturas."
                 )
 
-        # Crear cabecera (los totales se recalculan abajo)
+        # Crear cabecera (los totales se recalculan abajo).
+        # numero y numero_interno NO se pasan -> DocumentoCompra.save()
+        # los auto-genera con Max('numero') + correlativo_inicial_factura_compra.
         documento = DocumentoCompra.objects.create(
             empresa_id=empresa_id_int,
             proveedor=proveedor,
             tipo_documento=tipo_documento,
-            numero_interno=numero_interno,
             numero_factura=numero_factura,
             fecha_compra=fecha_compra,
             monto_total_usd=Decimal('0.0000'),  # se recalcula
@@ -1982,15 +1971,27 @@ def registrar_compra_proveedor(
             logger.info("[COMPRA] %s unid. de %s. Costo actualizado a %s", cantidad, sku, costo_factura)
 
         # Totales finales del documento
-        # Aplicar descuento global sobre subtotal
-        descuento_global_usd = (subtotal_usd * (descuento_global / Decimal('100'))).quantize(Decimal('0.0001'))
-        monto_total_usd = (subtotal_usd - descuento_global_usd).quantize(Decimal('0.0001'))
+        # Aplicar descuento global proporcionalmente a cada ítem, luego calcular IVA
+        factor_global = Decimal('1') - (descuento_global / Decimal('100'))
+        subtotal_after_discount = Decimal('0')
+        iva_total_usd = Decimal('0')
+        
+        for d in documento.detalles.all():
+            item_subtotal = d.subtotal_usd
+            item_discounted = (item_subtotal * factor_global).quantize(Decimal('0.0001'))
+            item_iva = (item_discounted * (d.iva_porcentaje / Decimal('100'))).quantize(Decimal('0.0001'))
+            subtotal_after_discount += item_discounted
+            iva_total_usd += item_iva
 
-        # IVA total en Bs
-        iva_total_bs = sum(d.iva_bs for d in documento.detalles.all())
+        monto_total_usd = (subtotal_after_discount + iva_total_usd).quantize(Decimal('0.0001'))
 
-        # Total en Bs = (subtotal_usd - descuento_global_usd + iva_total_usd) * tasa_bcv
-        total_bs = ((monto_total_usd + iva_total_usd) * tasa_bcv_snap).quantize(Decimal('0.01'))
+        # Total en Bs = (subtotal_with_discount + iva_total_usd) * tasa_bcv.
+        # El IVA en Bs se calcula dinámicamente en la property iva_bs de cada
+        # DetalleDocumentoCompra (iva_usd * tasa_bcv_aplicada) y se muestra
+        # en vistas/PDF. Aquí calculamos el snapshot monto_total_bs_snapshot
+        # del documento completo aplicando el descuento_global a la base
+        # monetaria en USD antes de convertir a Bs.
+        total_bs = ((subtotal_after_discount + iva_total_usd) * tasa_bcv_snap).quantize(Decimal('0.01'))
 
         # Actualizar documento con totales finales
         documento.monto_total_usd = monto_total_usd
