@@ -29,6 +29,7 @@ class EmpresaQuerySet(models.QuerySet):
             return self.filter(empresa_id=empresa_id)
         return self
 
+
 class EmpresaManager(models.Manager):
     """
     Manager multi-tenant que filtra automáticamente por la empresa activa (ADR-17).
@@ -36,13 +37,16 @@ class EmpresaManager(models.Manager):
     SEGURIDAD: Si el ContextVar no tiene empresa (None), retorna un queryset
     VACÍO en lugar de toda la tabla, previniendo fugas de datos cross-tenant.
     Use global_objects para consultas administrativas explícitas.
+
+    IMPORTANTE: Requiere que cada modelo multi-tenant posea una columna
+    física ``empresa_id`` en la BD (vía FK ``models.ForeignKey(Empresa,
+    ...)``). Modelos 'transitivos' sin columna ``empresa_id`` propia
+    deber usar ``global_objects`` y filtrar manualmente via su cabecera.
     """
     def get_queryset(self):
-        qs = EmpresaQuerySet(self.model, using=self._db)
         empresa_id = get_current_empresa()
-        if empresa_id is not None:
-            qs = qs.filter(empresa_id=empresa_id)
-        else:
-            qs = qs.none()
-        return qs
+        qs = super().get_queryset()
+        if empresa_id is None:
+            return qs.none()
+        return qs.filter(empresa_id=empresa_id)
 

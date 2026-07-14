@@ -1,0 +1,400 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white">
+                <i class="fa-solid fa-rotate-left mr-2"></i> Módulo de Notas de Crédito
+            </h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                Devoluciones parciales o totales sobre ventas y compras. Ticket #18-NC.
+            </p>
+        </div>
+    </div>
+
+    <!-- ─── TABS ─────────────────────────────────────────────────────────── -->
+    <div class="flex border-b border-slate-200 dark:border-slate-800">
+        <button id="tab-btn-lista" onclick="switchTab('lista')"
+            class="px-6 py-3 font-bold text-sm border-b-2 border-indigo-500 text-indigo-600 dark:text-indigo-400 transition">
+            <i class="fa-solid fa-list mr-2"></i> Historial de NCs
+        </button>
+        <button id="tab-btn-emitir" onclick="switchTab('emitir')"
+            class="px-6 py-3 font-bold text-sm border-b-2 border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition">
+            <i class="fa-solid fa-plus-circle mr-2"></i> Emitir Nueva NC
+        </button>
+    </div>
+
+    <!-- ─── TAB HISTORIAL ────────────────────────────────────────────────── -->
+    <div id="tab-lista" class="block">
+        <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div class="overflow-x-auto h-[520px] overflow-y-auto">
+                <table class="w-full text-left text-xs">
+                    <thead>
+                        <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800 sticky top-0 bg-white dark:bg-slate-900">
+                            <th class="pb-2">Tipo</th>
+                            <th class="pb-2">N° Control</th>
+                            <th class="pb-2">Fecha</th>
+                            <th class="pb-2">Doc. Origen</th>
+                            <th class="pb-2">Motivo</th>
+                            <th class="pb-2 text-right">Total USD</th>
+                            <th class="pb-2">Estado</th>
+                            <th class="pb-2 text-right">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                        {% for item in notas_data %}
+                            {% with nc=item.nc %}
+                            <tr id="row-nc-{{ nc.pk }}" class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                                <td class="py-3">
+                                    {% if nc.doc_origen_tipo == 'VENTA' %}
+                                        <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400 text-[10px] font-bold">VENTA</span>
+                                    {% else %}
+                                        <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400 text-[10px] font-bold">COMPRA</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3 font-bold">{{ nc.numero_control|default:'NC-pendiente' }}</td>
+                                <td class="py-3">{{ nc.fecha|date:"d/m/Y H:i" }}</td>
+                                <td class="py-3">{{ item.origen_display }}</td>
+                                <td class="py-3 truncate max-w-[200px]" title="{{ nc.motivo }}">{{ nc.motivo }}</td>
+                                <td class="py-3 text-right font-bold">${{ nc.monto_total_reembolso|default:0|floatformat:2 }}</td>
+                                <td class="py-3">
+                                    <span id="badge-nc-{{ nc.pk }}" class="px-2 py-0.5 rounded text-[9px] font-bold
+                                        {% if nc.estado == 'ANULADO' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                                        {% else %}bg-sky-100 text-sky-800 dark:bg-sky-500/10 dark:text-sky-400{% endif %}">
+                                        {{ nc.estado }}
+                                    </span>
+                                </td>
+                                <td class="py-3 text-right space-x-1">
+                                    <a href="{% url 'inventory:detalle_nc' nc.pk %}" class="inline-block bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-bold px-2 py-1 rounded transition">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </a>
+                                    <a href="{% url 'inventory:pdf_nc' nc.pk %}" target="_blank" class="inline-block bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold px-2 py-1 rounded transition">
+                                        <i class="fa-solid fa-file-pdf"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endwith %}
+                        {% empty %}
+                            <tr><td colspan="8" class="py-6 text-center text-slate-500">
+                                <i class="fa-solid fa-inbox text-2xl mb-2 block"></i>
+                                No hay Notas de Crédito registradas todavía.
+                            </td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── TAB EMITIR ───────────────────────────────────────────────────── -->
+    <div id="tab-emitir" class="hidden">
+        <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+            <!-- Selector tipo + búsqueda -->
+            <div class="grid md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5">Tipo de Origen</label>
+                    <select id="nc-tipo" onchange="onTipoChange()"
+                        class="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-sm">
+                        <option value="venta">Venta (Nota de Entrega / Factura)</option>
+                        <option value="compra">Compra (Documento de Compra)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5">
+                        Buscar Doc. por <span id="nc-search-label">N° Nota / N° Factura</span>
+                    </label>
+                    <input id="nc-buscar" type="text" placeholder="ej: 5 o FACT-001"
+                        class="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-sm">
+                </div>
+                <div class="flex items-end">
+                    <button onclick="buscarOrigen()"
+                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-4 py-2 rounded-lg transition">
+                        <i class="fa-solid fa-search mr-2"></i> Cargar Documento
+                    </button>
+                </div>
+            </div>
+
+            <!-- Destino (visible tras buscar) -->
+            <div id="nc-origen-info" class="hidden bg-indigo-50 dark:bg-indigo-500/10 p-4 rounded-xl border border-indigo-200 dark:border-indigo-500/30">
+                <div class="text-sm font-bold text-indigo-900 dark:text-indigo-300" id="nc-origen-label">NE-00000005 (FACTURA ABC-001)</div>
+            </div>
+
+            <div id="nc-error" class="hidden bg-red-50 dark:bg-red-500/10 p-3 rounded-lg text-red-700 dark:text-red-400 text-xs font-bold"></div>
+
+            <!-- Grilla editable de items -->
+            <div id="nc-items-wrap" class="hidden">
+                <label class="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">Líneas a devolver (marcar y ajustar):</label>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs">
+                        <thead>
+                            <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                                <th class="pb-2 w-8"></th>
+                                <th class="pb-2">SKU</th>
+                                <th class="pb-2">Artículo</th>
+                                <th class="pb-2">Almacén</th>
+                                <th class="pb-2 text-right">Cant. Orig.</th>
+                                <th class="pb-2 text-right">Ya devuelto</th>
+                                <th class="pb-2 text-right">A devolver</th>
+                                <th class="pb-2 text-right">Precio U.</th>
+                                <th class="pb-2 text-right">IVA %</th>
+                                <th class="pb-2 text-right">Total USD</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nc-items-tbody" class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                        </tbody>
+                        <tfoot>
+                            <tr class="border-t-2 border-slate-200 dark:border-slate-700 text-xs font-bold">
+                                <td colspan="9" class="py-3 text-right">TOTAL A REEMBOLSAR →</td>
+                                <td class="py-3 text-right text-lg text-indigo-600 dark:text-indigo-400" id="nc-total">$0.00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <!-- Motivo + Submit -->
+                <div class="grid md:grid-cols-4 gap-4 mt-5">
+                    <div class="md:col-span-3">
+                        <label class="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1.5">Motivo (obligatorio)</label>
+                        <input id="nc-motivo" type="text" maxlength="500"
+                            placeholder="ej: Cliente devolvió producto defectuoso"
+                            class="w-full px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-sm">
+                    </div>
+                    <div class="flex items-end">
+                        <button id="nc-submit" onclick="submitNC()" disabled
+                            class="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed dark:disabled:bg-slate-700 text-white text-sm font-bold px-4 py-2 rounded-lg transition">
+                            <i class="fa-solid fa-check mr-2"></i> Emitir NC
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+    .nc-row-check:checked + .nc-row-style { background-color: rgb(238 242 255 / 1); }
+    .dark .nc-row-check:checked + .nc-row-style { background-color: rgb(49 46 129 / 0.2); }
+</style>
+
+<script>
+    const ENDPOINT_CREAR = "{% url 'inventory:crear_nc' %}";
+    const ENDPOINT_API   = "{% url 'inventory:api_origen_detalle' %}";
+
+    let currentOrig = null;   // {tipo, doc_id, items:[]}
+    const itemsSeleccion = new Map();   // detalle_id -> {cantidad, precio, iva}
+
+    function switchTab(tab) {
+        document.getElementById('tab-lista').classList.toggle('hidden', tab !== 'lista');
+        document.getElementById('tab-emitir').classList.toggle('hidden', tab !== 'emitir');
+        const colors = ['border-transparent', 'text-slate-500'];
+        ['lista', 'emitir'].forEach(t => {
+            const btn = document.getElementById('tab-btn-' + t);
+            btn.classList.remove('border-indigo-500', 'text-indigo-600', 'dark:text-indigo-400', 'border-transparent', 'text-slate-500');
+            if (t === tab) {
+                btn.classList.add('border-indigo-500', 'text-indigo-600', 'dark:text-indigo-400');
+            } else {
+                btn.classList.add('border-transparent', 'text-slate-500');
+            }
+        });
+    }
+
+    function onTipoChange() {
+        const tipo = document.getElementById('nc-tipo').value;
+        document.getElementById('nc-search-label').textContent =
+            tipo === 'venta' ? 'N° Nota / N° Factura' : 'ID Compra / N° Factura';
+        document.getElementById('nc-buscar').value = '';
+        document.getElementById('nc-origen-info').classList.add('hidden');
+        document.getElementById('nc-items-wrap').classList.add('hidden');
+        document.getElementById('nc-error').classList.add('hidden');
+        currentOrig = null;
+        itemsSeleccion.clear();
+    }
+
+    function showError(msg) {
+        const el = document.getElementById('nc-error');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
+    function hideError() {
+        document.getElementById('nc-error').classList.add('hidden');
+    }
+
+    async function buscarOrigen() {
+        hideError();
+        const tipo = document.getElementById('nc-tipo').value;
+        const q = document.getElementById('nc-buscar').value.trim();
+        if (!q) { showError('Indique un identificador de documento.'); return; }
+
+        try {
+            const qs = '?tipo=' + encodeURIComponent(tipo) + '&q=' + encodeURIComponent(q);
+            const resp = await fetch(ENDPOINT_API + qs, { headers: { 'X-CSRFToken': getCookie('csrftoken') }});
+            const data = await resp.json();
+            if (!data.ok) { showError(data.error); return; }
+
+            currentOrig = data;
+            document.getElementById('nc-origen-label').textContent = data.doc_label;
+            document.getElementById('nc-origen-info').classList.remove('hidden');
+            renderItems(data.items);
+            document.getElementById('nc-items-wrap').classList.remove('hidden');
+            itemsSeleccion.clear();
+            itemsSeleccion.size === 0;  // no-op
+            recomputeTotal();
+        } catch(e) {
+            showError('Error de conexión: ' + e.message);
+        }
+    }
+
+    function renderItems(items) {
+        const tb = document.getElementById('nc-items-tbody');
+        tb.innerHTML = '';
+        items.forEach(it => {
+            const tr = document.createElement('tr');
+            tr.id = 'nc-item-row-' + it.detalle_id;
+            tr.className = 'hover:bg-slate-50 dark:hover:bg-slate-800/30 transition';
+            tr.innerHTML = `
+                <td class="py-2"><input type="checkbox" class="nc-row-check w-4 h-4 accent-indigo-600" data-detid="${it.detalle_id}"></td>
+                <td class="py-2 font-bold">${it.sku}</td>
+                <td class="py-2">${escapeHtml(it.nombre)}</td>
+                <td class="py-2">${escapeHtml(it.almacen)}</td>
+                <td class="py-2 text-right">${formatDec4(it.cantidad_original)}</td>
+                <td class="py-2 text-right text-amber-600">${formatDec4(it.cantidad_ya_devuelta)}</td>
+                <td class="py-2 text-right"><input type="number" step="0.0001" min="0" max="${it.cantidad_pendiente}" value="${it.cantidad_pendiente}"
+                    data-detid="${it.detalle_id}" data-max="${it.cantidad_pendiente}"
+                    class="w-24 text-right px-1 py-0.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 nc-cant-input" disabled></td>
+                <td class="py-2 text-right"><input type="number" step="0.0001" min="0" value="${it.precio_unitario}"
+                    data-detid="${it.detalle_id}"
+                    class="w-24 text-right px-1 py-0.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 nc-precio-input" disabled></td>
+                <td class="py-2 text-right"><input type="number" step="0.01" min="0" max="100" value="${it.iva_porcentaje}"
+                    data-detid="${it.detalle_id}"
+                    class="w-16 text-right px-1 py-0.5 border border-slate-300 dark:border-slate-700 rounded bg-white dark:bg-slate-800 nc-iva-input" disabled></td>
+                <td class="py-2 text-right nc-row-total font-bold">$0.00</td>
+            `;
+            tb.appendChild(tr);
+        });
+
+        // Wire events.
+        document.querySelectorAll('.nc-row-check').forEach(cb => {
+            cb.addEventListener('change', onCheckToggle);
+        });
+        document.querySelectorAll('.nc-cant-input, .nc-precio-input, .nc-iva-input').forEach(inp => {
+            inp.addEventListener('input', onLineInput);
+        });
+    }
+
+    function onCheckToggle(ev) {
+        const detid = ev.target.dataset.detid;
+        const cantInput  = document.querySelector(`.nc-cant-input[data-detid="${detid}"]`);
+        const precioInput = document.querySelector(`.nc-precio-input[data-detid="${detid}"]`);
+        const ivaInput    = document.querySelector(`.nc-iva-input[data-detid="${detid}"]`);
+        const enabled = ev.target.checked;
+
+        [cantInput, precioInput, ivaInput].forEach(i => i.disabled = !enabled);
+
+        if (enabled) {
+            itemsSeleccion.set(detid, {
+                cantidad:  parseFloat(cantInput.value),
+                precio:    parseFloat(precioInput.value),
+                iva:       parseFloat(ivaInput.value),
+            });
+        } else {
+            itemsSeleccion.delete(detid);
+        }
+        recomputeTotal();
+    }
+
+    function onLineInput(ev) {
+        const detid = ev.target.dataset.detid;
+        const entry = itemsSeleccion.get(detid);
+        if (!entry) return;
+        if (ev.target.classList.contains('nc-cant-input'))  entry.cantidad = parseFloat(ev.target.value) || 0;
+        if (ev.target.classList.contains('nc-precio-input')) entry.precio = parseFloat(ev.target.value) || 0;
+        if (ev.target.classList.contains('nc-iva-input'))    entry.iva = parseFloat(ev.target.value) || 0;
+        itemsSeleccion.set(detid, entry);
+        recomputeTotal();
+    }
+
+    function recomputeTotal() {
+        let total = 0;
+        itemsSeleccion.forEach((v, detid) => {
+            const cant = Math.min(v.cantidad || 0, parseFloat(document.querySelector(`.nc-cant-input[data-detid="${detid}"]`).dataset.max));
+            const sub = cant * (v.precio || 0);
+            const iva = sub * ((v.iva || 0) / 100);
+            const lineTotal = sub + iva;
+            const cell = document.querySelector(`#nc-item-row-${detid} .nc-row-total`);
+            if (cell) cell.textContent = '$' + lineTotal.toFixed(4);
+            total += lineTotal;
+        });
+        document.getElementById('nc-total').textContent = '$' + total.toFixed(4);
+        document.getElementById('nc-submit').disabled = itemsSeleccion.size === 0;
+    }
+
+    function getCookie(name) {
+        let v = null;
+        if (document.cookie) {
+            for (const c of document.cookie.split(';')) {
+                const t = c.trim();
+                if (t.startsWith(name + '=')) { v = decodeURIComponent(t.substring(name.length+1)); break; }
+            }
+        }
+        return v;
+    }
+
+    function escapeHtml(s) {
+        return String(s||'').replace(/[&<>"']/g, m => ({
+            '&':'&','<':'<','>':'>','"':'"',"'":'''
+        }[m]));
+    }
+    function formatDec4(s) {
+        const n = parseFloat(s);
+        return isNaN(n) ? s : n.toFixed(4);
+    }
+
+    async function submitNC() {
+        const motivo = document.getElementById('nc-motivo').value.trim();
+        if (!motivo) { showError('El motivo es obligatorio.'); return; }
+        if (!currentOrig || itemsSeleccion.size === 0) { showError('Marque al menos una línea.'); return; }
+
+        const items = [];
+        itemsSeleccion.forEach((v, detid) => {
+            items.push({
+                detalle_id: parseInt(detid),
+                cantidad_devolver: v.cantidad,
+                precio_unitario: v.precio,
+                iva_porcentaje: v.iva,
+            });
+        });
+
+        const payload = {
+            tipo: currentOrig.tipo,
+            doc_id: currentOrig.doc_id,
+            motivo: motivo,
+            items: items,
+        };
+
+        const btn = document.getElementById('nc-submit');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> Procesando...';
+
+        try {
+            const resp = await fetch(ENDPOINT_CREAR, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                body: JSON.stringify(payload),
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                alert('NC emitida con éxito: ' + (data.numero_control || ('#' + (data.nc_id || ''))));
+                window.location.reload();
+            } else {
+                showError(data.error);
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> Emitir NC';
+            }
+        } catch(e) {
+            showError('Error de conexión: ' + e.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> Emitir NC';
+        }
+    }
+</script>
+{% endblock %}

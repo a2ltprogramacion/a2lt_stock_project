@@ -47,6 +47,13 @@ urlpatterns = [
     path('compras/<int:compra_id>/pdf/', views.generar_pdf_compra, name='pdf_compra'),
     path('compras/<int:compra_id>/', views.vista_detalle_compra, name='detalle_compra'),
 
+    # ── Ticket #18-NC: Notas de Crédito (Devoluciones) ─────────────────────
+    path('notas-credito/', views.notas_credito_view, name='notas_credito'),
+    path('notas-credito/api/origen-detalle/', views.api_origen_detalle, name='api_origen_detalle'),
+    path('notas-credito/crear/', views.api_crear_nc, name='crear_nc'),
+    path('notas-credito/<int:nc_id>/', views.vista_detalle_nc, name='detalle_nc'),
+    path('notas-credito/<int:nc_id>/pdf/', views.generar_pdf_nc, name='pdf_nc'),
+
     # Tasas
     path('tasas/sincronizar/', views.vista_sincronizar_tasa, name='sincronizar_tasa'),
 

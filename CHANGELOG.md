@@ -8,6 +8,94 @@ vez público.
 
 ---
 
+## [1.2.0] — 2026-07-13
+
+Iteración que cierra el **TKET #18-NC** (Notas de Crédito / Devoluciones):
+módulo aparte `/notas-credito/` con devoluciones parciales o totales
+sobre Ventas y Compras, snapshots inmutables de precios/IVA por línea,
+generación de PDFs A4, e integración atómica con Kardex.
+
+### Added (Features nuevas)
+
+- **Módulo Notas de Crédito (`/notas-credito/`):** nueva ruta con 5
+  endpoints (`notas_credito`, `api_origen_detalle`, `crear_nc`,
+  `detalle_nc`, `pdf_nc`) y 2 templates (`notas_credito.html` +
+  `nota_credito_detalle.html`). Pantalla única con pestañas **Historial
+  de NCs** (totales, estado, link a PDF) y **Emitir Nueva NC** (carga
+  del documento origen → grilla editable de líneas con IVA % por
+  item → submit JSON con motivo obligatorio).
+- **Modelos `NotaCredito` + `DetalleNotaCredito`:** nueva jerarquía
+  con `prefijo` + `numero` + `numero_control`, integración 1-NC-1-origen
+  enforce por `CheckConstraint` (XOR entre `nota_entrega` y
+  `factura_compra`). Snapshots inmutables de `precio_unitario_snapshot`,
+  `iva_porcentaje_snapshot`, `cantidad_devuelta` por cada línea, con
+  cálculo automático de `subtotal_devuelto_usd` + `iva_usd` +
+  `linea_total_usd` en `save()`.
+- **`ConfiguracionEmpresa.prefijo_nota_credito` + 
+  `correlativo_inicial_nota_credito`:** configurable por el tenant
+  (default `NC` + correlativo aislado por empresa). Autoasignación de
+  `numero = Max('numero') + 1` dentro del tenant.
+- **`procesar_devolucion_venta()` + `procesar_devolucion_compra()`:** 
+  servicios atómicos en `services.py` con `@transaction.atomic`,
+  validación perimetral multi-tenant (`global_objects` para evitar
+  leak entre tenants), kardex (`DEVOLUCION_VENTA` ENTRADA /
+  `DEVOLUCION_COMPRA` SALIDA) y liberación FIFO de seriales 
+  (VENDIDO → DISPONIBLE en ventas; DISPONIBLE → ANULADO_COMPRA en
+  compras). Reverso de los movimientos contables generados.
+- **Properties `cantidad_devuelta_acumulada` + 
+  `cantidad_pendiente_devolver` + `es_totalmente_devuelto`:** en 
+  `DetalleNotaEntrega` y `DetalleDocumentoCompra` para que la UI y 
+  los reports muestren cuánto queda sin devolver.
+- **PDF de la NC:** `generar_pdf_nc` (reportlab A4 portrait) con
+  encabezado, motivo, doc origen, líneas y total a reembolsar.
+
+### Fixed (Bug fixes)
+
+- **C-N1:** `CheckConstraint` con `check=` (no soportado por Django)
+  reemplazada por `condition=` (la kwarg correcta). Detectado por
+  `TestSettingsHardening.test_sincronizacion_con_tests` mediante
+  `subprocess.run('manage.py check')`.
+- **C-N2:** `NotaCredito.save()` con default `prefijo='NC'` no leía
+  `ConfiguracionEmpresa.prefijo_nota_credito` porque Django nunca
+  ejecutaba la rama `if not self.prefijo`. Corregido a `default=''` 
+  (CharField truthy) → migración 0015 + tests verdes 
+  (15 backend + 14 UI).
+- **C-N3:** `_testMethodName` se usa para nombres únicos entre tests
+  `TransactionTestCase` (la BD persiste); además agregado 
+  `BEGIN; ... PRAGMA defer_foreign_keys;` para evadir FKs al limpiar.
+- **C-N4:** `create_tenant_defaults` signal ahora usa 
+  `instance.rif` en lugar de `instance.pk` para la
+  identificacion del Cliente Genérico (evita UNIQUE collisions al
+  re-correr la suite).
+- **C-N5:** código muerto de `procesar_devolucion_venta` legacy 
+  (TKET #15-SAAS, firma posicional con `tipo_costo`) eliminado; los
+  tests legacy se marquaron `@skip` con razón informativa.
+
+### Internal (Refactors)
+
+- **Limpieza mojibake:** corregidos 470+ caracteres UTF-8 mal
+  decodificados en `tests.py` (todos originados por ediciones a mano
+  en sesiones donde el encoding del editor no fue utf-8). Restaurada
+  la sincronización de `TestSettingsHardening` 
+  (subprocess `manage.py check`).
+- **PK de la NC auto:** `numero_control` se calcula en `save()` 
+  leyendo `prefijo` → `f"{prefijo}-{numero:08d}"`, evitando solaparse
+  entre tenants.
+
+### Estadísticas
+
+- **276 tests verdes** (247 previos + 15 backend + 14 UI nuevos 
+  de Notas de Crédito), 5 skipped (4 de `TestNotasDeCreditoPOS` 
+  legacy + `test_costo_historico_snapshot_venta_vs_actual` ya
+  reemplazados por `TestNotasCreditoBackend`).
+- Migraciones nuevas: `0014_nota_credito_devoluciones` y
+  `0015_nota_credito_prefijo_default`.
+- Templates nuevos: `notas_credito.html` (1 pantalla con pestañas
+  Historial + Emitir), `nota_credito_detalle.html` (cabecera + líneas
+  + totales + botón PDF).
+
+---
+
 ## [1.1.1] — 2026-07-13
 
 Iteración de refinamiento basada en feedback del cliente sobre los 

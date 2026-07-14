@@ -2089,156 +2089,19 @@ def exportar_datos_tenant(empresa_id: int, meses_historico: int = 6) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 12. MÓDULO DE DEVOLUCIONES Y CUARENTENA (TICKET #15-SAAS)
+# 12. MÓDULO DE CONTRAPARTIDAS Y REVERSOS (TICKET #20)
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# Nota histórica: La versión original de "MÓDULO DE DEVOLUCIONES Y CUARENTENA"
+# (Ticket #15-SAAS, MVP antiguo) tenía una función `procesar_devolucion_venta`
+# con firma posicional y soporte para "tipo_costo" (HISTORICO|ACTUAL),
+# "es_defectuoso" (merma automática) y "almacen_cuarentena". Esa API fue
+# enteramente reemplazada en el Ticket #18-NC (ADR-29) por un diseño limpio
+# 1-NC-1-origen con snapshots de precio e IVA persistidos por línea. La
+# maquinaria nueva vive en la sección 14 (más abajo), y los tests legacy en
+# TestNotasDeCreditoPOS están marcados con `@skip(reason=...)` por compatibilidad
+# documental.
 
-@transaction.atomic
-def procesar_devolucion_venta(nota_entrega_id: int, items_devolucion: list, tipo_costo: str, usuario: str = '') -> dict:
-    """
-    Procesa la devolución parcial o total de una venta.
-    
-    :param nota_entrega_id: ID de la Nota de Entrega original.
-    :param items_devolucion: Lista de dicts con la estructura:
-                             [{'articulo_sku': 'SKU', 'cantidad': X, 'seriales': ['IMEI-1'], 'es_defectuoso': False}]
-    :param tipo_costo: 'HISTORICO' o 'ACTUAL'.
-    """
-    from decimal import Decimal
-    from django.db.models import F
-    from inventory.models import (
-        NotaEntrega, DetalleNotaEntrega, Almacen, ConfiguracionEmpresa,
-        NotaCredito, DetalleNotaCredito, Articulo, SerialArticulo
-    )
-    from .services import registrar_movimiento  # Reuso del servicio existente
-
-    # 1. Recuperar Nota de Entrega Original (Bloqueo Pesimista)
-    nota_original = NotaEntrega.objects.select_for_update().get(id=nota_entrega_id)
-    empresa = nota_original.empresa
-    almacen_origen = nota_original.almacen
-
-    # 2. Configuración y Almacén Destino
-    config = ConfiguracionEmpresa.objects.get(empresa=empresa)
-    almacen_destino = almacen_origen
-
-    if config.usa_almacen_cuarentena:
-        almacen_cuarentena, created = Almacen.objects.get_or_create(
-            empresa=empresa,
-            nombre='Servicio Técnico/Cuarentena',
-            defaults={
-                'activo': True,
-                'es_principal': False
-            }
-        )
-        almacen_destino = almacen_cuarentena
-
-    # 3. Cabecera Nota de Crédito
-    # Numero de control autogenerado
-    import time
-    numero_nc = f"NC-{int(time.time())}"
-    
-    nota_credito = NotaCredito.objects.create(
-        empresa=empresa,
-        nota_entrega=nota_original,
-        numero_control=numero_nc,
-        motivo='Devolución de cliente'
-    )
-
-    monto_reembolso_total = Decimal('0.00')
-
-    # 4. Procesamiento de Ítems
-    for item in items_devolucion:
-        sku = item['articulo_sku']
-        cantidad_devolver = Decimal(str(item['cantidad']))
-        es_defectuoso = item.get('es_defectuoso', False)
-        seriales_ids = item.get('seriales', [])
-
-        detalle_venta = DetalleNotaEntrega.objects.get(
-            nota_entrega=nota_original,
-            articulo__sku=sku
-        )
-        articulo = detalle_venta.articulo
-
-        if cantidad_devolver > detalle_venta.cantidad:
-            raise ValueError(f"No se puede devolver {cantidad_devolver} de {articulo.nombre}, solo se facturaron {detalle_venta.cantidad}.")
-
-        # Determinación de Costo de Reingreso (ADR-18: Snapshot inmutable)
-        if tipo_costo == 'HISTORICO':
-            costo_aplicado = detalle_venta.costo_unitario_snapshot
-        else:
-            costo_aplicado = articulo.costo
-
-        # Reingreso al Kárdex (C-05: Concepto estandarizado)
-        registrar_movimiento(
-            articulo=articulo,
-            almacen=almacen_destino,
-            tipo='ENTRADA',
-            cantidad=cantidad_devolver,
-            concepto='DEVOLUCION_ENTRADA',
-            detalle_adicional=f"Devolución - Nota de Crédito #{nota_credito.id}",
-            nota_entrega=nota_original,
-            usuario=usuario
-        )
-
-        # Crear Detalle NC
-        DetalleNotaCredito.objects.create(
-            nota_credito=nota_credito,
-            articulo=articulo,
-            cantidad=cantidad_devolver,
-            costo_aplicado=costo_aplicado
-        )
-
-        monto_reembolso_total += detalle_venta.precio_base * cantidad_devolver
-
-        # Control Defectuosos Automático (C-05: Concepto estandarizado)
-        if not config.usa_almacen_cuarentena and es_defectuoso:
-            registrar_movimiento(
-                articulo=articulo,
-                almacen=almacen_destino,
-                tipo='SALIDA',
-                cantidad=cantidad_devolver,
-                concepto='MERMA_DEFECTUOSO',
-                detalle_adicional="Ajuste por salida - Artículo defectuoso devuelto",
-                nota_entrega=nota_original,
-                usuario=usuario
-            )
-
-        # Control de Seriales
-        if articulo.usa_serial:
-            if len(seriales_ids) != int(cantidad_devolver):
-                raise ValueError(f"Se requieren {int(cantidad_devolver)} seriales para la devolución de {articulo.nombre}.")
-            
-            seriales_db = list(SerialArticulo.objects.select_for_update().filter(
-                serial__in=seriales_ids,
-                articulo=articulo,
-                empresa=empresa
-            ))
-
-            for s in seriales_db:
-                if s.estado != 'VENDIDO':
-                    raise ValueError(f"El serial {s.serial} no está marcado como VENDIDO.")
-                if s.detalle_nota != detalle_venta:
-                    raise ValueError(f"El serial {s.serial} no pertenece a esta venta.")
-                
-                s.estado = 'DISPONIBLE'
-                s.detalle_nota = None
-                s.almacen = almacen_destino
-            
-            SerialArticulo.objects.bulk_update(seriales_db, ['estado', 'detalle_nota', 'almacen'])
-
-    # Actualizar monto total
-    nota_credito.monto_total_reembolso = monto_reembolso_total
-    nota_credito.save()
-
-    return {
-        'ok': True,
-        'nota_credito_id': nota_credito.id,
-        'numero_control': nota_credito.numero_control,
-        'monto_reembolsado': str(monto_reembolso_total)
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 13. MÓDULO DE CONTRAPARTIDAS Y REVERSOS (TICKET #20)
-# ─────────────────────────────────────────────────────────────────────────────
 
 @transaction.atomic
 def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
@@ -2309,4 +2172,359 @@ def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str) -> d
     seriales.update(estado='ANULADO_COMPRA')
     
     return {'ok': True, 'mensaje': f"Compra Factura {compra.numero_factura} reversada exitosamente."}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. NOTAS DE CRÉDITO — DEVOLUCIONES PARCIALES O TOTALES (TICKET #18-NC)
+#
+# Reglas (ADR-29):
+#   - Una NC se apega a un único documento origen (NE en venta o
+#     DocumentoCompra en compra), enforced por CheckConstraint.
+#   - Múltiples NCs pueden existir sobre el mismo DetalleNotaEntrega /
+#     DetalleDocumentoCompra; cada una respeta `cantidad_pendiente_devolver`.
+#   - El kardex guarda Movimiento 'DEVOLUCION_VENTA' (entrada) o
+#     'DEVOLUCION_COMPRA' (salida) por la cantidad_devuelta.
+#   - Los seriales se liberan FIFO (estado=VENDIDO → DISPONIBLE) hasta
+#     cubrir la cantidad_devuelta (solo en devoluciones de venta).
+#   - Precios snapshot persisten incluso si Articulo cambia después.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@transaction.atomic
+def procesar_devolucion_venta(
+    empresa_id: int,
+    nota_id: int,
+    items_devueltos: list,
+    motivo: str,
+    usuario: str = 'Sistema',
+) -> dict:
+    """
+    Crea una NotaCredito de VENTA con N DetalleNotaCredito.
+    
+    Par\u00e1metros:
+      - empresa_id: tenant activo (seguridad multi-tenant).
+      - nota_id: pk de NotaEntrega (origen de la devoluci\u00f3n).
+      - items_devueltos: lista de dicts {
+            'detalle_id': int (pk de DetalleNotaEntrega),
+            'cantidad_devolver': Decimal,
+            'precio_unitario': Decimal (opcional; default = precio_base origen),
+            'iva_porcentaje': Decimal (opcional; default = iva_porcentaje origen)
+        }
+      - motivo: requerido, no blank.
+      - usuario: nombre del operador (default 'Sistema').
+    
+    Retorna: dict {
+        'ok': True,
+        'nc_id': ...,
+        'numero_control': 'NC-00000001',
+        'detalles_ids': [...],
+        'monto_total_reembolso': Decimal,
+        'mensaje': '...'
+    }
+    
+    Lanza ValueError si:
+      - motivo blank.
+      - nota no encontrada / otro tenant.
+      - detalle_id no pertenece a la nota.
+      - cantidad_devolver > cantidad_pendiente_devolver del detalle.
+      - precio_unitario < 0 o iva fuera de [0, 100].
+      - items_devueltos vac\u00edo.
+    """
+    from decimal import Decimal as _D
+    from .models import (
+        NotaEntrega, DetalleNotaEntrega, NotaCredito, DetalleNotaCredito,
+        SerialArticulo, Almacen, Articulo,
+    )
+
+    motivo = (motivo or '').strip()
+    if not motivo:
+        raise ValueError("El motivo de la NC es obligatorio.")
+    if not items_devueltos:
+        raise ValueError("La lista de items devueltos no puede estar vacía.")
+
+    # 1. Validación perimetral multi-tenant (con select_for_update).
+    try:
+        nota = NotaEntrega.objects.select_for_update().get(
+            pk=nota_id, empresa_id=empresa_id,
+        )
+    except NotaEntrega.DoesNotExist:
+        raise ValueError(
+            f"La Nota de Entrega {nota_id} no pertenece a la empresa activa."
+        )
+
+    if nota.estado == 'ANULADO':
+        raise ValueError("La Nota de Entrega está anulada; no se puede emitir una NC sobre ella.")
+
+    # 2. Crear cabecera (NotaCredito.save() calcula numero y numero_control).
+    nc = NotaCredito.objects.create(
+        empresa_id=empresa_id,
+        nota_entrega=nota,
+        doc_origen_tipo='VENTA',
+        motivo=motivo,
+        usuario=usuario,
+        estado='PROCESADO',
+    )
+
+    detalles_ids = []
+    monto_total_usd = _D('0.0000')
+
+    try:
+        for item in items_devueltos:
+            cantidad_devolver = _D(str(item.get('cantidad_devolver') or 0))
+            if cantidad_devolver <= 0:
+                raise ValueError("cantidad_devolver debe ser > 0 (omite el item si 0).")
+
+            try:
+                detalle = DetalleNotaEntrega.objects.select_for_update().get(
+                    pk=item['detalle_id'],
+                    nota_entrega=nota,
+                )
+            except DetalleNotaEntrega.DoesNotExist:
+                raise ValueError(
+                    f"El detalle {item['detalle_id']} no pertenece a la nota {nota_id}."
+                )
+
+            # 3. Validar cantidad pendiente.
+            cantidad_pendiente = detalle.cantidad_pendiente_devolver
+            if cantidad_devolver > cantidad_pendiente:
+                raise ValueError(
+                    f"No se pueden devolver {cantidad_devolver} de '{detalle.articulo.nombre}'. "
+                    f"Cantidad pendiente_devolver = {cantidad_pendiente}."
+                )
+
+            # 4. Snapshots (override opcional del precio / iva).
+            precio_unitario = _D(str(
+                item.get('precio_unitario', detalle.precio_base)
+            ))
+            iva_pct = _D(str(
+                item.get('iva_porcentaje', detalle.iva_porcentaje or 0)
+            ))
+            if precio_unitario < 0:
+                raise ValueError("precio_unitario no puede ser negativo.")
+            if not (_D('0') <= iva_pct <= _D('100')):
+                raise ValueError(
+                    f"iva_porcentaje para {detalle.articulo.sku} debe estar entre 0 y 100."
+                )
+
+            # 5. Crear DetalleNotaCredito (save() calcula totales snapshot).
+            det_nc = DetalleNotaCredito.objects.create(
+                nota_credito=nc,
+                detalle_origen_venta=detalle,
+                articulo=detalle.articulo,
+                almacen=detalle.almacen,
+                cantidad_devuelta=cantidad_devolver,
+                precio_unitario_snapshot=precio_unitario,
+                iva_porcentaje_snapshot=iva_pct,
+            )
+            detalles_ids.append(det_nc.pk)
+            monto_total_usd += det_nc.linea_total_usd
+
+            # 6. Movimiento de Kárdex: ENTRADA por la cantidad devuelta
+            #    (reingresa stock al almacén del doc. origen).
+            registrar_movimiento(
+                articulo=detalle.articulo,
+                almacen=detalle.almacen,
+                tipo='ENTRADA',
+                cantidad=cantidad_devolver,
+                concepto='DEVOLUCION_VENTA',
+                detalle_adicional=(
+                    f"NC {nc.numero_control} sobre NotEntrega NE-{nota.numero:08d}: {motivo}"
+                ),
+                nota_entrega=nota,
+                usuario=usuario,
+            )
+
+            # 7. Liberar seriales FIFO (estado VENDIDO → DISPONIBLE).
+            if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
+                seriales_disponibles = list(
+                    SerialArticulo.objects.filter(
+                        detalle_nota=detalle,
+                        estado='VENDIDO',
+                        empresa_id=empresa_id,
+                    ).order_by('id')[:int(cantidad_devolver)]
+                )
+                if len(seriales_disponibles) < int(cantidad_devolver):
+                    # Log warning pero no abortamos: el operador puede seguir
+                    # si el producto tiene stock previo sin seriales.
+                    import logging
+                    logging.warning(
+                        "NC %s: seriales insuficientes para '%s' "
+                        "(esperados=%s, encontrados=%s). Continuando sin liberar todos.",
+                        nc.numero_control,
+                        detalle.articulo.sku,
+                        int(cantidad_devolver),
+                        len(seriales_disponibles),
+                    )
+                SerialArticulo.objects.filter(
+                    pk__in=[s.pk for s in seriales_disponibles]
+                ).update(estado='DISPONIBLE', detalle_nota=None)
+    except Exception:
+        # Si algo falla, el @transaction.atomic envuelve todo y hace rollback.
+        nc.delete() if nc.pk else None
+        raise
+
+    nc.monto_total_reembolso = monto_total_usd.quantize(_D('0.0001'))
+    nc.save(update_fields=['monto_total_reembolso'])
+
+    return {
+        'ok': True,
+        'nc_id': nc.pk,
+        'numero_control': nc.numero_control,
+        'detalles_ids': detalles_ids,
+        'monto_total_reembolso': nc.monto_total_reembolso,
+        'mensaje': (
+            f"Nota de Crédito {nc.numero_control} emitida sobre "
+            f"Nota de Entrega NE-{nota.numero:08d}: {len(detalles_ids)} item(s) devuelto(s)."
+        ),
+    }
+
+
+@transaction.atomic
+def procesar_devolucion_compra(
+    empresa_id: int,
+    compra_id: int,
+    items_devueltos: list,
+    motivo: str,
+    usuario: str = 'Sistema',
+) -> dict:
+    """
+    Crea una NotaCredito de COMPRA con N DetalleNotaCredito.
+    
+    An\u00e1logo a procesar_devolucion_venta pero:
+      - kardex: SALIDA por la cantidad (sacamos del almacén del doc. origen).
+      - seriales se reciclan a estado ANULADO_COMPRA (no DISPONIBLE).
+    
+    Mismas validaciones que procesar_devolucion_venta.
+    """
+    from decimal import Decimal as _D
+    from .models import (
+        DocumentoCompra, DetalleDocumentoCompra, NotaCredito, DetalleNotaCredito,
+    )
+
+    motivo = (motivo or '').strip()
+    if not motivo:
+        raise ValueError("El motivo de la NC es obligatorio.")
+    if not items_devueltos:
+        raise ValueError("La lista de items devueltos no puede estar vacía.")
+
+    try:
+        compra = DocumentoCompra.objects.select_for_update().get(
+            pk=compra_id, empresa_id=empresa_id,
+        )
+    except DocumentoCompra.DoesNotExist:
+        raise ValueError(
+            f"El Documento de Compra {compra_id} no pertenece a la empresa activa."
+        )
+
+    if compra.estado == 'ANULADO':
+        raise ValueError("La Compra está anulada; no se puede emitir una NC sobre ella.")
+
+    nc = NotaCredito.objects.create(
+        empresa_id=empresa_id,
+        factura_compra=compra,
+        doc_origen_tipo='COMPRA',
+        motivo=motivo,
+        usuario=usuario,
+        estado='PROCESADO',
+    )
+
+    detalles_ids = []
+    monto_total_usd = _D('0.0000')
+
+    try:
+        for item in items_devueltos:
+            cantidad_devolver = _D(str(item.get('cantidad_devolver') or 0))
+            if cantidad_devolver <= 0:
+                raise ValueError("cantidad_devolver debe ser > 0 (omite el item si 0).")
+
+            try:
+                detalle = DetalleDocumentoCompra.objects.select_for_update().get(
+                    pk=item['detalle_id'],
+                    documento_compra=compra,
+                )
+            except DetalleDocumentoCompra.DoesNotExist:
+                raise ValueError(
+                    f"El detalle de compra {item['detalle_id']} no pertenece al doc. {compra_id}."
+                )
+
+            cantidad_pendiente = detalle.cantidad_pendiente_devolver
+            if cantidad_devolver > cantidad_pendiente:
+                raise ValueError(
+                    f"No se pueden devolver {cantidad_devolver} de '{detalle.articulo.nombre}'. "
+                    f"Cantidad pendiente_devolver = {cantidad_pendiente}."
+                )
+
+            precio_unitario = _D(str(
+                item.get('precio_unitario', detalle.costo_base)
+            ))
+            iva_pct = _D(str(
+                item.get('iva_porcentaje', detalle.iva_porcentaje or 0)
+            ))
+            if precio_unitario < 0:
+                raise ValueError("precio_unitario no puede ser negativo.")
+            if not (_D('0') <= iva_pct <= _D('100')):
+                raise ValueError(
+                    f"iva_porcentaje para {detalle.articulo.sku} debe estar entre 0 y 100."
+                )
+
+            det_nc = DetalleNotaCredito.objects.create(
+                nota_credito=nc,
+                detalle_origen_compra=detalle,
+                articulo=detalle.articulo,
+                almacen=detalle.almacen,
+                cantidad_devuelta=cantidad_devolver,
+                precio_unitario_snapshot=precio_unitario,
+                iva_porcentaje_snapshot=iva_pct,
+            )
+            detalles_ids.append(det_nc.pk)
+            monto_total_usd += det_nc.linea_total_usd
+
+            # Kardex: SALIDA porque estamos sacando del almacén por devolución.
+            registrar_movimiento(
+                articulo=detalle.articulo,
+                almacen=detalle.almacen,
+                tipo='SALIDA',
+                cantidad=cantidad_devolver,
+                concepto='DEVOLUCION_COMPRA',
+                detalle_adicional=(
+                    f"NC {nc.numero_control} sobre DocumentoCompra "
+                    f"{compra.tipo_documento} {compra.numero_factura or compra.numero_interno}: {motivo}"
+                ),
+                usuario=usuario,
+                documento_compra=compra,
+            )
+
+            # Seriales: ANULADO_COMPRA (no DISPONIBLE; ya no son stock).
+            if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
+                from .models import SerialArticulo
+                seriales = list(
+                    SerialArticulo.objects.filter(
+                        compra_origen=compra,
+                        articulo=detalle.articulo,
+                        estado='DISPONIBLE',
+                        empresa_id=empresa_id,
+                    ).order_by('id')[:int(cantidad_devolver)]
+                )
+                if seriales:
+                    SerialArticulo.objects.filter(
+                        pk__in=[s.pk for s in seriales]
+                    ).update(estado='ANULADO_COMPRA')
+    except Exception:
+        nc.delete() if nc.pk else None
+        raise
+
+    nc.monto_total_reembolso = monto_total_usd.quantize(_D('0.0001'))
+    nc.save(update_fields=['monto_total_reembolso'])
+
+    return {
+        'ok': True,
+        'nc_id': nc.pk,
+        'numero_control': nc.numero_control,
+        'detalles_ids': detalles_ids,
+        'monto_total_reembolso': nc.monto_total_reembolso,
+        'mensaje': (
+            f"Nota de Crédito {nc.numero_control} emitida sobre Compra "
+            f"#{compra_id}: {len(detalles_ids)} item(s) devuelto(s)."
+        ),
+    }
 

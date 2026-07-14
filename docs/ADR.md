@@ -407,3 +407,80 @@ desarrollo formal en este archivo:
 | 26 | Toolbar caret tracking sin servidor | `articulos.html` JS `injectToken()` |
 | 27 | IVA individual por línea con override (1.1.1) | `procesar_venta`, `registrar_compra_proveedor`, `ivas_disponibles_json` |
 | 28 | Tipo de Documento Compra 3 opciones (1.1.1) | `DocumentoCompra.TIPO_DOCUMENTO_CHOICES`, migración 0013 |
+| 29 | Notas de Crédito como módulo aparte 1-NC-1-origen (1.2.0 / TKET #18-NC) | `NotaCredito`/`DetalleNotaCredito`, `procesar_devolucion_{venta,compra}`, ruta `/notas-credito/` |
+
+## ADR-29: Notas de Crédito con diseño 1-NC-1-origen (1.2.0 / TKET #18-NC)
+
+**Estado:** Aceptado (2026-07-13). Implementado y validado por
+`TestNotasCreditoBackend` (15 tests) + `TestNotasCreditoUI` (14 tests) +
+suite completa 276 ✓ en ~190s.
+
+**Contexto:**
+
+La versión anterior del módulo de Notas de Crédito (TKET #15-SAAS)
+implementaba un modelo flexible pero con problemas de diseño:
+
+1. La función `procesar_devolucion_venta()` recibía parámetros
+   posicionales (`nota_id, items, tipo_costo`) en lugar de kwargs.
+2. Soportaba tres modos ortogonales (`tipo_costo` ∈ {HISTORICO, ACTUAL},
+   `es_defectuoso`, `usa_almacen_cuarentena`) que interactuaban
+   generando una explosión combinatoria de casos a probar.
+3. El servicio determinaba el destino del stock mediante un campo en
+   `ConfiguracionEmpresa`, lo que abortaba el flujo offline si la
+   configuración cambiaba.
+4. La NC se identificaba con un sello de tiempo (`int(time.time())`)
+   que podía colisionar entre tenants.
+
+**Decisión:**
+
+Para la iteración 1.2.0 reemplazamos el módulo entero con un diseño
+**1-NC-1-origen**:
+
+- Cada nota de crédito se apega exclusivamente a **un** documento de
+  origen: o una `NotaEntrega` (devolución de venta) **o** un
+  `DocumentoCompra` (devolución a proveedor). Esto se enforce a nivel
+  de BD con `models.CheckConstraint(condition=…)` (XOR entre los dos
+  campos FK).
+- Cada línea tiene su propio `detalle_origen_venta` o
+  `detalle_origen_compra` (también XOR).
+- El `numero_control` se calcula en el `save()` de la NC, leyendo
+  `ConfiguracionEmpresa.prefijo_nota_credito` (default `NC`) y
+  `numero = Max('numero') + 1` **filtrado por empresa**. Resultado: 
+  formato `NC-00000001` por tenant.
+- Cada ítem de la NC persiste **3 snapshots** inmutables:
+  `precio_unitario_snapshot`, `iva_porcentaje_snapshot` y
+  `cantidad_devuelta`. Aunque el `Articulo` cambie después, la NC
+  sigue mostrando el precio con que se vendió/compró.
+- Cardinalidad: múltiples NC pueden existir sobre el mismo
+  `DetalleNotaEntrega`/`DetalleDocumentoCompra`; cada una respeta el
+  tope `cantidad_pendiente_devolver` que es propiedad agregada de la
+  línea, **no** de la NC.
+- Kardex: la devolución genera **un único movimiento** por línea de
+  NC: `DEVOLUCION_VENTA`/`DEVOLUCION_COMPRA`. La liberación de
+  seriales es FIFO (`VENDIDO → DISPONIBLE` en ventas; 
+  `DISPONIBLE → ANULADO_COMPRA` en compras).
+- Servicios `procesar_devolucion_venta()` y
+  `procesar_devolucion_compra()` comparten firma kwargs: 
+  `(empresa_id, nota/compra_id, items_devueltos, motivo, usuario)`.
+  Validación multi-tenant **perimetral** con `global_objects` (evita
+  leak entre tenants vía contextvars del `EmpresaManager`).
+
+**Consecuencias:**
+
+- ✅ Auditoría más limpia: cada NC está asociada 1:1 con un único doc
+  origen, sin enumerar varios en la cabecera. Kardex tiene un solo
+  registro por línea.
+- ✅ UI simplificada: una sola pantalla con pestañas (historial +
+  emisión) en lugar del wizard multi-paso de la versión previa.
+- ✅ Multi-tenant estricto: services pasan por validación
+  perimetral `global_objects` aislada del `EmpresaManager.transitivo`
+  para que las FKs (FK to origen) no salten de tenant.
+- ✅ Snapshots robustos: cambio de precio en `Articulo` no afecta
+  histórico de NCs ya emitidas (C-N2).
+- ⚠️ Funcionalidades removidas del sistema anterior: talla複数
+  simultánea (`HISTORICO`/`ACTUAL` mezcladas en una misma emisión),
+  merma automática desafect, cuarentena automática. Estas se podrán
+  readicionar en ADR futura si el cliente las pide. Tests legacy
+  (`TestNotasDeCreditoPOS`, 4 tests + 1 de
+  `TestSaneamientoYVulnerabilidadesSaaS.test_costo_historico_*`) 
+  marcados con `@skip` por incompatibilidad de contrato.

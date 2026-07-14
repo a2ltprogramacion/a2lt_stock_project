@@ -1819,3 +1819,327 @@ def vista_reporte_detalle(request, nombre):
     }
     return render(request, 'inventory/reportes/detalle.html', context)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TICKET #18-NC: Vistas del móduloNotas de Crédito (Devoluciones)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from django.views.decorators.http import require_POST, require_GET
+
+@login_required
+def notas_credito_view(request):
+    """
+    Página principal del módulo Notas de Crédito.
+    Tabla con las NCs del tenant actual, divididas por tipo (VENTA / COMPRA).
+    Permite crear una nueva NC desde el mismo formulario en 1 pantalla (no wizard).
+    """
+    from .models import NotaCredito, NotaEntrega, DocumentoCompra
+    empresa_id = request.session.get('empresa_id')
+
+    notas = NotaCredito.objects.filter(empresa_id=empresa_id).order_by('-id')
+
+    # Lookup de origen para mostrar #NC origen sin DB join extra.
+    ne_ids = [n.nota_entrega_id for n in notas if n.nota_entrega_id]
+    dc_ids = [n.factura_compra_id for n in notas if n.factura_compra_id]
+    ne_map = {n.id: n for n in NotaEntrega.objects.filter(id__in=ne_ids)}
+    dc_map = {n.id: n for n in DocumentoCompra.objects.filter(id__in=dc_ids)}
+
+    nc_data = []
+    for nc in notas:
+        origen_id = nc.nota_entrega_id or nc.factura_compra_id
+        origen_obj = ne_map.get(origen_id) or dc_map.get(origen_id)
+        origen_display = ''
+        if origen_obj:
+            if nc.doc_origen_tipo == 'VENTA':
+                # NC-DE-1 (orig: FACTURA FA-001)
+                origen_display = (
+                    f"NE-{nc.nota_entrega.numero:08d}" +
+                    (f" | FACTURA {nc.nota_entrega.numero_factura}"
+                     if nc.nota_entrega.numero_factura else '')
+                )
+            else:
+                # DC usa tipo_documento + numero_interno
+                origen_display = (
+                    f"{nc.factura_compra.tipo_documento} "
+                    f"{nc.factura_compra.numero_interno}"
+                )
+        nc_data.append({
+            'nc': nc,
+            'origen_display': origen_display,
+        })
+
+    return render(request, 'inventory/notas_credito.html', {
+        'notas_data': nc_data,
+    })
+
+
+@login_required
+@require_GET
+def api_origen_detalle(request):
+    """
+    GET ?tipo=venta&q=<numero> ó ?tipo=compra&q=<numero>
+    Devuelve el detalle del documento origen con cantidades_devueltas_acumuladas
+    para que la UI pre-poblegr la grilla de la NC.
+    """
+    from .models import NotaEntrega, DocumentoCompra
+
+    empresa_id = request.session.get('empresa_id')
+    tipo = request.GET.get('tipo', '').strip().lower()
+    q = request.GET.get('q', '').strip()
+
+    if tipo not in ('venta', 'compra') or not q:
+        return JsonResponse({'ok': False, 'error': 'Parámetros tipo y q requeridos.'},
+                            status=400)
+
+    try:
+        if tipo == 'venta':
+            # Buscar por numero (int) o numero_factura (str)
+            if q.isdigit():
+                doc = NotaEntrega.objects.filter(empresa_id=empresa_id, numero=int(q)).first()
+            else:
+                doc = NotaEntrega.objects.filter(empresa_id=empresa_id,
+                                                  numero_factura=q).first()
+            if not doc:
+                return JsonResponse({'ok': False, 'error': 'Nota de Entrega no encontrada.'},
+                                    status=404)
+            detalles = doc.detalles.select_related('articulo', 'almacen').all()
+            items = [{
+                'detalle_id': d.pk,
+                'sku': d.articulo.sku,
+                'nombre': d.articulo.nombre,
+                'almacen': d.almacen.nombre if d.almacen else '',
+                'cantidad_original': str(d.cantidad),
+                'cantidad_ya_devuelta': str(d.cantidad_devuelta_acumulada),
+                'cantidad_pendiente': str(d.cantidad_pendiente_devolver),
+                'precio_unitario': str(d.precio_base),
+                'iva_porcentaje': str(d.iva_porcentaje),
+            } for d in detalles]
+            return JsonResponse({
+                'ok': True,
+                'tipo': 'venta',
+                'doc_id': doc.pk,
+                'doc_label': f"NE-{doc.numero:08d}"
+                              + (f" | FACTURA {doc.numero_factura}" if doc.numero_factura else ''),
+                'items': items,
+            })
+
+        # tipo == 'compra'
+        if q.isdigit():
+            doc = DocumentoCompra.objects.filter(empresa_id=empresa_id, pk=int(q)).first()
+        else:
+            doc = DocumentoCompra.objects.filter(empresa_id=empresa_id,
+                                                  numero_factura=q).first()
+        if not doc:
+            return JsonResponse({'ok': False, 'error': 'Documento de Compra no encontrado.'},
+                                status=404)
+        detalles = doc.detalles.select_related('articulo', 'almacen').all()
+        items = [{
+            'detalle_id': d.pk,
+            'sku': d.articulo.sku,
+            'nombre': d.articulo.nombre,
+            'almacen': d.almacen.nombre if d.almacen else '',
+            'cantidad_original': str(d.cantidad),
+            'cantidad_ya_devuelta': str(d.cantidad_devuelta_acumulada),
+            'cantidad_pendiente': str(d.cantidad_pendiente_devolver),
+            'precio_unitario': str(d.costo_base),
+            'iva_porcentaje': str(d.iva_porcentaje),
+        } for d in detalles]
+        return JsonResponse({
+            'ok': True,
+            'tipo': 'compra',
+            'doc_id': doc.pk,
+            'doc_label': f"{doc.tipo_documento} {doc.numero_interno}",
+            'items': items,
+        })
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+
+
+@login_required
+@require_POST
+def api_crear_nc(request):
+    """POST JSON: { tipo: 'venta'|'compra', doc_id, motivo, items: [{detalle_id, cantidad_devolver, precio_unitario, iva_porcentaje}] }"""
+    import json as _json
+    from . import services as svc
+
+    try:
+        data = _json.loads(request.body)
+        tipo = data.get('tipo')
+        doc_id = data.get('doc_id')
+        motivo = (data.get('motivo') or '').strip()
+        items_raw = data.get('items') or []
+        empresa_id = request.session.get('empresa_id', getattr(svc, '_ctx_empresa', None))
+
+        if not tipo or not doc_id or not motivo or not items_raw:
+            return JsonResponse({'ok': False, 'error': 'Faltan datos (tipo, doc_id, motivo, items).'}, status=400)
+
+        # Normalizar items -> Decimal.
+        items_normalized = []
+        for it in items_raw:
+            items_normalized.append({
+                'detalle_id': int(it['detalle_id']),
+                'cantidad_devolver': Decimal(str(it['cantidad_devolver'])),
+                'precio_unitario': Decimal(str(it.get('precio_unitario', 0))),
+                'iva_porcentaje': Decimal(str(it.get('iva_porcentaje', 0))),
+            })
+
+        if tipo == 'venta':
+            result = svc.procesar_devolucion_venta(
+                empresa_id=empresa_id,
+                nota_id=int(doc_id),
+                items_devueltos=items_normalized,
+                motivo=motivo,
+                usuario=request.user.username or 'Sistema',
+            )
+        elif tipo == 'compra':
+            result = svc.procesar_devolucion_compra(
+                empresa_id=empresa_id,
+                compra_id=int(doc_id),
+                items_devueltos=items_normalized,
+                motivo=motivo,
+                usuario=request.user.username or 'Sistema',
+            )
+        else:
+            return JsonResponse({'ok': False, 'error': 'tipo debe ser venta|compra.'}, status=400)
+
+        return JsonResponse(result)
+    except Exception as e:
+        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+
+
+@login_required
+def vista_detalle_nc(request, nc_id):
+    """Vista detalle de una NC con sus líneas, totales y origen."""
+    from .models import NotaCredito
+    empresa_id = request.session.get('empresa_id')
+    nc = get_object_or_404(
+        NotaCredito.objects.select_related('empresa'),
+        pk=nc_id, empresa_id=empresa_id,
+    )
+    detalles = nc.detalles.select_related(
+        'articulo', 'almacen',
+        'detalle_origen_venta',
+        'detalle_origen_compra',
+    ).all()
+
+    total_devuelto = sum(
+        (d.cantidad_devuelta or Decimal('0')) for d in detalles
+    )
+
+    # Resolver el doc origen.
+    origen_obj = nc.nota_entrega or nc.factura_compra
+    origen_label = ''
+    if nc.nota_entrega:
+        ne = nc.nota_entrega
+        origen_label = f"NE-{ne.numero:08d}" + (
+            f" (FACTURA {ne.numero_factura})" if ne.numero_factura else ''
+        )
+    elif nc.factura_compra:
+        dc = nc.factura_compra
+        origen_label = f"{dc.tipo_documento} {dc.numero_interno}"
+
+    print_url = f"/notas-credito/{nc.pk}/pdf/"
+
+    return render(request, 'inventory/nota_credito_detalle.html', {
+        'nc': nc,
+        'detalles': detalles,
+        'total_devuelto': total_devuelto,
+        'origen_obj': origen_obj,
+        'origen_label': origen_label,
+        'print_url': print_url,
+    })
+
+
+@login_required
+def generar_pdf_nc(request, nc_id):
+    """Genera el PDF A4 portrait de la NC con reportlab."""
+    from .models import NotaCredito
+    empresa_id = request.session.get('empresa_id')
+    nc = get_object_or_404(
+        NotaCredito.objects.select_related('empresa'),
+        pk=nc_id, empresa_id=empresa_id,
+    )
+    detalles = nc.detalles.select_related('articulo', 'almacen').all()
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+
+    response = HttpResponse(content_type='application/pdf')
+    doc_type_str = 'NOTA DE CREDITO'
+    filename = f'NC_{nc.numero_control or nc.pk}.pdf'
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+
+    doc = SimpleDocTemplate(
+        response, pagesize=A4,
+        leftMargin=18 * mm, rightMargin=18 * mm,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'TitleNC', parent=styles['Heading1'],
+        alignment=1, fontSize=14, spaceAfter=8,
+    )
+    header_style = ParagraphStyle(
+        'HeaderNC', parent=styles['Normal'],
+        fontSize=9, leading=11,
+    )
+
+    story = []
+    story.append(Paragraph(
+        f"<b>NOTA DE CRÉDITO {nc.numero_control or ''}</b>",
+        title_style,
+    ))
+    story.append(Paragraph(
+        f"<b>Emitida por:</b> {nc.empresa.nombre}<br/>"
+        f"<b>Fecha:</b> {nc.fecha: '%d/%m/%Y %H:%M' if nc.fecha else ''}<br/>"
+        f"<b>Motivo:</b> {nc.motivo}<br/>"
+        f"<b>Documento Origen:</b> {('NE-' + str(nc.nota_entrega.numero).zfill(8)) if nc.nota_entrega else (nc.factura_compra.tipo_documento + ' ' + nc.factura_compra.numero_interno if nc.factura_compra else '-')}<br/>"
+        f"<b>Usuario:</b> {nc.usuario}",
+        header_style,
+    ))
+    story.append(Spacer(1, 10))
+
+    # Tabla de ítems.
+    data = [['SKU', 'Artículo', 'Cant.', 'Precio U.', 'IVA%', 'Subtotal USD', 'IVA USD', 'Total USD']]
+    for d in detalles:
+        data.append([
+            d.articulo.sku,
+            d.articulo.nombre[:30],
+            f"{d.cantidad_devuelta:.4f}",
+            f"${d.precio_unitario_snapshot:.4f}",
+            f"{d.iva_porcentaje_snapshot:.2f}%",
+            f"${d.subtotal_devuelto_usd:.4f}",
+            f"${d.iva_usd:.4f}",
+            f"${d.linea_total_usd:.4f}",
+        ])
+    # Fila total.
+    total_final = sum(d.linea_total_usd for d in detalles) if detalles else Decimal('0')
+    data.append(['', '', '', '', '', '', 'Total:', f"${total_final:.4f}"])
+
+    t = Table(data, colWidths=[28*mm, 50*mm, 16*mm, 22*mm, 14*mm, 25*mm, 22*mm, 25*mm])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#312e81')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#cbd5e1')),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fef3c7')),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+    ]))
+    story.append(t)
+
+    if nc.estado == 'ANULADO':
+        story.append(Spacer(1, 16))
+        story.append(Paragraph(
+            f"<b>ANULADO</b>: {nc.motivo_anulacion or 'sin motivo'}",
+            ParagraphStyle('Anul', parent=styles['Normal'],
+                            textColor=colors.HexColor('#b91c1c'), fontSize=10)
+        ))
+
+    doc.build(story)
+    return response
+

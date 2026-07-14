@@ -226,12 +226,14 @@ módulos N1-C3 + Fichas, sin romper la arquitectura on-premise.
 | C24 | Iteración 1.1.1 O1 | 3 tipos de documento de compra + rechazo de choices viejos en backend + UI 3 radios | 5 |
 | C25 | Iteración 1.1.1 O2 | IVA individual por línea (select en grilla) en ventas y compras | 6 |
 | C26 | Iteración 1.1.1 O2 | `ConfiguracionEmpresa.ivas_disponibles` y serialización en JSON | 2 |
+| C27 | Iteración 1.2.0 TKET #18-NC | Módulo Notas de Crédito (`/notas-credito/`): 5 vistas + templates + `procesar_devolucion_{venta,compra}` + back-end multi-tenant + 5 properties + PDFs A4 + 29 tests (15 backend + 14 UI) | 29 |
 
 Otras suites sin código C: TestMovimientosBasicos, 
 TestRollbackAtomicidad (ADR-08), TestVentaExitosa, 
 TestCoberturaCritica (reversos notificados, correlativo por empresa), 
 TestProcesarVentaN2/N3/N4/N5, TestInterlockFacturaN4, 
-TestNotaEntregaFaseN5. **Suite total: 247 tests verdes en ~160s.**
+TestNotaEntregaFaseN5. **Suite total: 276 tests verdes en ~190s 
+(247 previos + 29 nuevos del módulo NC, 5 skipped legacy).**
 
 ## Documentos relacionados
 

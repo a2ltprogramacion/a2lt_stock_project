@@ -100,6 +100,9 @@
 | `/compras/<id>/` | Detalle Compra (1.1.0) | Vista detallada con desglose de 4 costos por líneas. |
 | `/compras/<id>/pdf/` | PDF Compra (1.1.0) | Descarga PDF A4 portrait. |
 | `/reversos/` | Reversos | Listado de notas y compras; opción de anular con motivo. |
+| `/notas-credito/` | Notas de Crédito (1.2.0 TICKET #18-NC) | **Módulo nuevo.** Pantalla única con 2 pestañas (Historial de NCs + Emitir Nueva NC). Devoluciones parciales o totales sobre ventas (`NotaEntrega`) o compras (`DocumentoCompra`) con kardex `DEVOLUCION_VENTA` (ENTRADA) o `DEVOLUCION_COMPRA` (SALIDA) y liberación FIFO de seriales. Diseño 1-NC-1-origen (ADR-29). |
+| `/notas-credito/<id>/` | Detalle NC (1.2.0) | Vista de la NC con motivo, doc. origen, líneas con IVA y total a reembolsar. |
+| `/notas-credito/<id>/pdf/` | PDF NC (1.2.0) | Descarga PDF A4 portrait con reportlab (encabezado, motivo, líneas). |
 | `/articulos/` | Fichas (1.1.0) | CRUD de artículos. **Toolbar con 4 botones** sobre `social_quick` y `social_cross` para insertar tokens de precio en la posición del cursor. |
 | `/carga/` | Carga Masiva | Upload de Excel para inventario inicial o ajustes. |
 | `/movimientos/` | Kardex Integrado | Listado de movimientos + registro manual de ajustes. |
@@ -205,13 +208,15 @@ que ya gestiona esto.
 
 ### Tests lentos en Windows
 
-La suite de **247 tests toma ~160s** (1.1.1). Es esperable en SQLite 
-WAL con migraciones completas cada vez. Para tests rápidos de un 
-módulo:
+La suite de **276 tests toma ~190s** (1.2.0: 247 previos + 15 backend
+NC + 14 UI NC). Es esperable en SQLite WAL con migraciones completas
+cada vez. Para tests rápidos de un módulo:
 ```bash
 python manage.py test inventory.tests.TestDashboardLiveData -v 2
 python manage.py test inventory.tests.TestArticulosToolbarTokens -v 2  # Fichas (rápidos)
 python manage.py test inventory.tests.TestIvaIndividualPorLinea -v 2   # 1.1.1 IVA por línea (rápido)
+python manage.py test inventory.tests.TestNotasCreditoUI -v 2         # 1.2.0 UI Notas de Crédito
+python manage.py test inventory.tests.TestNotasCreditoBackend -v 2    # 1.2.0 backend Notas de Crédito
 ```
 
 ### BD corrupta / backup inválido

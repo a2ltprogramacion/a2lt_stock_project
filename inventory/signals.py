@@ -27,7 +27,10 @@ def create_tenant_defaults(sender, instance, created, **kwargs):
             )
             Almacen.objects.create(empresa=instance, nombre="Principal", es_principal=True)
             Contacto.objects.create(
-                empresa=instance, identificacion=f"GEN-{instance.pk}",
+                empresa=instance,
+                # Usamos el RIF (único) en vez de instance.pk, porque pk puede
+                # colisionar tras tests si la BD conserva filas entre test runs.
+                identificacion=f"GEN-{instance.rif}",
                 nombre="Cliente Generico", tipo="CLIENTE"
             )
 

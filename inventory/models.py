@@ -147,6 +147,18 @@ class ConfiguracionEmpresa(models.Model):
         verbose_name='IVAs Disponibles (%)',
         help_text='Lista de hasta 5 tasas de IVA configurables. Ej: [0, 8, 16].',
     )
+    # -- Configuración Notas de Crédito (TICKET #18-NC) --
+    prefijo_nota_credito = models.CharField(
+        max_length=20,
+        default='NC',
+        verbose_name='Prefijo Nota de Crédito',
+        help_text='Prefijo alfanumérico fijo para el correlativo. Ej: NC, DEV.',
+    )
+    correlativo_inicial_nota_credito = models.PositiveIntegerField(
+        default=1,
+        verbose_name='Correlativo Inicial Nota de Crédito',
+        help_text='Número inicial del correlativo de NCs.',
+    )
 
     # -- Configuración del Motor de API de Tasas --
     api_url = models.CharField(
@@ -1046,6 +1058,32 @@ class DetalleDocumentoCompra(models.Model):
         if not tasa:
             return Decimal('0.00')
         return (self.iva_usd * tasa).quantize(Decimal('0.01'))
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Devoluciones / Notas de Crédito (TICKET #18-NC)
+    # ─────────────────────────────────────────────────────────────────────
+    @property
+    def cantidad_devuelta_acumulada(self):
+        """Cantidad total de unidades ya devueltas en NCs sobre este detalle."""
+        from decimal import Decimal
+        if self.pk is None:
+            return Decimal('0.0000')
+        total = Decimal('0')
+        for det_nc in self.devoluciones.all():
+            total += det_nc.cantidad_devuelta or Decimal('0')
+        return total.quantize(Decimal('0.0001'))
+
+    @property
+    def cantidad_pendiente_devolver(self):
+        from decimal import Decimal
+        pendiente = (self.cantidad or Decimal('0')) - self.cantidad_devuelta_acumulada
+        return max(pendiente, Decimal('0'))
+
+    @property
+    def es_totalmente_devuelto(self):
+        from decimal import Decimal
+        return self.cantidad_pendiente_devolver == Decimal('0')
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MovimientoKardex(models.Model):
@@ -1587,6 +1625,39 @@ class DetalleNotaEntrega(models.Model):
         from decimal import Decimal
         return self.subtotal_bs * (self.iva_porcentaje / Decimal('100'))
 
+    # ─────────────────────────────────────────────────────────────────────
+    # Devoluciones / Notas de Crédito (TICKET #18-NC)
+    # ─────────────────────────────────────────────────────────────────────
+    @property
+    def cantidad_devuelta_acumulada(self):
+        """
+        Cantidad total de unidades que ya han sido devueltas en NCs sobre
+        este detalle (sumadas de todas las NC activas).
+        Para evitar N+1 con `select_related`, se cachea con property; usar
+        `cantidad_devuelta_acumulada_optimized` si la queryset carga.
+        """
+        if self.pk is None:
+            return Decimal('0.0000')
+        total = Decimal('0')
+        for det_nc in self.devoluciones.all():
+            total += det_nc.cantidad_devuelta or Decimal('0')
+        return total.quantize(Decimal('0.0001'))
+
+    @property
+    def cantidad_pendiente_devolver(self):
+        """Cantidad original − ya devuelta. Nunca negativa."""
+        from decimal import Decimal
+        pendiente = (self.cantidad or Decimal('0')) - self.cantidad_devuelta_acumulada
+        return max(pendiente, Decimal('0'))
+
+    @property
+    def tiene_devoluciones(self):
+        return self.cantidad_devuelta_acumulada > Decimal('0')
+
+    @property
+    def es_totalmente_devuelto(self):
+        return self.cantidad_pendiente_devolver == Decimal('0')
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 11. TRAZABILIDAD Y CONTROL DE SERIALES (TICKET #14-SAAS)
@@ -1651,29 +1722,79 @@ class SerialArticulo(models.Model):
 
 class NotaCredito(models.Model):
     """
-    Cabecera de Nota de Crédito para gestionar devoluciones.
+    Cabecera de Nota de Crédito para gestionar devoluciones parciales o
+    totales de mercancía (Ticket #18-NC, ADR-29).
+    
+    Una NC se apega a un único documento origen (NotaEntrega en ventas o
+    DocumentoCompra en compras). En `nota_entrega` se guarda el id del
+    documento de venta origen; en `factura_compra` el de compra (uno
+    y sólo uno está relleno — enforced por CheckConstraint).
     """
+    DOC_TIPO_CHOICES = [
+        ('VENTA', 'Venta'),
+        ('COMPRA', 'Compra'),
+    ]
+    ESTADO_CHOICES = [
+        ('PROCESADO', 'Procesado'),
+        ('ANULADO', 'Anulado'),
+    ]
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='notas_credito')
     nota_entrega = models.ForeignKey(
-        NotaEntrega, 
-        on_delete=models.PROTECT, 
+        NotaEntrega,
+        on_delete=models.PROTECT,
         related_name='notas_credito',
-        verbose_name='Nota de Entrega Original'
+        null=True, blank=True,
+        verbose_name='Nota de Entrega Original',
+        help_text='Solo si la NC es de VENTA (devolución del cliente).',
+    )
+    factura_compra = models.ForeignKey(
+        DocumentoCompra,
+        on_delete=models.PROTECT,
+        related_name='notas_credito',
+        null=True, blank=True,
+        verbose_name='Documento de Compra Original',
+        help_text='Solo si la NC es de COMPRA (devolución al proveedor).',
+    )
+    prefijo = models.CharField(
+        max_length=20, default='',
+        verbose_name='Prefijo de NC',
+        help_text='Si está vacío, save() lo lee de ConfiguracionEmpresa.prefijo_nota_credito (default "NC").',
+    )
+    numero = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Correlativo',
+        help_text='Secuencial entero por empresa (no mostrar al usuario).',
     )
     numero_control = models.CharField(
-        max_length=50, 
-        verbose_name='Número de Control',
-        help_text='Identificador único de la Nota de Crédito.'
+        max_length=50, blank=True, default='',
+        verbose_name='N° Control NC',
+        help_text='Formato de display: "{prefijo}-{numero:08d}". Auto-asignado en save().',
+    )
+    doc_origen_tipo = models.CharField(
+        max_length=10, choices=DOC_TIPO_CHOICES, default='VENTA',
+        verbose_name='Tipo de documento origen',
     )
     motivo = models.TextField(
         verbose_name='Motivo de Devolución',
-        blank=True
+        help_text='Motivo GLOBAL (R6). Obligatorio, no blank.',
     )
     monto_total_reembolso = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2,
-        default=0.00,
-        verbose_name='Monto Total de Reembolso (USD)'
+        max_digits=16, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='Monto Total de Reembolso (USD)',
+        help_text='Suma de (cantidad_devuelta × precio_unitario_snapshot) + IVA.',
+    )
+    estado = models.CharField(
+        max_length=10, choices=ESTADO_CHOICES, default='PROCESADO',
+        verbose_name='Estado',
+    )
+    motivo_anulacion = models.TextField(
+        blank=True, default='',
+        verbose_name='Motivo de Anulación',
+        help_text='Si el estado es ANULADO, explica por qué.',
+    )
+    usuario = models.CharField(
+        max_length=150, default='Sistema',
+        verbose_name='Usuario que emitió la NC',
     )
     fecha = models.DateTimeField(auto_now_add=True)
 
@@ -1683,41 +1804,177 @@ class NotaCredito(models.Model):
     class Meta:
         verbose_name = 'Nota de Crédito'
         verbose_name_plural = '13. Notas de Crédito'
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(nota_entrega__isnull=False, factura_compra__isnull=True)
+                    | models.Q(nota_entrega__isnull=True, factura_compra__isnull=False)
+                ),
+                name='nota_credito_un_origen_exacto',
+            ),
+        ]
 
     def __str__(self):
-        return f"NC-{self.numero_control} (Ref: {self.nota_entrega.numero})"
+        return f"{self.numero_control or 'NC-?'} [{self.get_doc_origen_tipo_display()}]"
+
+    def save(self, *args, **kwargs):
+        """
+        Genera automáticamente `numero` y `numero_control` en save() si no están.
+        Misma mecánica que NotaEntrega y DocumentoCompra:
+        - numero = Max('numero')+1 dentro de la empresa (inicia en
+          ConfiguracionEmpresa.correlativo_inicial_nota_credito).
+        - numero_control = f"{prefijo}-{numero:08d}".
+        - prefijo se lee de ConfiguracionEmpresa si está vacío.
+        """
+        if not self.numero or self.numero == 0:
+            self.numero = NotaCredito._next_correlativo(self.empresa_id)
+        # Prefijo: si no viene, leerlo de la config del tenant.
+        if not self.prefijo:
+            try:
+                from .models import ConfiguracionEmpresa
+                config = ConfiguracionEmpresa.global_objects.get(
+                    empresa_id=self.empresa_id
+                )
+                self.prefijo = config.prefijo_nota_credito or 'NC'
+            except Exception:
+                self.prefijo = 'NC'
+        if not self.numero_control:
+            self.numero_control = f"{self.prefijo}-{self.numero:08d}"
+        super().save(*args, **kwargs)
+
+    @staticmethod
+    def _next_correlativo(empresa_id):
+        """Siguiente correlativo por empresa. Usa correlativo_inicial si no hay previas."""
+        from django.db.models import Max
+        try:
+            from .models import ConfiguracionEmpresa
+            config = ConfiguracionEmpresa.objects.get(empresa_id=empresa_id)
+            base = max(1, int(config.correlativo_inicial_nota_credito or 1))
+        except Exception:
+            base = 1
+        max_actual = NotaCredito.global_objects.filter(empresa_id=empresa_id).aggregate(
+            m=Max('numero')
+        )['m'] or 0
+        siguiente = max(int(max_actual) + 1, base)
+        return siguiente
 
 
 class DetalleNotaCredito(models.Model):
     """
-    Línea de detalle para artículos devueltos en una Nota de Crédito.
+    Línea de detalle de una NC (un item devuelto del documento origen).
+    Permite N devoluciones parciales sobre el mismo DetalleNotaEntrega
+    o DetalleDocumentoCompra del doc. origen sin violar
+    `cantidad_original − sum(cantidades_devueltas) ≥ 0`.
     """
     nota_credito = models.ForeignKey(
         NotaCredito,
         on_delete=models.CASCADE,
-        related_name='detalles'
+        related_name='detalles',
+        verbose_name='Nota de Crédito',
+    )
+    detalle_origen_venta = models.ForeignKey(
+        'DetalleNotaEntrega',
+        on_delete=models.PROTECT,
+        related_name='devoluciones',
+        null=True, blank=True,
+        verbose_name='Detalle de Venta Origen',
+        help_text='Solo si NC es de VENTA. Snapshot inmutable del original.',
+    )
+    detalle_origen_compra = models.ForeignKey(
+        DetalleDocumentoCompra,
+        on_delete=models.PROTECT,
+        related_name='devoluciones',
+        null=True, blank=True,
+        verbose_name='Detalle de Compra Origen',
+        help_text='Solo si NC es de COMPRA. Snapshot inmutable del original.',
     )
     articulo = models.ForeignKey(
         Articulo,
         on_delete=models.PROTECT,
-        related_name='devoluciones'
+        related_name='detalles_nota_credito',
+        verbose_name='Artículo',
+        help_text='Redundante para query speed; debe coincidir con el detalle origen.',
     )
-    cantidad = models.DecimalField(
-        max_digits=10,
-        decimal_places=2
+    almacen = models.ForeignKey(
+        Almacen,
+        on_delete=models.PROTECT,
+        related_name='detalles_nota_credito',
+        null=True, blank=True,
+        verbose_name='Almacén (reingreso)',
+        help_text='Almacén donde reingresa el stock; usualmente el del doc. origen. '
+                  'Obligatorio al persistir (enforced por clean()).',
     )
-    costo_aplicado = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        verbose_name='Costo Aplicado al Reingreso'
+    cantidad_devuelta = models.DecimalField(
+        max_digits=14, decimal_places=4,
+        default=Decimal('0.0000'),
+        verbose_name='Cantidad Devuelta',
+        help_text='Cantidad del detalle origen que se devuelve. Validada contra '
+                  'cantidad pendiente_devolver.',
     )
+    precio_unitario_snapshot = models.DecimalField(
+        max_digits=14, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='Precio Unitario (Snapshot)',
+        help_text='Snapshot tomado del detalle origen o editado por negociación.',
+    )
+    iva_porcentaje_snapshot = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0.00'),
+        verbose_name='IVA % (Snapshot)',
+        help_text='Snapshot tomado del detalle origen o editado por negociación.',
+    )
+    subtotal_devuelto_usd = models.DecimalField(
+        max_digits=16, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='Subtotal Devuelto (USD)',
+        help_text='~(cantidad_devuelta × precio_unitario_snapshot) - descuento (0% por defecto).',
+    )
+    iva_usd = models.DecimalField(
+        max_digits=16, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='IVA del Item Devuelto (USD)',
+        help_text='subtotal_devuelto_usd × iva_porcentaje_snapshot / 100.',
+    )
+    linea_total_usd = models.DecimalField(
+        max_digits=16, decimal_places=4, default=Decimal('0.0000'),
+        verbose_name='Total Línea (USD)',
+        help_text='subtotal_devuelto_usd + iva_usd.',
+    )
+    fecha = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+
+    # Modelo 'transitivo' (multi-tenant via FK a NotaCredito). El manager objects
+    # es Manager() estándar; la seguridad multi-tenant se enforces en services
+    # (`procesar_devolucion_*` valida empresa_id manualmente).
+    objects = models.Manager()
+    global_objects = models.Manager()
 
     class Meta:
         verbose_name = 'Detalle de Nota de Crédito'
         verbose_name_plural = '14. Detalles de Notas de Crédito'
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(detalle_origen_venta__isnull=False, detalle_origen_compra__isnull=True)
+                    | models.Q(detalle_origen_venta__isnull=True, detalle_origen_compra__isnull=False)
+                ),
+                name='detalle_nc_un_origen_exacto',
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.articulo.nombre} × {self.cantidad} (NC: {self.nota_credito.numero_control})"
+        return f"{self.nota_credito.numero_control} | {self.articulo.nombre} × {self.cantidad_devuelta}"
+
+    def save(self, *args, **kwargs):
+        """
+        Calcula subtotal_devuelto_usd, iva_usd, linea_total_usd en cada save()
+        (snapshot inmutable post-creación).
+        """
+        from decimal import Decimal as _D
+        cantidad = _D(str(self.cantidad_devuelta or 0))
+        precio = _D(str(self.precio_unitario_snapshot or 0))
+        iva_pct = _D(str(self.iva_porcentaje_snapshot or 0))
+        subtotal = (cantidad * precio).quantize(_D('0.0001'))
+        iva = (subtotal * iva_pct / _D('100')).quantize(_D('0.0001'))
+        self.subtotal_devuelto_usd = subtotal
+        self.iva_usd = iva
+        self.linea_total_usd = (subtotal + iva).quantize(_D('0.0001'))
+        super().save(*args, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

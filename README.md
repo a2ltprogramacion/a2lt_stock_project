@@ -61,6 +61,15 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
   `min(floor(S(a_i)/q_i))` sobre los componentes físicos.
 - **Reversos auditados** — anular NotaEntrega o DocumentoCompra 
   genera contramovimientos de kardex con motivo persistido.
+- **Notas de Crédito (Devoluciones)** — *iteración 1.2.0* (TKET 
+  #18-NC, ADR-29). Módulo aparte `/notas-credito/` con devoluciones 
+  parciales o totales sobre Ventas (`NotaEntrega`) o Compras 
+  (`DocumentoCompra`), diseño **1-NC-1-origen** enforced por 
+  `CheckConstraint` (la NC se apega a un único documento origen), 
+  kardex `DEVOLUCION_VENTA` (ENTRADA) / `DEVOLUCION_COMPRA` (SALIDA), 
+  liberación FIFO de seriales (VENDIDO→DISPONIBLE en ventas; 
+  DISPONIBLE→ANULADO_COMPRA en compras) y snapshots inmutables de 
+  precio/IVA por línea. PDF A4 portrait + vista detalle con botón PDF.
 
 ## Stack
 
@@ -69,8 +78,9 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
 - **Frontend:** Tailwind CSS (CDN), Chart.js, FontAwesome. Sin build JS.
 - **PDF:** reportlab 5.0.
 - **Excel:** openpyxl 3.1.
-- **Tests:** Django TestCase/TransactionTestCase — 247 tests verdes 
-  en **~160s** (157 en 1.0.0 + 77 en 1.1.0 + 13 en 1.1.1).
+- **Tests:** Django TestCase/TransactionTestCase — **276 tests 
+  verdes** en **~190s** (157 en 1.0.0 + 77 en 1.1.0 + 13 en 1.1.1 + 
+  29 en 1.2.0 [15 backend NC + 14 UI NC], 5 skipped legacy).
 
 ## Instalación rápida
 
@@ -104,10 +114,9 @@ Abrir http://127.0.0.1:8000
   ContextVar, regla sagrada del kardex, **snapshots inmutables 
   extendidos a 4 precios por detalle (ADR-24)**, mapa de 
   `services.py`, 12 migraciones numeradas, 29 modelos y tests C1-C23.
-- `docs/ADR.md` — **20 Decisiones de Arquitectura** formales 
-  (ADR-01 a ADR-26 con saltos; ADR-23 a ADR-26 añaden Emisión 
-  NE/Factura, snapshots 4-precios, tokens de precio y toolbar 
-  caret tracking).
+- `docs/ADR.md` — Decisiones de Arquitectura formales 
+  (ADR-01 a ADR-29 con saltos; ADR-29 añade el módulo Notas de 
+  Crédito con diseño 1-NC-1-origen).
 - `docs/BACKLOG.md` — 30+ tickets de desarrollo con estado 
   (incluye tickets #14-#17 iteración 1.1.0).
 - `docs/ROADMAP.md` — features post-100% (cuentas por cobrar/pagar, 
@@ -116,8 +125,9 @@ Abrir http://127.0.0.1:8000
   **tokens de variables de precio**, troubleshooting y reglas 
   operativas.
 - `CHANGELOG.md` — registro de cambios por release (Keep a 
-  Changelog). **1.1.0 (2026-07-13) cubre Emisión NE/Factura, 
-  Compras Avanzadas, Fichas de Artículos y auditoría.**
+  Changelog). **1.2.0 (2026-07-13) cierra el TICKET #18-NC con 
+  el módulo Notas de Crédito (`/notas-credito/`), ADR-29 y 29 tests 
+  nuevos.**
 
 ## Producción
 

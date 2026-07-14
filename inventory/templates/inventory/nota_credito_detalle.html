@@ -1,0 +1,147 @@
+{% extends 'inventory/base.html' %}
+{% block content %}
+<section class="space-y-6">
+    <div class="flex justify-between items-center">
+        <div>
+            <h2 class="text-xl font-bold text-slate-900 dark:text-white">
+                <i class="fa-solid fa-rotate-left mr-2"></i> Nota de Crédito {{ nc.numero_control|default:'(pendiente)' }}
+            </h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                Emitida el {{ nc.fecha|date:"d/m/Y H:i" }} · Ticket #18-NC
+            </p>
+        </div>
+        <div class="flex space-x-2">
+            <a href="{{ print_url }}" target="_blank"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition">
+                <i class="fa-solid fa-file-pdf mr-1"></i> PDF
+            </a>
+            <a href="{% url 'inventory:notas_credito' %}"
+                class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-750 text-xs font-bold px-3 py-2 rounded-xl transition">
+                <i class="fa-solid fa-arrow-left mr-1"></i> Volver
+            </a>
+        </div>
+    </div>
+
+    <!-- Banner estado -->
+    <div class="px-4 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-2
+        {% if nc.estado == 'ANULADO' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+        {% else %}bg-sky-100 text-sky-800 dark:bg-sky-500/10 dark:text-sky-400{% endif %}">
+        <i class="fa-solid {% if nc.estado == 'ANULADO' %}fa-circle-xmark{% else %}fa-circle-check{% endif %}"></i>
+        Estado: {{ nc.estado }}
+        {% if nc.estado == 'ANULADO' and nc.motivo_anulacion %}· {{ nc.motivo_anulacion }}{% endif %}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- CABECERA -->
+        <div class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+            <div class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-receipt text-indigo-500"></i> Datos de la NC
+                </h3>
+            </div>
+
+            <div class="space-y-3">
+                <div class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-slate-800 dark:text-slate-200 text-xs">N° de Control</span>
+                        <span class="font-mono text-[10px] text-slate-500 dark:text-slate-400">{{ nc.prefijo|default:'' }}-{{ nc.numero|default:0|stringformat:"08d" }}</span>
+                    </div>
+                    <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400 mt-1">
+                        <span><i class="fa-solid fa-calendar mr-1"></i>{{ nc.fecha|date:"d/m/Y H:i" }}</span>
+                        <span><i class="fa-solid fa-user mr-1"></i>{{ nc.usuario|default:"Sistema" }}</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 space-y-1">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-slate-800 dark:text-slate-200 text-xs">Documento Origen</span>
+                        <span class="text-[10px] font-bold
+                            {% if nc.doc_origen_tipo == 'VENTA' %}text-emerald-600 dark:text-emerald-400
+                            {% else %}text-amber-600 dark:text-amber-400{% endif %}">
+                            {{ nc.doc_origen_tipo|default:'-' }}
+                        </span>
+                    </div>
+                    <div class="text-slate-800 dark:text-slate-200">{{ origen_label|default:'-' }}</div>
+                </div>
+
+                <div class="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-850 space-y-1">
+                    <div class="font-bold text-slate-800 dark:text-slate-200 text-xs">Motivo de la Devolución</div>
+                    <div class="text-slate-700 dark:text-slate-300 text-sm">{{ nc.motivo|default:'-' }}</div>
+                </div>
+
+                <!-- Totales -->
+                <div class="border-t border-slate-100 dark:border-slate-800 my-4"></div>
+                <div class="space-y-2 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850 font-mono">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500 dark:text-slate-400">Total Reembolsado (USD):</span>
+                        <span class="text-slate-800 dark:text-slate-200 font-bold text-lg">${{ nc.monto_total_reembolso|default:0|floatformat:4 }}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-500 dark:text-slate-400">Cantidad Total Devuelta (unidades):</span>
+                        <span class="text-slate-800 dark:text-slate-200 font-bold">{{ total_devuelto|floatformat:4 }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PANEL LATERAL -->
+        <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
+            <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                <i class="fa-solid fa-circle-info text-indigo-500"></i> Resumen
+            </h3>
+            <div class="text-xs space-y-2 text-slate-600 dark:text-slate-400">
+                <div class="flex justify-between"><span>Empresa:</span><span class="font-bold">{{ nc.empresa.nombre }}</span></div>
+                <div class="flex justify-between"><span>Tipo:</span><span class="font-bold">{{ nc.doc_origen_tipo|default:'-' }}</span></div>
+                <div class="flex justify-between"><span>NC ID:</span><span class="font-mono">#{{ nc.pk }}</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLA DE LÍNEAS -->
+    <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+        <h3 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-slate-800 mb-3">
+            <i class="fa-solid fa-list text-indigo-500"></i> Líneas Devueltas ({{ detalles|length }})
+        </h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead>
+                    <tr class="text-slate-500 uppercase border-b border-slate-200 dark:border-slate-800">
+                        <th class="pb-2">SKU</th>
+                        <th class="pb-2">Artículo</th>
+                        <th class="pb-2">Almacén</th>
+                        <th class="pb-2 text-right">Cant. Dev.</th>
+                        <th class="pb-2 text-right">Precio U. USD</th>
+                        <th class="pb-2 text-right">IVA %</th>
+                        <th class="pb-2 text-right">Subtotal USD</th>
+                        <th class="pb-2 text-right">IVA USD</th>
+                        <th class="pb-2 text-right">Total USD</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px] text-slate-800 dark:text-slate-300">
+                    {% for d in detalles %}
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30 transition">
+                        <td class="py-3 font-bold">{{ d.articulo.sku }}</td>
+                        <td class="py-3">{{ d.articulo.nombre }}</td>
+                        <td class="py-3">{{ d.almacen.nombre|default:'-' }}</td>
+                        <td class="py-3 text-right">{{ d.cantidad_devuelta|floatformat:4 }}</td>
+                        <td class="py-3 text-right">${{ d.precio_unitario_snapshot|floatformat:4 }}</td>
+                        <td class="py-3 text-right">{{ d.iva_porcentaje_snapshot|floatformat:2 }}%</td>
+                        <td class="py-3 text-right">${{ d.subtotal_devuelto_usd|floatformat:4 }}</td>
+                        <td class="py-3 text-right">${{ d.iva_usd|floatformat:4 }}</td>
+                        <td class="py-3 text-right font-bold">${{ d.linea_total_usd|floatformat:4 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="9" class="py-6 text-center text-slate-500">Sin líneas.</td></tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="border-t-2 border-slate-200 dark:border-slate-700 text-xs font-bold">
+                        <td colspan="8" class="py-3 text-right">TOTAL →</td>
+                        <td class="py-3 text-right text-lg text-indigo-600 dark:text-indigo-400">${{ nc.monto_total_reembolso|default:0|floatformat:4 }}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}
