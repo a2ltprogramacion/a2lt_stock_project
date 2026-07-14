@@ -17,7 +17,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST, require_GET
 from django.db import models as db_models
 
 from . import services as svc
@@ -116,7 +116,7 @@ def dashboard(request):
     from decimal import Decimal
     from .models import (
         InventarioAlmacen, DetalleNotaEntrega, NotaEntrega,
-        ConfiguracionEmpresa, Articulo, RecetaCombo,
+        ConfiguracionEmpresa, Articulo,
     )
     from .managers import get_current_empresa
 
@@ -596,8 +596,6 @@ def vista_resolver_colision(request):
 # TICKET #5: MÓDULO DE VENTAS
 # ═══════════════════════════════════════════════════════════════════════
 
-from django.views.decorators.http import require_GET
-
 
 @login_required
 @require_GET
@@ -654,10 +652,6 @@ def api_validar_stock(request, sku, almacen_id):
     return JsonResponse({'stock_disponible': stock})
 
 
-import json
-from django.http import HttpResponse, JsonResponse
-from decimal import Decimal
-
 @login_required
 @require_http_methods(["POST"])
 def vista_crear_venta(request):
@@ -699,7 +693,7 @@ def vista_crear_venta(request):
     except ValueError as e:
         # Error de negocio (ej. falta de stock) -> Rollback automático en procesar_venta
         return JsonResponse({'ok': False, 'error': str(e)}, status=400)
-    except Exception as e:
+    except Exception:
         logger.exception("Error procesando venta")
         return JsonResponse({'ok': False, 'error': 'Error interno del servidor.'}, status=500)
 
@@ -789,13 +783,13 @@ def vista_detalle_nota(request, nota_id):
 @require_http_methods(["GET"])
 def generar_pdf_nota(request, nota_id):
     """Genera un PDF tamaño Carta (Letter) de la Nota de Entrega o Factura usando ReportLab."""
-    from .models import NotaEntrega, ConfiguracionEmpresa
+    from .models import NotaEntrega
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import cm, mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 
     empresa_id = request.session.get('empresa_id')
     nota = get_object_or_404(
@@ -803,7 +797,6 @@ def generar_pdf_nota(request, nota_id):
         pk=nota_id, empresa_id=empresa_id
     )
     detalles = nota.detalles.select_related('articulo').all()
-    config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
 
     response = HttpResponse(content_type='application/pdf')
     doc_type_str = 'NOTA DE ENTREGA' if nota.tipo_documento == 'NOTA_ENTREGA' else 'FACTURA'
@@ -966,13 +959,13 @@ def vista_detalle_compra(request, compra_id):
 @require_http_methods(["GET"])
 def generar_pdf_compra(request, compra_id):
     """Genera un PDF tamaño Carta (Letter) de la Factura de Compra usando ReportLab."""
-    from .models import DocumentoCompra, ConfiguracionEmpresa
+    from .models import DocumentoCompra
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     from reportlab.lib.units import cm, mm
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_RIGHT, TA_CENTER
 
     empresa_id = request.session.get('empresa_id')
     documento = get_object_or_404(
@@ -980,7 +973,6 @@ def generar_pdf_compra(request, compra_id):
         pk=compra_id, empresa_id=empresa_id
     )
     detalles = documento.detalles.select_related('articulo', 'almacen').all()
-    config = ConfiguracionEmpresa.objects.get(empresa=documento.empresa)
 
     response = HttpResponse(content_type='application/pdf')
     doc_type_str = 'FACTURA DE COMPRA' if documento.tipo_documento == 'FACTURA_COMPRA' else documento.get_tipo_documento_display().upper()
@@ -1161,7 +1153,7 @@ def vista_registrar_asiento_manual(request):
     from decimal import Decimal
     import json as _json
     from .models import Articulo, Almacen
-    from django.http import HttpResponse, JsonResponse
+    from django.http import JsonResponse
     from .managers import get_current_empresa
 
     try:
@@ -1433,7 +1425,7 @@ def articulos_view(request):
 
     Requiere @login_required + CSRF token en el fetch (articulos.html).
     """
-    from django.http import HttpResponse, JsonResponse
+    from django.http import JsonResponse
     from decimal import Decimal
     from .models import Articulo
     from .managers import get_current_empresa
@@ -1582,11 +1574,6 @@ def compras_view(request):
     }
     return render(request, 'inventory/compras.html', context)
 
-import json
-from django.http import HttpResponse, JsonResponse
-from decimal import Decimal
-from django.views.decorators.http import require_POST
-from decimal import Decimal
 from .services import registrar_compra_proveedor
 
 @login_required
@@ -2068,7 +2055,6 @@ def generar_pdf_nc(request, nc_id):
     from reportlab.lib.units import mm
 
     response = HttpResponse(content_type='application/pdf')
-    doc_type_str = 'NOTA DE CREDITO'
     filename = f'NC_{nc.numero_control or nc.pk}.pdf'
     response['Content-Disposition'] = f'inline; filename="{filename}"'
 

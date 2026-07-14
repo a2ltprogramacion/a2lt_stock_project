@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import csv
 import io
-from decimal import Decimal
 
 from django.http import HttpResponse
 
@@ -75,7 +74,6 @@ def export_pdf(resultado: dict, filename: str = 'reporte.pdf') -> HttpResponse:
     from reportlab.platypus import (
         SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     )
-    from reportlab.lib.enums import TA_LEFT
 
     columns = resultado.get('columns', [])
     rows = resultado.get('rows', [])

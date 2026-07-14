@@ -21,19 +21,16 @@ import datetime as _dt
 from collections import OrderedDict
 from decimal import Decimal
 
-from django.db.models import Sum, F, Q, Count
+from django.db.models import Sum, F
 from django.utils import timezone
 
 from .models import (
     Articulo,
-    Almacen,
     InventarioAlmacen,
     MovimientoKardex,
     NotaEntrega,
     DetalleNotaEntrega,
     DocumentoCompra,
-    Contacto,
-    ConfiguracionEmpresa,
 )
 
 

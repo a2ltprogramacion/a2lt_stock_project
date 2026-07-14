@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import datetime
 import os
-import sys
 import time
 
 from django.core.management.base import BaseCommand, CommandError
@@ -60,8 +59,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from django.db import connection
-
         # Validar engine
         engine = settings.DATABASES['default']['ENGINE']
         if 'sqlite' not in engine:

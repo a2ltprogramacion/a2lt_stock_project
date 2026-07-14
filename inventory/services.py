@@ -1268,9 +1268,6 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         descuento_global=descuento_global,
     )
 
-    # Concepto estandarizado para el Kárdex (C-05)
-    concepto_kardex = 'VENTA'
-
     # 4. Procesamiento de Ítems
     for item in lista_items:
         articulo = Articulo.objects.get(sku=item['articulo_sku'])
@@ -1412,8 +1409,7 @@ def sincronizar_tasa_cambio() -> dict:
     calcula el nuevo factor de cobertura y registra la auditoría.
     """
     import requests
-    from decimal import Decimal
-    from django.core.exceptions import ValidationError
+    from decimal import Decimal, InvalidOperation
     from .models import ConfiguracionEmpresa, AuditoriaTasa
 
     from .managers import get_current_empresa
@@ -1460,7 +1456,7 @@ def sincronizar_tasa_cambio() -> dict:
 
     try:
         tasa_mercado_obtenida = Decimal(str(current_val))
-    except (ValueError, TypeError, decimal.InvalidOperation):
+    except (ValueError, TypeError, InvalidOperation):
         logger.error("[API] El valor obtenido no es numérico: %s", current_val)
         return {'ok': False, 'error': "El valor devuelto por la API no es un número válido."}
 
@@ -1513,7 +1509,7 @@ def revertir_carga_masiva(lote_id: str, usuario: str = '') -> dict:
     from django.core.exceptions import ValidationError
     from django.db.models import Max
     from decimal import Decimal
-    from .models import MovimientoKardex, InventarioAlmacen
+    from .models import MovimientoKardex
 
     # Obtener todos los movimientos del lote
     movimientos_lote = MovimientoKardex.objects.filter(lote_carga=lote_id)
@@ -2035,10 +2031,8 @@ def exportar_datos_tenant(empresa_id: int, meses_historico: int = 6) -> dict:
     Truncando el historial de Kárdex y Notas de Entrega para evitar timeouts HTTP.
     Retorna un diccionario de Python serializable a JSON.
     """
-    import json
     from datetime import timedelta
     from django.utils import timezone
-    from django.core.serializers.json import DjangoJSONEncoder
     from .models import Articulo, Almacen, Contacto, NotaEntrega, MovimientoKardex, Empresa
 
     empresa = Empresa.objects.get(pk=empresa_id)
@@ -2107,8 +2101,7 @@ def exportar_datos_tenant(empresa_id: int, meses_historico: int = 6) -> dict:
 def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
     from .models import NotaEntrega, SerialArticulo
     from .services import registrar_movimiento
-    from django.db.models import F
-    
+
     nota = NotaEntrega.objects.select_for_update().get(id=nota_id, empresa_id=empresa_id)
     if nota.estado == 'ANULADO':
         raise ValueError("La Nota de Entrega ya se encuentra anulada.")
@@ -2141,8 +2134,7 @@ def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
 def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str) -> dict:
     from .models import DocumentoCompra, SerialArticulo, MovimientoKardex
     from .services import registrar_movimiento
-    from django.db.models import F
-    
+
     compra = DocumentoCompra.objects.select_for_update().get(id=compra_id, empresa_id=empresa_id)
     if compra.estado == 'ANULADO':
         raise ValueError("El Documento de Compra ya se encuentra anulado.")
@@ -2233,7 +2225,7 @@ def procesar_devolucion_venta(
     from decimal import Decimal as _D
     from .models import (
         NotaEntrega, DetalleNotaEntrega, NotaCredito, DetalleNotaCredito,
-        SerialArticulo, Almacen, Articulo,
+        SerialArticulo,
     )
 
     motivo = (motivo or '').strip()

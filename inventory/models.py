@@ -21,8 +21,6 @@ REGLA SAGRADA: Ningún campo de stock se modifica directamente.
 Todo cambio de existencias debe originarse desde MovimientoKardex
 dentro de un bloque @transaction.atomic (implementado en services.py).
 """
-
-import math
 from decimal import Decimal
 
 from django.db import models
@@ -1456,37 +1454,31 @@ class NotaEntrega(models.Model):
     @property
     def subtotal_usd(self):
         """Suma de subtotales USD (precio_base × cantidad, con descuento individual)."""
-        from decimal import Decimal
         return sum(d.subtotal_usd for d in self.detalles.all())
 
     @property
     def subtotal_ajustado_usd(self):
         """Suma de subtotales USD ajustados (× factor_cobertura)."""
-        from decimal import Decimal
         return sum(d.subtotal_ajustado_usd for d in self.detalles.all())
 
     @property
     def subtotal_bs_bcv(self):
         """Suma de subtotales Bs. BCV (sin factor)."""
-        from decimal import Decimal
         return sum(d.subtotal_bs_bcv for d in self.detalles.all())
 
     @property
     def subtotal_bs(self):
         """Suma de subtotales Bs. ajustados (con factor)."""
-        from decimal import Decimal
         return sum(d.subtotal_bs for d in self.detalles.all())
 
     @property
     def total_iva_bs(self):
         """IVA total en Bs. del documento (suma de iva_bs de cada detalle)."""
-        from decimal import Decimal
         return sum(d.iva_bs for d in self.detalles.all())
 
     @property
     def total_documento_bs(self):
         """Total documento = subtotal_bs + IVA BS (si aplica)."""
-        from decimal import Decimal
         return self.subtotal_bs + self.total_iva_bs
 
 
@@ -2091,7 +2083,7 @@ class TasaCambio(models.Model):
             destino = monedas.get(codigo=destino_codigo.upper())
         except Moneda.DoesNotExist:
             raise ValueError(
-                f"Moneda origen o destino no configurada en el tenant."
+                "Moneda origen o destino no configurada en el tenant."
             )
         # Buscar la tasa mas reciente via global_objects (no filtrar
         # por ContextVar aunque sirva de hint).

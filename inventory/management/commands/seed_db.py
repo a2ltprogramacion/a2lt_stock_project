@@ -26,7 +26,6 @@ from inventory.models import (
     Contacto,
     ConfiguracionEmpresa,
     SerialArticulo,
-    NotaEntrega,
     MovimientoKardex,
 )
 from inventory.services import (
@@ -253,7 +252,6 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(f"  [OK] Almacén '{almacen_sucursal.nombre}'")
         )
-        almacenes = [almacen_central, almacen_sucursal]
 
         # ── FASE 3: Entidades — Contactos ──────────────────────────────────────
         self.stdout.write("\n[3/7] Contactos — 10 Clientes + 5 Proveedores...")
@@ -473,7 +471,7 @@ class Command(BaseCommand):
             self.style.SUCCESS(f"  SEED COMPLETADO en {elapsed:.2f} segundos")
         )
         self.stdout.write("=" * 64)
-        self.stdout.write(f"  Empresas:          2")
+        self.stdout.write("  Empresas:          2")
         self.stdout.write(f"  Almacenes:         {Almacen.objects.count()}")
         self.stdout.write(f"  Contactos:         {Contacto.objects.count()}")
         self.stdout.write(f"  Artículos:         {Articulo.objects.count()}")
@@ -482,7 +480,6 @@ class Command(BaseCommand):
         self.stdout.write(
             f"  Movs. Kárdex:      {MovimientoKardex.objects.count()}"
         )
-
         set_current_empresa(None)
 
     # ─────────────────────────────────────────────────────────────────────────
