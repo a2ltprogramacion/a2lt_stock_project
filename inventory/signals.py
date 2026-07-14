@@ -19,7 +19,7 @@ def create_tenant_defaults(sender, instance, created, **kwargs):
     """
     if created:
         with transaction.atomic():
-            config = ConfiguracionEmpresa.objects.create(
+            config = ConfiguracionEmpresa.global_objects.create(
                 empresa=instance,
                 tasa_bcv=Decimal('60.0000'),
                 factor_cobertura=Decimal('1.4000'),

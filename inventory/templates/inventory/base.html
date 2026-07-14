@@ -131,7 +131,7 @@
                 <i class="fa-solid fa-calculator text-[10px]"></i>
                 <span class="font-semibold text-slate-500 dark:text-slate-400">Tasa Ajustada:</span>
                 <span id="header-adjusted-display"
-                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ tasa_ajustada|stringformat:".2f"|default:config.tasa_mercado|stringformat:".2f" }} Bs</span>
+                    class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ tasa_ajustada|stringformat:".2f"|default:config.tasa_mercado|stringformat:".2f"|default:"0.00" }} Bs</span>
             </div>
         </div>
         <!-- CONTROLES ADICIONALES: SELECTOR DE TEMA -->
