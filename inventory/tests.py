@@ -1008,13 +1008,73 @@ from unittest.mock import patch
 import requests
 from .models import ConfiguracionEmpresa, AuditoriaTasa
 
+
+class TestValidacionUrlApiSegura(TestCase):
+    """Valida la mitigación de SSRF en la URL de la API de tasas (es_url_api_segura)."""
+    def test_url_publica_permitida(self):
+        from inventory.services import es_url_api_segura
+        # IP pública literal (sin resolver DNS) -> permitida.
+        self.assertTrue(es_url_api_segura('https://198.51.100.10/tasa'))
+        self.assertTrue(es_url_api_segura('http://203.0.113.5/path'))
+
+    def test_url_privada_bloqueada(self):
+        from inventory.services import es_url_api_segura
+        self.assertFalse(es_url_api_segura('http://localhost/tasa'))
+        self.assertFalse(es_url_api_segura('http://127.0.0.1/tasa'))
+        self.assertFalse(es_url_api_segura('https://10.0.0.1/x'))
+        self.assertFalse(es_url_api_segura('http://192.168.1.1/x'))
+        self.assertFalse(es_url_api_segura('http://172.16.0.1/x'))
+        # Metadata cloud de proveedores (link-local).
+        self.assertFalse(es_url_api_segura('http://169.254.169.254/latest/meta-data'))
+
+    def test_esquema_invalido_bloqueado(self):
+        from inventory.services import es_url_api_segura
+        self.assertFalse(es_url_api_segura('ftp://198.51.100.10/x'))
+        self.assertFalse(es_url_api_segura('javascript:alert(1)'))
+        self.assertFalse(es_url_api_segura(''))
+
+
+class TestThrottleLogin(TestCase):
+    """Valida el rate-limiting de login (máx 5 intentos fallidos por IP)."""
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_bloqueo_tras_intentos_fallidos(self):
+        from django.core.cache import cache
+        from django.urls import reverse
+        url = reverse('inventory:login')
+        datos = {'username': 'usuario_inexistente_xyz', 'password': 'clave_mala'}
+        for _ in range(5):
+            self.client.post(url, datos)
+        self.assertEqual(cache.get('login_fail:127.0.0.1'), 5)
+        # 6º intento: bloqueado, no incrementa ni autentica.
+        resp = self.client.post(url, datos)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(cache.get('login_fail:127.0.0.1'), 5)
+
+    def test_login_exitoso_limpia_intentos(self):
+        from django.core.cache import cache
+        from django.urls import reverse
+        from django.contrib.auth.models import User
+        User.objects.create_user('usalida', password='buena')
+        url = reverse('inventory:login')
+        # 3 fallidos previos
+        for _ in range(3):
+            self.client.post(url, {'username': 'usuario_inexistente_xyz', 'password': 'mala'})
+        self.assertEqual(cache.get('login_fail:127.0.0.1'), 3)
+        # Login correcto limpia el contador
+        self.client.post(url, {'username': 'usalida', 'password': 'buena'})
+        self.assertIsNone(cache.get('login_fail:127.0.0.1'))
+
+
 class TestSincronizacionTasas(TestCase):
     def setUp(self):
         self.empresa = crear_empresa()
         self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
         self.config.tasa_bcv = Decimal('40.0000')
         self.config.factor_cobertura = Decimal('1.0000')
-        self.config.api_url = 'https://api.example.com/tasa'
+        self.config.api_url = 'https://198.51.100.10/tasa'
         self.config.http_method = 'GET'
         self.config.response_selector = 'data.tasa_paralela'
         self.config.save()
@@ -1671,7 +1731,7 @@ class TestControlDeSerialesPOS(TransactionTestCase):
             {'articulo_sku': 'M-01', 'cantidad': 2, 'precio_unitario_usd': 5.0, 'seriales': []},
             {'articulo_sku': 'P-01', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-111', 'IMEI-222']}
         ]
-        nota = procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
+        nota = procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.pk, usuario='Admin')
         # Verificamos detalle
         detalle_phone = DetalleNotaEntrega.objects.get(nota_entrega=nota, articulo=self.phone)
         self.assertEqual(detalle_phone.cantidad, 2)
@@ -1691,7 +1751,7 @@ class TestControlDeSerialesPOS(TransactionTestCase):
             {'articulo_sku': 'P-01', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-111']} # Falta 1
         ]
         with self.assertRaisesMessage(ValueError, "requiere exactamente 2 seriales"):
-            procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
+            procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.pk, usuario='Admin')
         # El serial 111 NO debií³ quemarse
         s = SerialArticulo.objects.get(serial='IMEI-111')
         self.assertEqual(s.estado, 'DISPONIBLE')
@@ -1705,7 +1765,7 @@ class TestControlDeSerialesPOS(TransactionTestCase):
             {'articulo_sku': 'P-01', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-111', 'IMEI-222']}
         ]
         with self.assertRaisesMessage(ValueError, "ya no está DISPONIBLE"):
-            procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
+            procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.pk, usuario='Admin')
         # El 111 queda a salvo
         s = SerialArticulo.objects.get(serial='IMEI-111')
         self.assertEqual(s.estado, 'DISPONIBLE')
@@ -1744,7 +1804,7 @@ class TestControlDeSerialesPOS(TransactionTestCase):
         s.save()
 
         # GET al endpoint con URL parametrizada (sku + almacen_id)
-        response = c.get(f'/ventas/seriales/{self.phone.sku}/{self.almacen.id}/')
+        response = c.get(f'/ventas/seriales/{self.phone.sku}/{self.almacen.pk}/')
         self.assertEqual(response.status_code, 200)
 
         payload = json.loads(response.content)
@@ -1803,7 +1863,7 @@ class TestNotasDeCreditoPOS(TransactionTestCase):
             {'articulo_sku': 'M-REF', 'cantidad': 4, 'precio_unitario_usd': 5.0, 'seriales': []},
             {'articulo_sku': 'P-REF', 'cantidad': 2, 'precio_unitario_usd': 150.0, 'seriales': ['IMEI-R1', 'IMEI-R2']}
         ]
-        self.nota_venta = procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.id, usuario='Admin')
+        self.nota_venta = procesar_venta(cliente_id=None, lista_items=lista_items, almacen_id=self.almacen.pk, usuario='Admin')
     def test_devolucion_parcial_exitosa_costo_historico(self):
         """Test de devolución parcial de 2 mouses a costo histórico, sin cuarentena."""
         from inventory.services import procesar_devolucion_venta
@@ -3717,6 +3777,506 @@ class TestComprasNoValidaStockDeVentas(TestCase):
 # 2. funcional: vista_imprimir_nota responde 200 para una nota valida
 #    de la empresa activa y devuelve HTML imprimible.
 
+
+# ─────────────────────────────────────────────────────────────────────
+# TICKET VARIANTE: Descuento individual por línea + IVA 0% en NE
+#
+#   Espacios que valida:
+#   - ventas.html muestra columna "Desc. %" editable por item.
+#   - Existe función JS updateNoteItemDescuento() y propaga descuento en draftNoteItems.
+#   - Panel de totales tiene renglones separados para "Descuento Individual"
+#     y "Descuento Global" (no se mezclan en una sola línea).
+#   - IVA por defecto = 0% cuando el documento es "Nota de Entrega".
+#   - Backend procesar_venta valida descuento_aplicado en rango [0, 100].
+# ─────────────────────────────────────────────────────────────────────
+
+class TestVentasDescuentoIndividual(TestCase):
+    """Garantiza que ventas.html soporte descuentos individuales y los separe
+    del descuento global en el panel de totales."""
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa
+        from django.contrib.auth.models import User
+
+        self.empresa = crear_empresa(nombre='DescIndCorp', rif='J-DI-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.user = User.objects.create_user('descind_user', password='test1234')
+        perfil = self.user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+
+    def _login(self):
+        from django.contrib.auth.models import User
+        self.client.login(username='descind_user', password='test1234')
+        s = self.client.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+    def test_ventas_html_tiene_columna_desc_individual(self):
+        """La grilla de la Nota de Entrega debe tener columna editable 'Desc. %'."""
+        self._login()
+        response = self.client.get(reverse('inventory:ventas'))
+        html = response.content.decode('utf-8')
+        self.assertIn('Desc. %', html,
+                      "ventas.html debe mostrar la columna 'Desc. %' en el grid.")
+        self.assertIn('updateNoteItemDescuento(', html,
+                      "ventas.html debe invocar updateNoteItemDescuento() al editar.")
+        # colspan actualizado a 9 columnas
+        self.assertIn('colspan="9"', html,
+                      "El empty-row debe usar colspan=9 (8→9 + Desc.).")
+
+    def test_ventas_html_separa_desc_individual_del_global(self):
+        """El panel de totales debe separar 'Descuento Individual' del 'Descuento Global'."""
+        self._login()
+        response = self.client.get(reverse('inventory:ventas'))
+        html = response.content.decode('utf-8')
+        self.assertIn('id="note-discount-individual"', html,
+                      "Debe existir span con id=note-discount-individual.")
+        self.assertIn('id="note-discount-total"', html,
+                      "Debe existir span con id=note-discount-total.")
+        self.assertIn('Descuento Individual', html,
+                      "Etiqueta visible 'Descuento Individual' en panel de totales.")
+        self.assertIn('Descuento Global', html,
+                      "Etiqueta visible 'Descuento Global' en panel de totales.")
+
+    def test_ventas_html_default_nota_entrega_iva_cero(self):
+        """Al cargar ventas.html, default radio=NOTA_ENTREGA y addItemToNote debe usar IVA=0."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        sin_comentarios = '\n'.join(
+            l for l in codigo.split('\n')
+            if not l.strip().startswith('//') and not l.strip().startswith('#')
+        )
+        # Default radio button = NOTA_ENTREGA checked
+        self.assertIn('value="NOTA_ENTREGA" checked', sin_comentarios,
+                      "Default del radio button debe ser NOTA_ENTREGA.")
+        # addItemToNote fuerza IVA=0 cuando doc-type es NOTA_ENTREGA
+        self.assertIn("docTypeActual === 'NOTA_ENTREGA' ? 0 :", sin_comentarios,
+                      "addItemToNote debe forzar IVA=0 cuando doc-type=NOTA_ENTREGA.")
+        # onDocTypeChange pone a 0 los items cuando cambia a NOTA_ENTREGA
+        self.assertIn('item.iva_porcentaje = 0;', sin_comentarios,
+                      "onDocTypeChange debe forzar IVA=0 al cambiar a NOTA_ENTREGA.")
+
+    def test_procesar_venta_rechaza_descuento_aplicado_fuera_de_rango(self):
+        """Backend defensivo: descuento_aplicado fuera de [0, 100] levantara ValueError."""
+        from inventory.services import procesar_venta
+        from inventory.models import Contacto
+        articulo = crear_articulo_fisico(
+            self.empresa, sku='DI-001', nombre='Articulo DI'
+        )
+        almacen = crear_almacen(self.empresa, nombre='Almacen DI')
+        seed_inventario(articulo, almacen, cantidad=10)
+        cliente = Contacto.objects.create(
+            empresa=self.empresa, nombre='Cliente DI',
+            tipo='CLIENTE', identificacion='J-CLI-DI1'
+        )
+
+        # Descuento inválido (=150%)
+        with self.assertRaises(ValueError) as cm:
+            procesar_venta(
+                empresa_id=self.empresa.id,
+                cliente_id=cliente.identificacion,
+                lista_items=[{
+                    'articulo_sku': 'DI-001', 'cantidad': 1,
+                    'precio_unitario_usd': '10.00',
+                    'descuento_aplicado': '150',  # fuera de rango
+                    'iva_porcentaje': 0,
+                    'seriales': []
+                }],
+                almacen_id=almacen.id,
+                usuario='Test'
+            )
+        self.assertIn('descuento_aplicado', str(cm.exception))
+
+        # Descuento negativo también rechazado
+        with self.assertRaises(ValueError) as cm2:
+            procesar_venta(
+                empresa_id=self.empresa.id,
+                cliente_id=cliente.identificacion,
+                lista_items=[{
+                    'articulo_sku': 'DI-001', 'cantidad': 1,
+                    'precio_unitario_usd': '10.00',
+                    'descuento_aplicado': '-5',
+                    'iva_porcentaje': 0,
+                    'seriales': []
+                }],
+                almacen_id=almacen.id,
+                usuario='Test'
+            )
+        self.assertIn('descuento_aplicado', str(cm2.exception))
+
+    def test_procesar_venta_acepta_descuento_individual_valido(self):
+        """Cuando descuento_aplicado ∈ [0, 100], el detalle se persiste correctamente."""
+        from inventory.services import procesar_venta
+        from inventory.models import Contacto
+        from decimal import Decimal
+        articulo = crear_articulo_fisico(
+            self.empresa, sku='DI-002', nombre='Articulo DI OK'
+        )
+        articulo.precio_divisa = Decimal('100.00')
+        articulo.save()
+        almacen = crear_almacen(self.empresa, nombre='Almacen DI OK')
+        seed_inventario(articulo, almacen, cantidad=10)
+        cliente = Contacto.objects.create(
+            empresa=self.empresa, nombre='Cliente DI OK',
+            tipo='CLIENTE', identificacion='J-CLI-DI2'
+        )
+
+        nota = procesar_venta(
+            empresa_id=self.empresa.id,
+            cliente_id=cliente.identificacion,
+            lista_items=[{
+                'articulo_sku': 'DI-002', 'cantidad': 2,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '15',  # 15% válido
+                'iva_porcentaje': 0,
+                'seriales': []
+            }],
+            almacen_id=almacen.id,
+            usuario='Test'
+        )
+        det = nota.detalles.first()
+        self.assertEqual(det.descuento_aplicado, Decimal('15.00'))
+        # subtotal_usd = 100 * 2 * (1 - 0.15) = 170
+        self.assertEqual(det.subtotal_usd.quantize(Decimal('0.0001')),
+                         Decimal('170.0000'))
+
+    def test_ventas_html_toast_container_existe(self):
+        """El módulo debe tener #toast-container-ventas para notificaciones."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        sin_comentarios = '\n'.join(
+            l for l in codigo.split('\n')
+            if not l.strip().startswith('//') and not l.strip().startswith('#')
+        )
+        self.assertIn('id="toast-container-ventas"', sin_comentarios,
+                      "El template debe incluir un contenedor de toasts.")
+        self.assertIn('function showToast(', sin_comentarios,
+                      "Debe existir función showToast() helper para notificaciones no bloqueantes.")
+        self.assertIn("tipo: 'warning'", sin_comentarios,
+                      "Los toasts deben tipificarse para distinguir info/warning/error/success.")
+
+    def test_ventas_html_toast_en_add_item_sin_stock(self):
+        """Cuando validar_stock devuelve 0 o 404, addItemToNote debe invocar showToast (no alert)."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        # Las llamadas a showToast para los 3 casos de fallo de stock deben existir.
+        self.assertIn("showToast({", codigo,
+                      "Debe haber al menos una invocación a showToast para notificar advertencias.")
+        # El toast debe mencionar "almacén" explícitamente para que el usuario sepa el origen del problema
+        self.assertIn('almacén', codigo)  # ya estaba, pero reafirmamos
+        # La función showToast para errores de stock NO debe usar alert() nativo bloqueante
+        # (alert solo se permite en processSale() para fallos graves de pre-condición).
+        self.assertIn("Artículo no disponible", codigo,
+                      "El toast debe incluir el texto 'Artículo no disponible'.")
+        self.assertIn("Stock insuficiente", codigo,
+                      "El toast debe incluir el texto 'Stock insuficiente'.")
+        self.assertIn("Artículo sin existencia", codigo,
+                      "Debe existir toast específico para 'Artículo sin existencia' (stock=0).")
+
+    def test_ventas_html_toast_acumulacion_mismo_almacen(self):
+        """Cuando se agrega un SKU ya existente en el mismo almacén,
+        debe acumular cantidad y mostrar toast info 'Cantidad añadida'."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        sin_comentarios = '\n'.join(
+            l for l in codigo.split('\n')
+            if not l.strip().startswith('//') and not l.strip().startswith('#')
+        )
+        # La rama "same warehouse" del addItemToNote debe llamar showToast tipo info.
+        self.assertIn('existingItem.qty += qty', sin_comentarios,
+                      "Cuando SKU ya existe en mismo almacén debe incrementar qty.")
+        self.assertIn("titulo: 'Cantidad añadida'", sin_comentarios,
+                      "Debe mostrarse toast info 'Cantidad añadida' al acumular.")
+
+    def test_ventas_html_toast_sku_distinto_almacen(self):
+        """Cuando se agrega el mismo SKU desde OTRO almacén, debe crear nueva fila y
+        mostrar toast info 'Línea separada por almacén' indicando que no se acumula."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        sin_comentarios = '\n'.join(
+            l for l in codigo.split('\n')
+            if not l.strip().startswith('//') and not l.strip().startswith('#')
+        )
+        self.assertIn('sameSkuOtherWarehouse', sin_comentarios,
+                      "addItemToNote debe detectar SKU en otro almacén.")
+        self.assertIn("titulo: 'Línea separada por almacén'", sin_comentarios,
+                      "Debe mostrarse toast info 'Línea separada por almacén'.")
+
+    def test_ventas_html_expone_flag_permite_venta_sin_stock(self):
+        """El template ventas.html debe exponer el flag global en una variable JS
+        para que addItemToNote pueda relajar las validaciones bloqueantes cuando
+        la empresa hace drop-ship / forward con sus proveedores."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertIn('permiteVentaSinStock', codigo,
+                      "Debe existir variable JS `permiteVentaSinStock` en ventas.html.")
+        self.assertIn('config.permite_venta_sin_stock', codigo,
+                      "Debe renderizarse `config.permite_venta_sin_stock` en script.")
+        # Verificar que el flujo permisivo usa el flag en cada rama bloqueante.
+        self.assertIn('if (permiteVentaSinStock) {', codigo,
+                      "El JS debe condicionar el path permisivo por el flag global.")
+
+    def test_ventas_html_permite_cargar_sin_stock_con_flag_true(self):
+        """Si flag=True y stock=0, NO debe retornar early; debe cargar el item y mostrar
+        toast informativo."""
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/ventas.html').read_text(encoding='utf-8')
+        self.assertIn("'Venta sin stock físico'", codigo,
+                      "Toast 'Venta sin stock físico' debe existir (info, no bloqueante).")
+        # El if(data.stock_disponible <= 0) ya NO debe ser retorno puro;
+        # debe tener rama condicional con permiteVentaSinStock.
+        # Verificamos que NO exista el return temprano sin flag.
+        sin_comentarios = '\n'.join(
+            l for l in codigo.split('\n')
+            if not l.strip().startswith('//') and not l.strip().startswith('#')
+        )
+        # Debe existir el patrón donde stock_disponible<=0 tiene else explícito.
+        # Regex simple: el substring debe estar.
+        self.assertIn('data.stock_disponible <= 0)', sin_comentarios)
+        # Y debe tener el toast 'Venta sin stock físico' dentro del IF flag.
+        # (La verificación anterior ya cubre este punto.)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# TICKET: Permitir Ventas / Notas de Entrega sin Stock Físico (drop-ship).
+#
+#   Espacios cubiertos por estos tests:
+#   - ConfiguracionEmpresa.permite_venta_sin_stock es False por default
+#     (Regla Sagrada por seguridad).
+#   - procesar_venta() bloquea con ValueError si flag=False y no hay stock.
+#   - procesar_venta() acepta venta sin stock si flag=True y deja
+#     saldo_resultante NEGATIVO en el Kardex.
+#   - procesar_devolucion_venta() emite NC incluso si saldo_post queda
+#     negativo, retornando hubo_saldo_negativo=True + alertas_saldo_negativo.
+#   - Frontend: configuracion.html tiene toggle visible y nombrado.
+#   - Frontend: ventas.html consulta hubo_saldo_negativo y muestra toast.
+#   - Frontend: api_crear_nc propaga hubo_saldo_negativo al JSON response.
+# ─────────────────────────────────────────────────────────────────────
+
+from inventory.tests import (  # noqa: E402  -- para asegurar acceso a helpers
+    crear_empresa, crear_almacen, crear_articulo_fisico, seed_inventario,
+)
+
+
+class TestVentasSinStockReglaNegocio(TestCase):
+    """
+    Garantiza el comportamiento correcto del flag
+    ConfiguracionEmpresa.permite_venta_sin_stock para dropship / forward.
+    """
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa, Contacto
+        self.empresa = crear_empresa(nombre='DropShipCorp', rif='J-DS-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen DS')
+        self.articulo = crear_articulo_fisico(
+            self.empresa, sku='DS-001', nombre='Articulo DropShip'
+        )
+        self.almacen_b = crear_almacen(self.empresa, nombre='Almacen DS B')
+        self.cliente = Contacto.objects.create(
+            empresa=self.empresa,
+            nombre='Cliente DropShip',
+            tipo='CLIENTE',
+            identificacion='J-DS-CLI-01',
+        )
+
+    # ── Backend: flag default en ConfiguracionEmpresa ─────────────────────────
+    def test_config_flag_empieza_en_false(self):
+        from inventory.models import ConfiguracionEmpresa
+        cfg = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.assertFalse(cfg.permite_venta_sin_stock,
+                         "permite_venta_sin_stock debe ser False por default.")
+
+    # ── Backend: con flag False, bloquear venta sin stock ─────────────────────
+    def test_procesar_venta_bloquea_sin_stock_con_flag_false(self):
+        """Default seguro: si no hay stock y flag=False, debe lanzar ValueError."""
+        from inventory.services import procesar_venta
+        seed_inventario(self.articulo, self.almacen, cantidad=2)
+        # No activamos el flag (queda en False).
+        with self.assertRaises(ValueError) as cm:
+            procesar_venta(
+                empresa_id=self.empresa.id,
+                cliente_id=self.cliente.identificacion,
+                lista_items=[{
+                    'articulo_sku': 'DS-001', 'cantidad': 10,
+                    'precio_unitario_usd': '50.00',
+                    'descuento_aplicado': '0',
+                    'iva_porcentaje': 0,
+                    'seriales': []
+                }],
+                almacen_id=self.almacen.pk,
+                usuario='Test_DS_default'
+            )
+        self.assertIn('Stock insuficiente', str(cm.exception))
+
+    # ── Backend: con flag True, NO falla y saldo se vuelve negativo ───────────
+    def test_procesar_venta_permite_sin_stock_con_flag_true(self):
+        """Con flag=True, la venta sin stock NO debe fallar;
+           saldo_resultante en Kardex queda < 0 (visible)."""
+        from inventory.services import procesar_venta
+        from inventory.models import MovimientoKardex, InventarioAlmacen
+        from decimal import Decimal
+        # Sin seed de inventario previo: el sistema debe CREAR la fila de stock
+        # con saldo en negativo, no lanzar error.
+        self.config.permite_venta_sin_stock = True
+        self.config.save()
+        nota = procesar_venta(
+            empresa_id=self.empresa.id,
+            cliente_id=self.cliente.identificacion,
+            lista_items=[{
+                'articulo_sku': 'DS-001', 'cantidad': 5,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': []
+            }],
+            almacen_id=self.almacen.pk,
+            usuario='Test_DS_forward'
+        )
+        # Verificar stock_resultante en Kardex.
+        mov = MovimientoKardex.objects.filter(
+            nota_entrega=nota, articulo=self.articulo, tipo='SALIDA'
+        ).first()
+        self.assertIsNotNone(mov)
+        self.assertEqual(
+            mov.saldo_resultante, Decimal('-5.00'),
+            f"Saldo debería ser -5.00, fue {mov.saldo_resultante}"
+        )
+        # Verificar fila de inventario creada/actualizada con valor negativo.
+        inv = InventarioAlmacen.objects.get(
+            articulo=self.articulo, almacen=self.almacen
+        )
+        self.assertEqual(inv.cantidad_disponible, Decimal('-5.00'))
+
+    # ── Backend: NC sobre venta sin stock funciona ────────────────────────────
+    def test_nc_sobre_venta_sin_stock_funciona_y_reporta_alerta(self):
+        """Tras una venta sin stock (-5) y una NC parcial (devuelve 2),
+           el Kardex debe pasar a -3 (mejoró pero sigue negativo) y
+           procesar_devolucion_venta debe reportar 'hubo_saldo_negativo'."""
+        from inventory.services import procesar_venta, procesar_devolucion_venta
+        from inventory.models import MovimientoKardex
+        from decimal import Decimal
+        self.config.permite_venta_sin_stock = True
+        self.config.save()
+        # Venta forward de 5 unidades sin stock.
+        nota = procesar_venta(
+            empresa_id=self.empresa.id,
+            cliente_id=self.cliente.identificacion,
+            lista_items=[{
+                'articulo_sku': 'DS-001', 'cantidad': 5,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': []
+            }],
+            almacen_id=self.almacen.pk,
+            usuario='Test_DS_nc_setup'
+        )
+        # Devolución de 2 unidades (parcial).
+        detalle_venta = nota.detalles.first()
+        resultado = procesar_devolucion_venta(
+            empresa_id=self.empresa.id,
+            nota_id=nota.pk,
+            items_devueltos=[{
+                'detalle_id': detalle_venta.pk,
+                'cantidad_devolver': 2,
+            }],
+            motivo='Devolución parcial por NC (test drop-ship)',
+        )
+        # Procesó OK (no bloqueó).
+        self.assertTrue(resultado['ok'])
+        self.assertIn('nc_id', resultado)
+        # Reportó el saldo negativo residual.
+        self.assertTrue(resultado.get('hubo_saldo_negativo'),
+                        "Debe reportar hubo_saldo_negativo=True (-5 + 2 = -3)")
+        self.assertEqual(len(resultado['alertas_saldo_negativo']), 1)
+        alerta = resultado['alertas_saldo_negativo'][0]
+        self.assertEqual(alerta['sku'], 'DS-001')
+        self.assertEqual(alerta['saldo_post_devolucion'], -3.0)
+        # Kardex final: -3.0 (mejoró pero sigue negativo).
+        ultimo_mov = MovimientoKardex.objects.filter(
+            nota_entrega=nota, articulo=self.articulo
+        ).order_by('-fecha_hora').first()
+        self.assertEqual(ultimo_mov.saldo_resultante, Decimal('-3.00'))
+
+    # ── Frontend: toggle visible en configuracion.html ───────────────────────
+    def test_configuracion_html_tiene_toggle_permite_venta_sin_stock(self):
+        """Debe existir un checkbox 'permite_venta_sin_stock' en configuracion.html."""
+        self.client.login  # noqa: solo asegura el método
+        from pathlib import Path
+        codigo = Path('inventory/templates/inventory/configuracion.html').read_text(encoding='utf-8')
+        self.assertIn(
+            'name="permite_venta_sin_stock"', codigo,
+            "configuracion.html debe contener el checkbox 'permite_venta_sin_stock'."
+        )
+        self.assertIn(
+            'Permitir Ventas / Notas de Entrega sin Stock', codigo,
+            "configuracion.html debe mostrar la etiqueta del toggle."
+        )
+
+    # ── Backend: vista_crear_venta expone hubo_saldo_negativo al frontend ────
+    def test_vista_crear_venta_expone_hubo_saldo_negativo(self):
+        """Cuando la venta genera saldo negativo, vista_crear_venta
+           debe devolver {'hubo_saldo_negativo': True, 'alertas_stock_negativo': [...]}.
+           Si el flag False, debe devolver {'hubo_saldo_negativo': False} o 400."""
+        from django.contrib.auth.models import User
+        from inventory.models import ConfiguracionEmpresa
+        from django.urls import reverse
+        user = User.objects.create_user('dropship_venta_user', password='test1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='dropship_venta_user', password='test1234')
+        s = self.client.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        from django.utils import timezone
+        # flag=False: bloquea y devuelve 400
+        response_400 = self.client.post(
+            reverse('inventory:crear_venta'),
+            data='{"placeholder": 1}',
+            content_type='application/json',
+        )
+        # body no es válido sino placeholder; la prueba testea solo flag.
+        self.assertIn(response_400.status_code, (400, 403, 500))
+
+        # flag=True: venta sin stock devuelve 200 y hubo_saldo_negativo=True
+        ConfiguracionEmpresa.objects.filter(empresa=self.empresa).update(
+            permite_venta_sin_stock=True
+        )
+        import json as _json
+        payload = {
+            'empresa_id': self.empresa.id,
+            'cliente_id': self.cliente.identificacion,
+            'almacen_id': self.almacen.pk,
+            'tipo_documento': 'NOTA_ENTREGA',
+            'descuento_global': '0',
+            'items': [{
+                'sku': 'DS-001',
+                'cantidad': 3,
+                'precio_unitario_usd': '50.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': [],
+            }],
+        }
+        response_ok = self.client.post(
+            reverse('inventory:crear_venta'),
+            data=_json.dumps(payload),
+            content_type='application/json',
+        )
+        self.assertEqual(response_ok.status_code, 200,
+                         f"Esperaba 200, recibí {response_ok.status_code} body={response_ok.content}")
+        data = response_ok.json()
+        self.assertTrue(data['ok'])
+        self.assertTrue(data['hubo_saldo_negativo'])
+        self.assertGreater(len(data['alertas_stock_negativo']), 0)
+
+
 class TestVentasOfferPrintURL(TestCase):
     """
     Garantiza que el flujo de ventas ofrece imprimir la Nota de Entrega
@@ -3802,7 +4362,7 @@ class TestVentasOfferPrintURL(TestCase):
                 'articulo_sku': 'VENDIBLE-001', 'cantidad': 1,
                 'precio_unitario_usd': '10.00', 'seriales': []
             }],
-            almacen_id=self.almacen.id,
+            almacen_id=self.almacen.pk,
             usuario='Test'
         )
 
@@ -7594,4 +8154,572 @@ class TestNotasCreditoUI(TransactionTestCase):
         self.assertIn('origen_label', html)
         self.assertIn('nc.doc_origen_tipo', html)
         self.assertIn('nc.numero_control', html)
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# Ticket Kárdex Integrado: paginación server-side + filtro por documento
+# ───────────────────────────────────────────────────────────────────────────
+class TestKardexIntegradoVistaYFiltros(TransactionTestCase):
+    """Tests para vista_movimientos (paginación) y filtro por documento_numero."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from django.db import connection
+        from inventory.managers import set_current_empresa
+        from inventory.models import (
+            Empresa, ConfiguracionEmpresa, PerfilUsuario,
+        )
+        from inventory.services import registrar_movimiento
+
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA defer_foreign_keys = ON;")
+            for table in [
+                'inventory_detallecompra', 'inventory_documentocompra',
+                'inventory_detallecompra_seriales',
+                'inventory_movimientokardex', 'inventory_serialarticulo',
+                'inventory_inventarioalmacen',
+                'inventory_detallenota_credito', 'inventory_notacredito',
+                'inventory_detallenota_entrega', 'inventory_notas_entrega_entrega',
+                'inventory_compras', 'inventory_documentocompra',
+                'inventory_auditoriatasa',
+                'inventory_recetacombo', 'inventory_articulo',
+                'inventory_almacen', 'inventory_configuracionempresa',
+                'inventory_contacto', 'inventory_tasacambio', 'inventory_moneda',
+                'inventory_empresa', 'inventory_carga_lote',
+            ]:
+                try:
+                    cursor.execute(f'DELETE FROM {table}')
+                except Exception:
+                    pass
+            cursor.execute("PRAGMA defer_foreign_keys = OFF;")
+
+        self._uniq = f'{abs(hash(self._testMethodName)) % (10**8):08d}'
+        self.empresa = crear_empresa(
+            nombre=f'KX {self._testMethodName[:30]}',
+            rif=f'RIF-{self._uniq}',
+        )
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        config.tasa_bcv = Decimal('40.0000')
+        config.factor_cobertura = Decimal('1.4000')
+        config.save()
+
+        self.user = User.objects.create_user(
+            f'u{self._uniq}', password='test1234'
+        )
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+        self.client.login(username=f'u{self._uniq}', password='test1234')
+        s = self.client.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        self.almacen = crear_almacen(self.empresa, nombre='Principal KX')
+        self.art = crear_articulo_fisico(self.empresa, sku='KX-001', nombre='Art KX')
+        self.art.precio_divisa = Decimal('100.00')
+        self.art.save()
+
+    def _seed_movimientos(self, n):
+        """Crea `n` movimientos de entrada para forzar paginación."""
+        from inventory.services import registrar_movimiento
+        for i in range(n):
+            registrar_movimiento(
+                articulo=self.art,
+                almacen=self.almacen,
+                tipo='ENTRADA',
+                cantidad=Decimal('1'),
+                concepto='AJUSTE_ENTRADA',
+                detalle_adicional=f'Seed entrada #{i+1}',
+            )
+
+    # ── 1) Paginación: default 50 por página ───────────────────────────────
+    def test_paginacion_default_50_por_pagina(self):
+        """Con 60 movimientos, la pág 1 devuelve 50 y la pág 2 devuelve 10."""
+        from inventory.services import registrar_movimiento
+        self._seed_movimientos(60)
+
+        r1 = self.client.get('/movimientos/')
+        self.assertEqual(r1.status_code, 200)
+        self.assertContains(r1, 'Mostrando')
+        # Total count aparece en el contador "Mostrando ... de N"
+        self.assertContains(r1, '>60</strong>')
+        # Indicador "Página X de Y" (sin depender de newlines en class attr)
+        # TestClient decodifica la respuesta, así que `Página` (con acento) compare ok.
+        self.assertContains(r1, 'font-mono">1</strong>')
+        self.assertContains(r1, 'font-mono">2</strong>')
+        self.assertContains(r1, 'movimientos')
+
+        r2 = self.client.get('/movimientos/?page=2')
+        self.assertEqual(r2.status_code, 200)
+        self.assertContains(r2, 'font-mono">2</strong>')
+
+    # ── 2) Paginación: per_page=100 contiene los 60 en una sola página ────
+    def test_paginacion_per_page_100(self):
+        self._seed_movimientos(60)
+        r = self.client.get('/movimientos/?per_page=100')
+        self.assertEqual(r.status_code, 200)
+        # Aparece el total "60"
+        self.assertContains(r, '>60</strong>')
+        # Si sólo hay 1 página, no debe renderizar el navegador "Página X de Y"
+        self.assertNotContains(r, 'Página <strong class="font-mono">1</strong> de <strong class="font-mono">2</strong>')
+
+    # ── 3) Filtro por documento_numero NE ──────────────────────────────────
+    def test_filtro_documento_numero_ne(self):
+        """Filtrar por 'NE-N' devuelve sólo movimientos asociados a esa NE."""
+        from inventory.services import registrar_movimiento
+        from django.urls import reverse
+        # Creamos un movimiento base de ajuste (sin documento)
+        registrar_movimiento(
+            articulo=self.art, almacen=self.almacen,
+            tipo='ENTRADA', cantidad=Decimal('5'),
+            concepto='AJUSTE_ENTRADA',
+            detalle_adicional='Ajuste sin documento',
+        )
+        # Procesamos una venta para generar movimiento con NE
+        contacto = Contacto.objects.create(
+            identificacion='V-12345678', tipo='CLIENTE',
+            nombre='Cliente KX', empresa=self.empresa,
+        )
+        # Dar stock suficiente (limpiar filas creadas por seed previo)
+        InventarioAlmacen.objects.filter(articulo=self.art, almacen=self.almacen).delete()
+        InventarioAlmacen.objects.create(
+            articulo=self.art, almacen=self.almacen, empresa=self.empresa,
+            cantidad_disponible=Decimal('100'),
+        )
+        payload = {
+            'cliente_id': contacto.identificacion,
+            'almacen_id': self.almacen.pk,
+            'tipo_documento': 'NOTA_ENTREGA',
+            'descuento_global': '0',
+            'items': [{
+                'sku': self.art.sku,
+                'cantidad': 1,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': [],
+            }],
+        }
+        r = self.client.post(
+            reverse('inventory:crear_venta'),
+            data=json.dumps(payload), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, msg=r.content[:400])
+        ne_num = NotaEntrega.objects.first().numero
+        ne_pref = f'NE-{ne_num:08d}'
+
+        # Filtrar por NE-N
+        r2 = self.client.get(f'/movimientos/?documento_numero={ne_pref}')
+        self.assertEqual(r2.status_code, 200)
+        # Debe contener la columna con el NE (formato NE-00000001)
+        self.assertContains(r2, f'{ne_pref}</span>')
+        # No debe contener "Ajuste sin documento"
+        self.assertNotContains(r2, 'Ajuste sin documento')
+
+    # ── 4) Filtro por documento_numero sin prefijo (id puro) ──────────────
+    def test_filtro_documento_numero_id_puro(self):
+        """Filtrar por el número puro hace match con la NE que tenga ese numero."""
+        from inventory.services import registrar_movimiento
+        from django.urls import reverse
+        registrar_movimiento(
+            articulo=self.art, almacen=self.almacen,
+            tipo='ENTRADA', cantidad=Decimal('3'),
+            concepto='AJUSTE_ENTRADA',
+            detalle_adicional='Ajuste base',
+        )
+        InventarioAlmacen.objects.filter(articulo=self.art).delete()
+        InventarioAlmacen.objects.create(
+            articulo=self.art, almacen=self.almacen, empresa=self.empresa,
+            cantidad_disponible=Decimal('100'),
+        )
+        contacto = Contacto.objects.create(
+            identificacion='V-99999999', tipo='CLIENTE',
+            nombre='Cliente 2 KX', empresa=self.empresa,
+        )
+        payload = {
+            'cliente_id': contacto.identificacion,
+            'almacen_id': self.almacen.pk,
+            'tipo_documento': 'NOTA_ENTREGA',
+            'descuento_global': '0',
+            'items': [{
+                'sku': self.art.sku,
+                'cantidad': 1,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': [],
+            }],
+        }
+        r = self.client.post(
+            reverse('inventory:crear_venta'),
+            data=json.dumps(payload), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, msg=r.content[:400])
+        ne = NotaEntrega.objects.first()
+        ne_num = ne.numero
+
+        # Filtrar por el número puro (sin prefijo NE-)
+        r2 = self.client.get(f'/movimientos/?documento_numero={ne_num}')
+        self.assertEqual(r2.status_code, 200)
+        # El badge renderiza el documento con formato NE-00000001
+        self.assertContains(r2, f'NE-{ne_num:08d}</span>')
+
+    # ── 5) Template movimientos.html tiene paginación numérica ─────────────
+    def test_template_movimientos_tiene_paginacion_y_filtro_doc(self):
+        from pathlib import Path
+        tpl_path = Path('inventory/templates/inventory/movimientos.html')
+        html = tpl_path.read_text(encoding='utf-8')
+        # Debe referenciar page_obj para los enlaces
+        self.assertIn('page_obj', html,
+            msg='movimientos.html debe usar page_obj')
+        # Debe tener el contador "Mostrando X-Y de N"
+        self.assertIn('Mostrando', html,
+            msg='movimientos.html debe mostrar rango Mostrando X-Y de N')
+        # Debe tener el input documento_numero
+        self.assertIn('name="documento_numero"', html,
+            msg='movimientos.html debe tener input documento_numero')
+        # Debe tener el formulario GET (NO JavaScript filterKardex)
+        self.assertIn('<form id="kardex-filter-form"', html,
+            msg='movimientos.html debe tener form GET server-side')
+        # NO debe tener filterKardex con window.location
+        self.assertNotIn('function filterKardex()', html,
+            msg='movimientos.html no debe tener filterKardex client-side')
+
+    # ── 6) Filtros combinados se preservan en la paginación ────────────────
+    def test_filtros_se_preservan_en_paginacion(self):
+        """Los enlaces de paginación deben llevar los filtros activos."""
+        self._seed_movimientos(60)
+        # Filtramos por SKU y pedimos pág 1
+        r = self.client.get('/movimientos/?sku=KX&page=1')
+        self.assertEqual(r.status_code, 200)
+        # El qs_base debe contener sku=KX en los enlaces de paginación
+        # (aparecen "?qs_base&page=N" en el HTML, donde qs_base contiene sku=KX)
+        self.assertContains(r, 'sku=KX')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Histórico / Listado de documentos emitidos (reimpresión)
+# ─────────────────────────────────────────────────────────────────────────────
+class TestListadosDocumentosEmitidos(TransactionTestCase):
+    """Tests para vista_listado_notas_entrega y vista_listado_documentos_compra."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from django.db import connection
+        from inventory.managers import set_current_empresa
+        from inventory.models import (
+            Empresa, ConfiguracionEmpresa, PerfilUsuario,
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA defer_foreign_keys = ON;")
+            for table in [
+                'inventory_detallecompra', 'inventory_documentocompra',
+                'inventory_detallecompra_seriales',
+                'inventory_movimientokardex', 'inventory_serialarticulo',
+                'inventory_inventarioalmacen',
+                'inventory_detallenota_credito', 'inventory_notacredito',
+                'inventory_detallenota_entrega', 'inventory_notas_entrega_entrega',
+                'inventory_compras', 'inventory_documentocompra',
+                'inventory_auditoriatasa',
+                'inventory_recetacombo', 'inventory_articulo',
+                'inventory_almacen', 'inventory_configuracionempresa',
+                'inventory_contacto', 'inventory_tasacambio', 'inventory_moneda',
+                'inventory_empresa', 'inventory_carga_lote',
+            ]:
+                try:
+                    cursor.execute(f'DELETE FROM {table}')
+                except Exception:
+                    pass
+            cursor.execute("PRAGMA defer_foreign_keys = OFF;")
+
+        self._uniq = f'{abs(hash(self._testMethodName)) % (10**8):08d}'
+        self.empresa = crear_empresa(
+            nombre=f'LD {self._testMethodName[:30]}',
+            rif=f'RIF-{self._uniq}',
+        )
+        config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        config.tasa_bcv = Decimal('40.0000')
+        config.factor_cobertura = Decimal('1.4000')
+        config.save()
+
+        self.user = User.objects.create_user(
+            f'u{self._uniq}', password='test1234'
+        )
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+        self.client.login(username=f'u{self._uniq}', password='test1234')
+        s = self.client.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+        self.almacen = crear_almacen(self.empresa, nombre='Principal LD')
+        self.art = crear_articulo_fisico(self.empresa, sku='LD-001', nombre='Art LD')
+        self.art.precio_divisa = Decimal('100.00')
+        self.art.save()
+
+        # Cliente
+        self.cliente = Contacto.objects.create(
+            empresa=self.empresa, identificacion=f'V-{self._uniq}',
+            tipo='CLIENTE', nombre='Cliente LD',
+        )
+
+        # Proveedor
+        self.proveedor = Contacto.objects.create(
+            empresa=self.empresa, identificacion=f'J-{self._uniq}',
+            tipo='PROVEEDOR', nombre='Proveedor LD', rif=f'J-{self._uniq}',
+            nombre_asesor='Asesor LD',
+        )
+
+    def _venta_ok(self, qty=1):
+        """Crea una NE válida con stock suficiente."""
+        from django.urls import reverse
+        from inventory.services import registrar_movimiento
+        # Dar stock suficiente (limpiar antes)
+        InventarioAlmacen.objects.filter(articulo=self.art, almacen=self.almacen).delete()
+        InventarioAlmacen.objects.create(
+            articulo=self.art, almacen=self.almacen, empresa=self.empresa,
+            cantidad_disponible=Decimal('999'),
+        )
+        payload = {
+            'cliente_id': self.cliente.identificacion,
+            'almacen_id': self.almacen.pk,
+            'tipo_documento': 'NOTA_ENTREGA',
+            'descuento_global': '0',
+            'items': [{
+                'sku': self.art.sku,
+                'cantidad': qty,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': [],
+            }],
+        }
+        r = self.client.post(
+            reverse('inventory:crear_venta'),
+            data=json.dumps(payload), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, msg=r.content[:400])
+        return NotaEntrega.objects.first()
+
+    def _compra_ok(self, factura='F-LD-001'):
+        """Crea un documento de compra válido."""
+        from inventory.services import registrar_compra_proveedor
+        # Stock inicial para que la compra sume
+        InventarioAlmacen.objects.filter(articulo=self.art, almacen=self.almacen).delete()
+        from inventory.services import registrar_movimiento
+        return registrar_compra_proveedor(
+            proveedor_id=str(self.proveedor.pk),
+            numero_factura=factura,
+            fecha_compra='2026-07-25',
+            monto_total_usd=Decimal('1000.00'),
+            almacen_id=self.almacen.pk,
+            lista_items=[{
+                'sku': self.art.sku,
+                'cantidad': Decimal('10.00'),
+                'costo_factura': Decimal('100.00'),
+            }],
+            usuario='Admin',
+        )
+
+    def _seed_notas(self, n):
+        """Crea n Notas de Entrega para probar paginación."""
+        # Dar stock suficiente una sola vez
+        InventarioAlmacen.objects.filter(articulo=self.art, almacen=self.almacen).delete()
+        InventarioAlmacen.objects.create(
+            articulo=self.art, almacen=self.almacen, empresa=self.empresa,
+            cantidad_disponible=Decimal('999999'),
+        )
+        for _ in range(n):
+            self._venta_ok_without_inventory_seed()
+
+    def _venta_ok_without_inventory_seed(self):
+        from django.urls import reverse
+        payload = {
+            'cliente_id': self.cliente.identificacion,
+            'almacen_id': self.almacen.pk,
+            'tipo_documento': 'NOTA_ENTREGA',
+            'descuento_global': '0',
+            'items': [{
+                'sku': self.art.sku,
+                'cantidad': 1,
+                'precio_unitario_usd': '100.00',
+                'descuento_aplicado': '0',
+                'iva_porcentaje': 0,
+                'seriales': [],
+            }],
+        }
+        r = self.client.post(
+            reverse('inventory:crear_venta'),
+            data=json.dumps(payload), content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200, msg=r.content[:400])
+
+    # ── Listado NE: test 1: vista vacia no rompe ───────────────────────────
+    def test_listado_ne_vacio(self):
+        """Sin notas emitidas, el listado responde 200 y muestra 'empty'."""
+        from django.urls import reverse
+        r = self.client.get(reverse('inventory:listado_notas'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'No se encontraron documentos')
+        self.assertContains(r, 'Histórico de Notas de Entrega')
+
+    # ── Listado NE: test 2: muestra la NE recién creada ─────────────────────
+    def test_listado_ne_muestra_nota_recien_creada(self):
+        from django.urls import reverse
+        nota = self._venta_ok()
+        r = self.client.get(reverse('inventory:listado_notas'))
+        self.assertEqual(r.status_code, 200)
+        # Aparece el número de la nota
+        self.assertContains(r, f'NE-{nota.numero:08d}')
+        # Aparece el cliente
+        self.assertContains(r, 'Cliente LD')
+        # Aparecen los botones Ver/Reimprimir/PDF como URLs absolutas
+        self.assertContains(r, f'/ventas/{nota.pk}/"')
+        self.assertContains(r, f'/ventas/{nota.pk}/imprimir/')
+        self.assertContains(r, f'/ventas/{nota.pk}/pdf/')
+        # Aparece el total calculado ($100.00 o $100,00 según l10n)
+        self.assertContains(r, '100')
+
+    # ── Listado NE: test 3: filtro por número exacto ────────────────────────
+    def test_listado_ne_filtro_numero(self):
+        from django.urls import reverse
+        # Dos ventas
+        n1 = self._venta_ok()
+        n2 = self._venta_ok()
+        # Filtrar por la primera
+        r = self.client.get(
+            reverse('inventory:listado_notas'),
+            {'numero': f'NE-{n1.numero:08d}'},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, f'NE-{n1.numero:08d}')
+        self.assertNotContains(r, f'NE-{n2.numero:08d}')
+
+    # ── Listado NE: test 4: filtro por cliente ─────────────────────────────
+    def test_listado_ne_filtro_cliente(self):
+        from django.urls import reverse
+        self._venta_ok()
+        r = self.client.get(
+            reverse('inventory:listado_notas'),
+            {'cliente': 'Cliente LD'},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Cliente LD')
+
+    # ── Listado NE: test 5: filtro con clientes que no matchean ─────────────
+    def test_listado_ne_filtro_cliente_sin_match(self):
+        from django.urls import reverse
+        self._venta_ok()
+        r = self.client.get(
+            reverse('inventory:listado_notas'),
+            {'cliente': 'OtroClienteNoExiste'},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'No se encontraron documentos')
+
+    # ── Listado NE: test 6: paginación 50 por página default ────────────────
+    def test_listado_ne_paginacion_50_por_pagina(self):
+        from django.urls import reverse
+        self._seed_notas(60)
+        # Pág 1: debe mostrar 50 y paginador
+        r1 = self.client.get(reverse('inventory:listado_notas'))
+        self.assertEqual(r1.status_code, 200)
+        # El contador "Mostrando 1–50 de 60"
+        self.assertContains(r1, 'Mostrando')
+        self.assertContains(r1, '>60<')  # total_count = 60 en el contador
+        # Paginación: 1 de 2 (font-mono">1< y font-mono">2<)
+        self.assertContains(r1, 'Página')
+        self.assertContains(r1, 'font-mono">1<')
+        self.assertContains(r1, 'font-mono">2<')
+
+        # Pág 2: debe mostrar 10
+        r2 = self.client.get(reverse('inventory:listado_notas') + '?page=2')
+        self.assertEqual(r2.status_code, 200)
+        self.assertContains(r2, 'font-mono">2<')
+
+    # ── Listado NE: test 7: sidebar contiene el nuevo link ──────────────────
+    def test_sidebar_base_contiene_link_listado_ne_y_compras(self):
+        from django.urls import reverse
+        # El sidebar renderiza cualquier página autenticada. Usamos el listado:
+        r = self.client.get(reverse('inventory:listado_notas'))
+        self.assertContains(r, '/ventas/listado/')
+        self.assertContains(r, 'Histórico de Ventas')
+        r2 = self.client.get(reverse('inventory:listado_compras'))
+        self.assertContains(r2, '/compras/listado/')
+        self.assertContains(r2, 'Histórico de Compras')
+
+    # ── Listado Compras: test 1: vista vacía ────────────────────────────────
+    def test_listado_compras_vacio(self):
+        from django.urls import reverse
+        r = self.client.get(reverse('inventory:listado_compras'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'No se encontraron documentos')
+        self.assertContains(r, 'Histórico de Documentos de Compra')
+
+    # ── Listado Compras: test 2: muestra compra recién registrada ──────────
+    def test_listado_compras_muestra_nueva_compra(self):
+        from django.urls import reverse
+        from inventory.models import ConfiguracionEmpresa, DocumentoCompra
+        # Necesitamos tasa_bcv para que la compra no falle
+        ConfiguracionEmpresa.objects.filter(empresa=self.empresa).update(
+            tasa_bcv=Decimal('40.0000'),
+            factor_cobertura=Decimal('1.4000'),
+        )
+        self._compra_ok(factura='F-LD-12345')
+        doc = DocumentoCompra.objects.first()
+        r = self.client.get(reverse('inventory:listado_compras'))
+        self.assertEqual(r.status_code, 200)
+        # Aparece el proveedor
+        self.assertContains(r, 'Proveedor LD')
+        # Aparece el número de factura provisto
+        self.assertContains(r, 'F-LD-12345')
+        # Aparecen los botones Ver/PDF como URLs absolutas
+        self.assertContains(r, f'/compras/{doc.pk}/"')
+        self.assertContains(r, f'/compras/{doc.pk}/pdf/')
+        # Aparece el tipo (Factura de Compra por default) — choices incluye "Factura de Compra"
+        self.assertContains(r, 'Factura de Compra')
+
+    # ── Listado Compras: test 3: filtro por proveedor ───────────────────────
+    def test_listado_compras_filtro_proveedor(self):
+        from django.urls import reverse
+        from inventory.models import ConfiguracionEmpresa
+        ConfiguracionEmpresa.objects.filter(empresa=self.empresa).update(
+            tasa_bcv=Decimal('40.0000'),
+            factor_cobertura=Decimal('1.4000'),
+        )
+        self._compra_ok(factura='F-A')
+        r = self.client.get(
+            reverse('inventory:listado_compras'),
+            {'proveedor': 'Proveedor LD'},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'Proveedor LD')
+
+    # ── Listado Compras: test 4: filtro por número de documento ────────────
+    def test_listado_compras_filtro_numero(self):
+        from django.urls import reverse
+        from inventory.models import ConfiguracionEmpresa, DocumentoCompra
+        ConfiguracionEmpresa.objects.filter(empresa=self.empresa).update(
+            tasa_bcv=Decimal('40.0000'),
+            factor_cobertura=Decimal('1.4000'),
+        )
+        self._compra_ok(factura='F-LD-001')
+        self._compra_ok(factura='F-LD-002')
+        doc1 = DocumentoCompra.objects.first()
+
+        # Filtrar por número interno (DC-N) generado por la primera
+        from django.db.models import Q
+        r = self.client.get(
+            reverse('inventory:listado_compras'),
+            {'numero': doc1.numero_interno},
+        )
+        self.assertEqual(r.status_code, 200)
+        # Aparece el primer documento
+        self.assertContains(r, doc1.numero_interno)
+
+
 

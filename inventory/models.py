@@ -158,6 +158,19 @@ class ConfiguracionEmpresa(models.Model):
         help_text='Número inicial del correlativo de NCs.',
     )
 
+    # -- Reglas de Negocio / TICKET: Ventas sin stock --
+    permite_venta_sin_stock = models.BooleanField(
+        default=False,
+        verbose_name='Permitir Ventas/Notas de Entrega sin Stock',
+        help_text=(
+            'Si está activo: permite emitir notas de entrega y facturas aunque el artículo '
+            'no tenga existencia física en el almacén. El Kardex registrará la salida y el '
+            'saldo_resultante quedará NEGATIVO hasta que llegue la mercancía del proveedor. '
+            'Patrón común: ventas forward / drop-ship / consignación con proveedor. '
+            'Si está desactivado (default): bloquea la venta con error "Stock insuficiente".'
+        ),
+    )
+
     # -- Configuración del Motor de API de Tasas --
     api_url = models.CharField(
         max_length=500,

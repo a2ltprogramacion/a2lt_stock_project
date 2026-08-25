@@ -38,12 +38,16 @@ urlpatterns = [
     path('ventas/validar_stock/<str:sku>/<int:almacen_id>/', views.api_validar_stock, name='validar_stock'),
     path('ventas/crear/', views.vista_crear_venta, name='crear_venta'),
     path('ventas/seriales/<str:articulo_sku>/<int:almacen_id>/', views.vista_buscar_seriales_articulo, name='buscar_seriales'),
+    # Histórico / Listado (antes de <int:nota_id> para evitar shadow)
+    path('ventas/listado/', views.vista_listado_notas_entrega, name='listado_notas'),
     path('ventas/<int:nota_id>/pdf/', views.generar_pdf_nota, name='pdf_nota'),
     path('ventas/<int:nota_id>/', views.vista_detalle_nota, name='detalle_nota'),
     path('ventas/<int:nota_id>/imprimir/', views.vista_imprimir_nota, name='imprimir_nota'),
     path('ventas/<int:nota_id>/imprimir-coordenadas/', views.vista_imprimir_coordenadas, name='imprimir_coordenadas'),
 
     # ── Compras ─────────────────────────────────────────────────────────────
+    # Histórico / Listado (antes de <int:compra_id> para evitar shadow)
+    path('compras/listado/', views.vista_listado_documentos_compra, name='listado_compras'),
     path('compras/<int:compra_id>/pdf/', views.generar_pdf_compra, name='pdf_compra'),
     path('compras/<int:compra_id>/', views.vista_detalle_compra, name='detalle_compra'),
 

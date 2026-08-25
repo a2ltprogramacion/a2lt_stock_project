@@ -96,8 +96,8 @@
 | `/ventas/` | Notas de Entrega / Facturas (1.1.0) | Punto de venta. Emite `NOTA_ENTREGA` o `FACTURA` (con `numero_factura` único por empresa). Soporta `descuento_global` (0-100 %) e `iva_porcentaje` por artículo. PDF descargable. |
 | `/ventas/<id>/` | Detalle NE/Factura (1.1.0) | Vista detallada de nota con desglose de 4 precios por líneas, IVA y descuento. |
 | `/ventas/<id>/pdf/` | PDF NE/Factura (1.1.0) | Descarga PDF A4 portrait con reportlab. |
-| `/compras/` | Compras a Proveedor (1.1.0/1.1.1) | Registro de compra con **3 tipos de documento** (Factura obligatoria, Nota Entrega/Recibo opcional, Registro Menor sin doc), **IVA individual por línea** (1.1.1), 4 snapshots de costo + descuento + seriales por artículo. |
-| `/compras/<id>/` | Detalle Compra (1.1.0) | Vista detallada con desglose de 4 costos por líneas. |
+| `/compras/` | Compras a Proveedor (1.1.0/1.1.1/1.2.1) | Registro de compra con **3 tipos de documento** (Factura obligatoria, Nota Entrega/Recibo opcional, Registro Menor sin doc), **IVA individual por línea** (1.1.1), 4 snapshots de costo + descuento + **captura de seriales inline** (1.2.1, ADR-30: input por fila con contador X/N). |
+| `/compras/<id>/` | Detalle Compra (1.1.0/1.2.1) | Vista detallada con **grid 1/3 + 2/3** (Detalle a la izquierda, Ítems a la derecha, 1.2.1). Desglose de 4 costos por líneas. |
 | `/compras/<id>/pdf/` | PDF Compra (1.1.0) | Descarga PDF A4 portrait. |
 | `/reversos/` | Reversos | Listado de notas y compras; opción de anular con motivo. |
 | `/notas-credito/` | Notas de Crédito (1.2.0 TICKET #18-NC) | **Módulo nuevo.** Pantalla única con 2 pestañas (Historial de NCs + Emitir Nueva NC). Devoluciones parciales o totales sobre ventas (`NotaEntrega`) o compras (`DocumentoCompra`) con kardex `DEVOLUCION_VENTA` (ENTRADA) o `DEVOLUCION_COMPRA` (SALIDA) y liberación FIFO de seriales. Diseño 1-NC-1-origen (ADR-29). |
@@ -275,7 +275,24 @@ python manage.py createsuperuser
    removidas — Notas de Crédito se reservan para TICKET #18 
    (módulo aparte `/notas-credito/`).
 8. **IVA individual por línea** (1.1.1 O2): cada ítem en 
-   `/ventas/` y `/compras/` puede tener su propio `iva_porcentaje` 
-   (default 16 desde `Articulo.iva_porcentaje`; override desde 
-   `<select>` de la grilla). Rango `[0, 100]`. `iva_total` del 
-   documento se recalcula sumando IVAs individuales.
+    `/ventas/` y `/compras/` puede tener su propio `iva_porcentaje` 
+    (default 16 desde `Articulo.iva_porcentaje`; override desde 
+    `<select>` de la grilla). Rango `[0, 100]`. `iva_total` del 
+    documento se recalcula sumando IVAs individuales.
+9. **Captura de seriales en Compras (1.2.1, ADR-30):** al registrar 
+    una compra, cada item con `usa_serial=true` muestra un input 
+    inline para escribir los IMEIs/seriales que **llegan en la 
+    factura del proveedor** (no los DISPONIBLES existentes). 
+    Separar por `,` `;` o saltos de línea. El contador `X/N` 
+    debe estar verde antes de Confirmar; si no, el sistema bloquea 
+    el submit. Útil para pegar listas largas desde el correo/PDF 
+    del proveedor.
+10. **Sidebar colapsable (1.2.1, ADR-31):** el botón de menú 
+    (`fa-bars`) en el header colapsa el sidebar a sólo iconos 
+    (192 px extra de zona de trabajo). El estado se persiste en 
+    `localStorage` — no reinicia entre pestañas, recargas ni 
+    sesiones. Especialmente útil en pantallas 1366×768.
+11. **Detalle de Compra layout (1.2.1):** `/compras/<id>/` muestra 
+    el bloque "Detalle del Documento" a la izquierda (1/3 del 
+    ancho) y la tabla de Ítems a la derecha (2/3). En pantallas 
+    chicas apilan al 100%.

@@ -78,11 +78,20 @@ def reporte_kardex(
     almacen_id=None,
     desde=None,
     hasta=None,
+    documento_numero=None,
 ):
     """
     Kardex valorizado: una fila por MovimientoKardex, con costo unitario
     y valor monetario del movimiento (cantidad * costo_unitario_snapshot
     quando disponible, sino Articulo.costo actual como aproximacion).
+
+    Filtros opcionales:
+      - articulo_sku: SKU exacto.
+      - almacen_id: id de Almacen.
+      - desde / hasta: rango de fecha_hora.
+      - documento_numero: Nº del documento origen (Nota de Entrega o
+        DocumentoCompra). Acepta búsquedas con o sin prefijos ('NE-1', '1',
+        'FC-2', etc).
     """
     desde_dt, hasta_dt = _parse_fecha(desde, hasta)
 
@@ -98,6 +107,29 @@ def reporte_kardex(
         qs = qs.filter(fecha_hora__gte=desde_dt)
     if hasta_dt:
         qs = qs.filter(fecha_hora__lte=hasta_dt)
+    if documento_numero:
+        # Aceptar como viene (puede incluir prefijo). Extraer la parte
+        # numérica principal para hacer match contra NE.numero o DC.pk.
+        from django.db.models import Q
+        raw = (documento_numero or '').strip()
+        # Quitar prefijos comunes: 'NE-', 'DC-', 'NE:', espacios, etc.
+        cleaned = raw.upper().replace('NE-', '').replace('DC-', '') \
+                             .replace('NE:', '').replace('DC:', '').strip()
+        try:
+            # Si quedó un número puro, hacemos match por el entero.
+            id_int = int(cleaned)
+            qs = qs.filter(
+                Q(nota_entrega__numero=id_int) |
+                Q(nota_entrega__pk=id_int) |
+                Q(documento_compra__pk=id_int) |
+                Q(documento_compra__numero_interno=cleaned)
+            )
+        except (ValueError, TypeError):
+            # Si no es numérico puro, hacer búsqueda substring sobre el campo.
+            qs = qs.filter(
+                Q(nota_entrega__numero__icontains=cleaned) |
+                Q(documento_compra__numero_interno__icontains=cleaned)
+            )
 
     columns = [
         ('fecha_hora', 'Fecha y Hora'),
@@ -108,6 +140,7 @@ def reporte_kardex(
         ('concepto', 'Concepto'),
         ('cantidad', 'Cantidad'),
         ('saldo', 'Saldo'),
+        ('doc_origen', 'Nº Documento Origen'),
         ('costo_unit', 'Costo Unit. USD'),
         ('valor_mov', 'Valor Mov. USD'),
     ]
@@ -126,6 +159,20 @@ def reporte_kardex(
         else:
             total_salidas += valor_mov
 
+        # Doc origen: prefijo identificable del NE/DC/NCR asociado al movimiento.
+        if m.nota_entrega_id or m.documento_compra_id:
+            doc_label = []
+            if m.nota_entrega_id:
+                ne = m.nota_entrega
+                doc_label.append(f"NE-{ne.numero}{(' F:' + ne.numero_factura) if ne.numero_factura else ''}")
+            if m.documento_compra_id:
+                dc = m.documento_compra
+                doc_label.append(f"DC-{dc.pk}{(' ' + dc.numero_interno) if dc.numero_interno else ''}")
+            doc_origen_value = ' / '.join(doc_label)
+        else:
+            # Sin documento origen — puede ser ajuste manual / carga masiva / etc.
+            doc_origen_value = '—'
+
         rows.append(OrderedDict([
             ('fecha_hora', m.fecha_hora.strftime('%Y-%m-%d %H:%M')),
             ('articulo_sku', m.articulo_id),
@@ -135,6 +182,7 @@ def reporte_kardex(
             ('concepto', m.concepto),
             ('cantidad', str(m.cantidad)),
             ('saldo', str(m.saldo_resultante)),
+            ('doc_origen', doc_origen_value),
             ('costo_unit', str(costo_unit)),
             ('valor_mov', str(valor_mov)),
         ]))
@@ -151,6 +199,7 @@ def reporte_kardex(
             'Kardex Valorizado', empresa_id,
             articulo_sku=articulo_sku or 'TODOS',
             almacen_id=almacen_id or 'TODOS',
+            documento_numero=documento_numero or 'TODOS',
             desde=desde_dt.date().isoformat() if desde_dt else 'INICIO',
             hasta=hasta_dt.date().isoformat() if hasta_dt else 'AHORA',
         ),

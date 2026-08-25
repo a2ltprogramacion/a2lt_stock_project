@@ -155,6 +155,19 @@ módulos N1-C3 + Fichas, sin romper la arquitectura on-premise.
 | Tests | +13 tests en 3 clases: `TestTipoDocumentoCompra3Opciones`, `TestIvaIndividualPorLinea`, `TestIVAConfiguracionIvasDisponibles`. | (este commit) | ✅ |
 | Doc | CHANGELOG 1.1.1 + OPERACION 1.1.1 + BACKLOG TICKET #18. | (este commit) | ✅ |
 
+### Iteración 1.2.1 — UX Compras + Sidebar Colapsable (2026-07-26)
+
+**Decisión:** 3 observaciones reales del operador en pantalla 1366×768 
+sin tocar backend (`services.py` y `models.py` intactos). Sin migraciones.
+
+| Sub | Descripción | Commit | Estado |
+|-----|-------------|--------|---------|
+| TICKET #19-UX-ITER1 | Sidebar colapsable en `base.html` con localStorage + script anti-flash + CSS `.sidebar-collapsed`. ADR-31. | (este commit) | ✅ |
+| TICKET #19-UX-ITER2 | Captura de seriales inline por fila en `compras.html`. Removido panel de selección. `parseSerialInput()` + contador live `X/N`. ADR-30. | (este commit) | ✅ |
+| TICKET #19-UX-ITER3 | 3 bug-fixes: payload key `lista_items`, propagación dict response en `registrar_compra_api`, override de costo en `addItemToPurchase`. | (este commit) | ✅ |
+| TICKET #19-UX-ITER4 | Layout `compra_detalle.html` grid 1/3 + 2/3 (Detalle + Ítems). Form sizing para 1366×768. | (este commit) | ✅ |
+| Doc | CHANGELOG 1.2.1 + ADR-30/31 + BACKLOG TICKET #19-UX + PLAN + ARQUITECTURA + OPERACION + README. | (este commit) | ✅ |
+
 ### Etapa F — Documentación
 
 | Sub | Descripción | Estado |
@@ -191,10 +204,22 @@ módulos N1-C3 + Fichas, sin romper la arquitectura on-premise.
    debe filtrar por `empresa_id=request.session.get('empresa_id')` 
    en el `get_object_or_404` (regla C2 — anti-leak multi-tenant).
 8. **Los tokens `$[PRECIO_USD]`, `$[PRECIO_BCV]`, `$[PRECIO_BS_BASE]`, 
-   `$[PRECIO_BS]`** se persisten como texto literal en `social_quick` 
-   y `social_cross`. La sustitución ocurre solo al mostrar/copiar el 
-   mensaje en `catalogo.html`. La toolbar de `articulos.html` 
-   (**NO** envía datos al servidor).
+    `$[PRECIO_BS]`** se persisten como texto literal en `social_quick` 
+    y `social_cross`. La sustitución ocurre solo al mostrar/copiar el 
+    mensaje en `catalogo.html`. La toolbar de `articulos.html` 
+    (**NO** envía datos al servidor).
+9. **Captura de seriales en Compras (1.2.1 ADR-30):** la UI de 
+    Compras usa input inline por fila con `parseSerialInput()` para 
+    escribir los seriales NUEVOS que llegan en la factura del 
+    proveedor (no lista los DISPONIBLES existentes como en Ventas). 
+    El contador live `X/N` debe estar verde antes de submit. El 
+    backend `registrar_compra_proveedor` valida `len(seriales)==qty` 
+    desde 1.1.0.
+10. **Sidebar colapsable (1.2.1 ADR-31):** el estado colapsado/expandido 
+    se persiste en `localStorage['a2lt_sidebar_collapsed']`. Un script 
+    anti-flash en el `<head>` aplica la clase desde el primer paint 
+    (mismo patrón que el toggle de dark mode). NO usar `document.cookie` 
+    ni backend; el estado es puramente del navegador.
 
 ## Matriz de tests (C1-C19)
 
@@ -227,22 +252,23 @@ módulos N1-C3 + Fichas, sin romper la arquitectura on-premise.
 | C25 | Iteración 1.1.1 O2 | IVA individual por línea (select en grilla) en ventas y compras | 6 |
 | C26 | Iteración 1.1.1 O2 | `ConfiguracionEmpresa.ivas_disponibles` y serialización en JSON | 2 |
 | C27 | Iteración 1.2.0 TKET #18-NC | Módulo Notas de Crédito (`/notas-credito/`): 5 vistas + templates + `procesar_devolucion_{venta,compra}` + back-end multi-tenant + 5 properties + PDFs A4 + 29 tests (15 backend + 14 UI) | 29 |
+| — | Iteración 1.2.1 UX | Sidebar colapsable (ADR-31) + Seriales inline en Compras (ADR-30) + 3 bug-fixes en payload/views + Layout `compra_detalle.html` (1/3 + 2/3). Sin migraciones, sin tests nuevos (suite 276 sigue verde). Backend services intacto. | 0 |
 
 Otras suites sin código C: TestMovimientosBasicos, 
 TestRollbackAtomicidad (ADR-08), TestVentaExitosa, 
 TestCoberturaCritica (reversos notificados, correlativo por empresa), 
 TestProcesarVentaN2/N3/N4/N5, TestInterlockFacturaN4, 
 TestNotaEntregaFaseN5. **Suite total: 276 tests verdes en ~190s 
-(247 previos + 29 nuevos del módulo NC, 5 skipped legacy).**
+(247 previos + 29 nuevos del módulo NC, 5 skipped legacy). Iteración 
+1.2.1 sin tests nuevos (cambios UI puramente frontend).**
 
 ## Documentos relacionados
 
 - `docs/AUDITORIA_INICIAL.md` — hallazgos previos a la Fase A.
 - `docs/ARQUITECTURA.md` — diagrama, multi-tenant, regla sagrada 
   kardex, snapshots, mapa de services, migraciones, tests.
-- `docs/ADR.md` — 20 ADRs formales (01-26 con saltos; ADR-23 a ADR-26 
-  añadidos en 1.1.0 para Emisión NE/Factura, snapshots 4 precios, 
-  tokens de precio y toolbar caret tracking).
+- `docs/ADR.md` — 22 ADRs formales (01-31 con saltos; ADR-30 y ADR-31 
+  añadidos en 1.2.1 para seriales inline y sidebar colapsable).
 - `docs/ROADMAP.md` — features post-100% (cuentas por cobrar/pagar, 
   factura electrónica Seniat, bitácora de auditoría).
 - `docs/OPERACION.md` — guía de instalación detallada, módulos, 

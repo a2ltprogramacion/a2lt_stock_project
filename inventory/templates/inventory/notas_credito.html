@@ -1,6 +1,10 @@
 {% extends 'inventory/base.html' %}
 {% block content %}
 <section class="space-y-6">
+
+    <!-- TOAST CONTAINER para notificaciones no bloqueantes -->
+    <div id="toast-container-nc" class="fixed top-4 right-4 z-[100] space-y-2 w-80 pointer-events-none"></div>
+
     <div class="flex justify-between items-center">
         <div>
             <h2 class="text-xl font-bold text-slate-900 dark:text-white">
@@ -383,8 +387,29 @@
             });
             const data = await resp.json();
             if (data.ok) {
-                alert('NC emitida con éxito: ' + (data.numero_control || ('#' + (data.nc_id || ''))));
-                window.location.reload();
+                // Toast de éxito.
+                showNcToast({
+                    tipo: 'success',
+                    titulo: 'NC emitida',
+                    mensaje: 'NC ' + (data.numero_control || ('#' + (data.nc_id || ''))) +
+                             ' emitida correctamente.',
+                    duracion: 4000
+                });
+                // Advertencia de saldo negativo (si el sistema vendió originalmente
+                // sin stock, y la devolución NO alcanza a cubrirlo).
+                if (data.hubo_saldo_negativo) {
+                    const texto = (data.alertas_saldo_negativo || [])
+                        .map(a => `• ${a.sku} @ ${a.almacen}: saldo post = ${a.saldo_post_devolucion}`)
+                        .join('\\n');
+                    showNcToast({
+                        tipo: 'warning',
+                        titulo: 'Stock sigue en negativo',
+                        mensaje: 'Una o más líneas quedaron con saldo_stock < 0 después de la devolución. ' +
+                                 'La NC se aplicó correctamente pero el producto físico no alcanza para cubrir el faltante original (drop-ship).\n\n' + texto,
+                        duracion: 12000
+                    });
+                }
+                setTimeout(() => window.location.reload(), 1500);
             } else {
                 showError(data.error);
                 btn.disabled = false;
@@ -395,6 +420,42 @@
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> Emitir NC';
         }
+    }
+
+    function showNcToast({ tipo = 'info', titulo = '', mensaje = '', duracion = 5000 } = {}) {
+        const cont = document.getElementById('toast-container-nc');
+        if (!cont) return;
+        const styles = {
+            info:    { bg: 'bg-indigo-600',  icon: 'fa-circle-info',           ring: 'border-indigo-300'  },
+            warning: { bg: 'bg-amber-500',   icon: 'fa-triangle-exclamation',  ring: 'border-amber-300'   },
+            error:   { bg: 'bg-rose-600',    icon: 'fa-circle-xmark',          ring: 'border-rose-300'    },
+            success: { bg: 'bg-emerald-600', icon: 'fa-circle-check',          ring: 'border-emerald-300' },
+        };
+        const s = styles[tipo] || styles.info;
+        const toast = document.createElement('div');
+        toast.className = [
+            'pointer-events-auto flex items-start gap-3 p-3 rounded-xl shadow-2xl text-white text-xs',
+            'border-l-4', s.bg, s.ring,
+            'transform translate-x-6 opacity-0 transition duration-200 ease-out'
+        ].join(' ');
+        toast.innerHTML = `
+            <i class="fa-solid ${s.icon} text-base mt-0.5 flex-shrink-0"></i>
+            <div class="flex-1 min-w-0">
+                <p class="font-bold leading-tight">${(titulo || '').replace(/</g, '<')}</p>
+                <p class="text-[11px] opacity-90 leading-snug mt-1 whitespace-pre-wrap">${(mensaje || '').replace(/</g, '<')}</p>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-white/80 hover:text-white transition flex-shrink-0" title="Cerrar">
+                <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
+        `;
+        cont.appendChild(toast);
+        requestAnimationFrame(() => {
+            toast.classList.remove('translate-x-6', 'opacity-0');
+        });
+        setTimeout(() => {
+            toast.classList.add('translate-x-6', 'opacity-0');
+            setTimeout(() => toast.remove(), 200);
+        }, duracion);
     }
 </script>
 {% endblock %}

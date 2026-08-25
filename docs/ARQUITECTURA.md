@@ -1,6 +1,6 @@
 # Arquitectura — A2LT Stock
 
-**Versión:** 1.0 (julio 2026)
+**Versión:** 1.2.1 (julio 2026)
 
 ## Visión general
 
@@ -335,6 +335,21 @@ Codificados por **C-series** (criterio de validación):
   una Empresa, `create_tenant_defaults` siembra ConfiguracionEmpresa 
   con defaults para NE/Compras; al guardar DocumentoCompra, 
   `Max('numero')+1` calcula el siguiente correlativo por empresa.
+- **Captura de seriales inline en Compras (ADR-30, 1.2.1)** — en 
+  lugar de un panel de selección de seriales DISPONIBLES (que era 
+  conceptualmente errado: las compras registran seriales NUEVOS), 
+  cada fila de item con `usa_serial=true` muestra un input inline 
+  para pegar la lista de IMEIs que llegan en la factura. 
+  `parseSerialInput(str)` normaliza (split por `,` `;` `\n`, trim, 
+  dedupe, descarta vacíos) y un contador live `X/N` valida antes 
+  de submit. El backend `registrar_compra_proveedor` ya esperaba 
+  `lista_items[].seriales: [str]` desde 1.1.0, sin cambios.
+- **Sidebar colapsable con localStorage (ADR-31, 1.2.1)** — el 
+  `<aside>` colapsa a `w-16` (sólo iconos) con un toggle en el 
+  header. Estado persistido en `localStorage['a2lt_sidebar_collapsed']`. 
+  Script anti-flash en el `<head>` aplica la clase antes del primer 
+  paint para evitar FOUC. Patrón ortogonal al toggle de dark mode 
+  (ambos viven en localStorage independientes).
 
 ## Limitaciones aceptadas
 

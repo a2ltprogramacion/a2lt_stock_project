@@ -69,6 +69,7 @@ def registrar_movimiento(
     detalle_adicional: str = '',
     usuario: str = '',
     documento_compra = None,
+    permite_saldo_negativo: bool = False,
 ) -> MovimientoKardex:
     """
     Registra un movimiento de inventario de forma transaccional y atómica.
@@ -88,6 +89,11 @@ def registrar_movimiento(
         lote_carga (str):    ID del lote de carga masiva (opcional, para Ticket #3).
         detalle_adicional:   Texto libre de auditoría (opcional).
         usuario (str):       Nombre del usuario que ejecuta el movimiento (opcional).
+        documento_compra:    DocumentoCompra asociado (opcional, para compras).
+        permite_saldo_negativo (bool): Si True, una SALIDA puede dejar el stock_actual
+            en negativo (para ventas forward / drop-ship donde la mercancia aún no
+            ha llegado del proveedor). Solo aplicar cuando la regla de negocio
+            `ConfiguracionEmpresa.permite_venta_sin_stock` esté activa.
 
     Returns:
         MovimientoKardex: El registro creado en el Kárdex.
@@ -96,7 +102,8 @@ def registrar_movimiento(
         ValueError: Si tipo no es 'ENTRADA' o 'SALIDA'.
         ValueError: Si cantidad no es un número positivo.
         ValueError: Si articulo.tipo == 'COMBO' (los combos no tienen stock propio).
-        ValueError: En SALIDA, si el stock disponible es insuficiente (anti-negativo).
+        ValueError: En SALIDA, si el stock disponible es insuficiente y NO se permite
+            saldo negativo (Regla Sagrada por defecto).
         Articulo.DoesNotExist / Almacen.DoesNotExist: Si las FK no existen en BD.
     """
     from decimal import Decimal
@@ -153,16 +160,38 @@ def registrar_movimiento(
                 almacen=almacen,
             )
         except InventarioAlmacen.DoesNotExist:
-            raise ValueError(
-                f"No existe inventario para '{articulo.sku}' en '{almacen.nombre}'. "
-                "No se pueden registrar salidas sin existencia previa."
-            )
+            if permite_saldo_negativo:
+                # Venta forward / drop-ship: ni siquiera existe fila de stock aún.
+                # La creamos con cantidad_disponible=0 y luego el UPDATE la dejará en negativo.
+                inv = InventarioAlmacen.objects.create(
+                    empresa=articulo.empresa,
+                    articulo=articulo,
+                    almacen=almacen,
+                    cantidad_disponible=Decimal('0.00'),
+                )
+                logger.warning(
+                    "[KARDEX SALIDA] %s @ %s | Sin fila de inventario previa. "
+                    "permite_saldo_negativo=True (drop-ship / forward). Saldo inicial=0.",
+                    articulo.sku, almacen.nombre,
+                )
+            else:
+                raise ValueError(
+                    f"No existe inventario para '{articulo.sku}' en '{almacen.nombre}'. "
+                    "No se pueden registrar salidas sin existencia previa."
+                )
 
-        if inv.cantidad_disponible < cantidad:
+        if inv.cantidad_disponible < cantidad and not permite_saldo_negativo:
             raise ValueError(
                 f"Stock insuficiente para '{articulo.nombre}' en '{almacen.nombre}'. "
                 f"Disponible: {inv.cantidad_disponible} | Solicitado: {cantidad}. "
                 "No se permiten saldos negativos (Regla Sagrada)."
+            )
+
+        if permite_saldo_negativo and inv.cantidad_disponible < cantidad:
+            logger.warning(
+                "[KARDEX SALIDA] %s @ %s | -%s → Stock queda NEGATIVO: %s (permite_saldo_negativo=True).",
+                articulo.sku, almacen.nombre, cantidad,
+                inv.cantidad_disponible - cantidad,
             )
 
         InventarioAlmacen.objects.filter(pk=inv.pk).update(
@@ -1206,6 +1235,10 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
     factor_aplicado = config.factor_cobertura
     tasa_mercado_aplicada = config.tasa_mercado
 
+    # Regla de Negocio: Permitir venta sin stock (drop-ship / forward con proveedor).
+    # Default False (Regla Sagrada anti-negativo). Configurable por empresa.
+    permite_sin_stock = bool(config.permite_venta_sin_stock)
+
     # N2: Validación de tipo_documento y numero_factura
     if tipo_documento not in ('NOTA_ENTREGA', 'FACTURA'):
         raise ValueError(
@@ -1276,8 +1309,12 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         precio_base = Decimal(str(
             item.get('precio_base', item.get('precio_unitario_usd'))
         ))
-        # Descuento individual opcional (default 0)
+        # Descuento individual opcional (default 0; validación defensiva [0, 100])
         descuento_aplicado = Decimal(str(item.get('descuento_aplicado', '0')))
+        if not (Decimal('0') <= descuento_aplicado <= Decimal('100')):
+            raise ValueError(
+                f"descuento_aplicado para {articulo.sku} debe estar entre 0 y 100."
+            )
         # IVA por línea opcional (default 0, sobrescribe Articulo.iva_porcentaje
         # si la UI lo envía; NO aceptamos valor fuera de 0-100).
         iva_porcentaje_item = item.get('iva_porcentaje', None)
@@ -1288,29 +1325,62 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
                     f"iva_porcentaje para {articulo.sku} debe estar entre 0 y 100."
                 )
 
-        # Validación estricta de Stock
-        stock_disp = articulo.get_stock_disponible(almacen)
-        if stock_disp < cantidad:
-            raise ValueError(
-                f"Stock insuficiente para '{articulo.nombre}'. "
-                f"Requerido: {cantidad}, Disponible: {stock_disp} en '{almacen.nombre}'."
-            )
+        # Resolución del almacén POR LÍNEA (permite una misma SKU en varios
+        # almacenes dentro del mismo documento). Cada línea determina su propio
+        # origen físico. Si no se envía `almacen_id` por línea, se usa el de
+        # la cabecera por compatibilidad hacia atrás.
+        item_almacen_id = item.get('almacen_id')
+        if item_almacen_id is not None:
+            try:
+                item_almacen_id_int = int(item_almacen_id)
+            except (ValueError, TypeError):
+                raise ValueError(f"almacen_id inválido en línea con SKU {articulo.sku}.")
+            if item_almacen_id_int != int(almacen.pk):
+                # Verificar multi-tenant: el almacén de la línea debe pertenecer
+                # a la misma empresa que la cabecera.
+                try:
+                    item_almacen = Almacen.global_objects.get(
+                        pk=item_almacen_id_int,
+                        empresa_id=empresa_id_int,
+                    )
+                except Almacen.DoesNotExist:
+                    raise ValueError(
+                        f"El almacén {item_almacen_id_int} de la línea con SKU "
+                        f"'{articulo.sku}' no pertenece a la empresa activa."
+                    )
+                almacen_para_kardex = item_almacen
+            else:
+                almacen_para_kardex = almacen
+        else:
+            almacen_para_kardex = almacen
 
-        # Descuento atómico del Kárdex
+        # Validación de Stock (perimetral; tolera negativos si la config lo permite).
+        stock_disp = articulo.get_stock_disponible(almacen_para_kardex)
+        if stock_disp < cantidad:
+            if not permite_sin_stock:
+                raise ValueError(
+                    f"Stock insuficiente para '{articulo.nombre}'. "
+                    f"Requerido: {cantidad}, Disponible: {stock_disp} en "
+                    f"'{almacen_para_kardex.nombre}'."
+                )
+            # Si permite_sin_stock=True, se continúa (la salida generará saldo negativo).
+
+        # Descuento atómico del Kárdex (usa el almacén por línea).
         if articulo.tipo == 'FISICO':
             registrar_movimiento(
                 articulo=articulo,
-                almacen=almacen,
+                almacen=almacen_para_kardex,
                 tipo='SALIDA',
                 cantidad=cantidad,
                 concepto='VENTA',
                 nota_entrega=nota_entrega,
-                usuario=usuario
+                usuario=usuario,
+                permite_saldo_negativo=permite_sin_stock,
             )
         elif articulo.tipo == 'COMBO':
             procesar_salida_combo(
                 combo=articulo,
-                almacen=almacen,
+                almacen=almacen_para_kardex,
                 cantidad_combos=cantidad,
                 nota_entrega=nota_entrega,
                 usuario=usuario
@@ -1329,10 +1399,11 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
             iva_porcentaje = articulo.iva_porcentaje
 
         # Creación de Detalle (Línea de factura) — ADR-18: 4 precios snapshot + IVA
+        # El almacen aquí es el de la línea (puede diferir del de cabecera).
         detalle_nota = DetalleNotaEntrega.objects.create(
             nota_entrega=nota_entrega,
             articulo=articulo,
-            almacen=almacen,
+            almacen=almacen_para_kardex,
             cantidad=cantidad,
             precio_base=precio_base,
             precio_ajustado=precio_ajustado,
@@ -1354,19 +1425,19 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
                 )
 
             # Bloqueo pesimista: select_for_update garantiza que nadie más pueda tocar estos seriales
-            # simultáneamente en otra transacción.
+            # simultáneamente en otra transacción. Filtra también por el almacén de la línea.
             seriales_db = list(SerialArticulo.objects.select_for_update().filter(
                 serial__in=seriales_ids,
                 articulo=articulo,
-                empresa=almacen.empresa,
-                almacen=almacen
+                empresa=almacen_para_kardex.empresa,
+                almacen=almacen_para_kardex
             ))
 
             if len(seriales_db) != len(seriales_ids):
                 encontrados = [s.serial for s in seriales_db]
                 faltantes = set(seriales_ids) - set(encontrados)
                 raise ValueError(
-                    f"Los siguientes seriales no se encontraron o no pertenecen a '{almacen.nombre}': {', '.join(faltantes)}"
+                    f"Los siguientes seriales no se encontraron o no pertenecen a '{almacen_para_kardex.nombre}': {', '.join(faltantes)}"
                 )
 
             for s in seriales_db:
@@ -1403,6 +1474,54 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
 # 5. SINCRONIZACIÓN DE TASAS DE CAMBIO (API)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+def es_url_api_segura(url: str) -> bool:
+    """
+    Valida que `url` sea apta para ser consumida por sincronizar_tasa_cambio,
+    bloqueando direcciones internas/privadas (mitigación de SSRF).
+
+    - Esquema únicamente http/https.
+    - El host resuelto no debe caer en rangos de red privada, loopback,
+      link-local (incl. 169.254.169.254 de metadata cloud) ni IPv6 única/local.
+    """
+    import socket
+    import ipaddress
+    from urllib.parse import urlparse
+
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https'):
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+    redes_bloqueadas = (
+        ipaddress.ip_network('127.0.0.0/8'),
+        ipaddress.ip_network('10.0.0.0/8'),
+        ipaddress.ip_network('172.16.0.0/12'),
+        ipaddress.ip_network('192.168.0.0/16'),
+        ipaddress.ip_network('169.254.0.0/16'),
+        ipaddress.ip_network('::1/128'),
+        ipaddress.ip_network('fc00::/7'),
+        ipaddress.ip_network('fe80::/10'),
+    )
+    for info in infos:
+        ip_str = info[4][0].split('%')[0]
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+        for red in redes_bloqueadas:
+            if addr in red:
+                return False
+    return True
+
+
 def sincronizar_tasa_cambio() -> dict:
     """
     Se conecta a la API configurada para obtener la tasa de mercado,
@@ -1421,12 +1540,17 @@ def sincronizar_tasa_cambio() -> dict:
     if not config.api_url:
         return {'ok': False, 'error': "La URL de la API no está configurada en el sistema."}
 
-    # 1. Petición HTTP
+    if not es_url_api_segura(config.api_url):
+        logger.error("[API] URL de la API rechazada por política de seguridad (SSRF): %s", config.api_url)
+        return {'ok': False, 'error': "La URL de la API no es válida o apunta a una dirección no permitida."}
+
+    # 1. Petición HTTP (sin seguir redirects para evitar bypass vía redirección).
     try:
         response = requests.request(
             method=config.http_method.upper(),
             url=config.api_url,
-            timeout=5
+            timeout=5,
+            allow_redirects=False,
         )
         response.raise_for_status()
         data = response.json()
@@ -2259,6 +2383,12 @@ def procesar_devolucion_venta(
 
     detalles_ids = []
     monto_total_usd = _D('0.0000')
+    # Advertencias: la NC se completa, pero alertamos si después de la ENTRADA
+    # el stock_resultante sigue NEGATIVO (escenario: venta forward, no hay
+    # producto físico para devolver; la ENTRADA no cubre el faltante.
+    # NO bloqueamos — el operador tiene visibilidad para que confirme
+    # con el cliente que el producto sí está físicamente).
+    alertas_saldo_negativo = []
 
     try:
         for item in items_devueltos:
@@ -2313,7 +2443,7 @@ def procesar_devolucion_venta(
 
             # 6. Movimiento de Kárdex: ENTRADA por la cantidad devuelta
             #    (reingresa stock al almacén del doc. origen).
-            registrar_movimiento(
+            movimiento = registrar_movimiento(
                 articulo=detalle.articulo,
                 almacen=detalle.almacen,
                 tipo='ENTRADA',
@@ -2325,6 +2455,30 @@ def procesar_devolucion_venta(
                 nota_entrega=nota,
                 usuario=usuario,
             )
+
+            # 6.1 Verificación de saldo posterior a la devolución. Si sigue
+            # NEGATIVO, registramos una advertencia para que la UI la muestre.
+            try:
+                saldo_post = _D(str(movimiento.saldo_resultante))
+            except Exception:
+                saldo_post = _D('0')
+            if saldo_post < 0:
+                alertas_saldo_negativo.append({
+                    'sku': detalle.articulo.sku,
+                    'almacen': detalle.almacen.nombre,
+                    'saldo_post_devolucion': float(saldo_post),
+                    'cantidad_devuelta': float(cantidad_devolver),
+                })
+                logger.warning(
+                    "[NC VENTA] %s sobre %s: stock SIGUE NEGATIVO después de la "
+                    "devolución: %s @ %s = %s (devuelto: %s). "
+                    "El producto físico no alcanza para cubrir el faltante original.",
+                    nc.numero_control,
+                    detalle.articulo.sku,
+                    detalle.almacen.nombre,
+                    saldo_post,
+                    cantidad_devolver,
+                )
 
             # 7. Liberar seriales FIFO (estado VENDIDO → DISPONIBLE).
             if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
@@ -2358,15 +2512,25 @@ def procesar_devolucion_venta(
     nc.monto_total_reembolso = monto_total_usd.quantize(_D('0.0001'))
     nc.save(update_fields=['monto_total_reembolso'])
 
+    # Si alguna línea quedó con saldo_stock aún negativo después de la
+    # devolución, advertimos al frontend para mostrar un toast explicativo.
+    hubo_saldo_negativo = bool(alertas_saldo_negativo)
+
     return {
         'ok': True,
         'nc_id': nc.pk,
         'numero_control': nc.numero_control,
         'detalles_ids': detalles_ids,
         'monto_total_reembolso': nc.monto_total_reembolso,
+        'hubo_saldo_negativo': hubo_saldo_negativo,
+        'alertas_saldo_negativo': alertas_saldo_negativo,
         'mensaje': (
             f"Nota de Crédito {nc.numero_control} emitida sobre "
             f"Nota de Entrega NE-{nota.numero:08d}: {len(detalles_ids)} item(s) devuelto(s)."
+        ) + (
+            " ADVERTENCIA: el stock de uno o más artículos sigue en negativo "
+            "(el producto físico no alcanza para cubrir la devolución)."
+            if hubo_saldo_negativo else ""
         ),
     }
 

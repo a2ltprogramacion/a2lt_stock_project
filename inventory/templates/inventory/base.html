@@ -17,6 +17,22 @@
         } else {
             document.documentElement.classList.remove('dark');
         }
+
+        // Anti-flash: aplica estado colapsado ANTES del render del body.
+        // Si localStorage tiene 'sidebar-collapsed' = 'true' o la pantalla es pequeña por default.
+        (function () {
+            const stored = localStorage.getItem('sidebar-collapsed');
+            // Default: colapsado en pantallas pequeñas (< 768px), expandido en grandes.
+            const smallScreen = window.matchMedia('(max-width: 768px)').matches;
+            const shouldCollapse = stored === 'true' || (stored === null && smallScreen);
+            if (shouldCollapse) {
+                document.addEventListener('DOMContentLoaded', function once() {
+                    const sb = document.getElementById('app-sidebar');
+                    if (sb) sb.classList.add('sidebar-collapsed');
+                    document.removeEventListener('DOMContentLoaded', once);
+                });
+            }
+        })();
         
         tailwind.config = {
             darkMode: 'class',
@@ -82,6 +98,37 @@
         ::-webkit-scrollbar-thumb:hover {
             background: #6366f1;
         }
+
+        /* ── Sidebar desplegable (toggle persistente) ───────────────────── */
+        #app-sidebar {
+            width: 16rem; /* 256px = w-64 */
+            transition: width 0.2s ease;
+        }
+        #app-sidebar.sidebar-collapsed {
+            width: 4rem; /* 64px = w-16 */
+        }
+        #app-sidebar.sidebar-collapsed .nav-label,
+        #app-sidebar.sidebar-collapsed .sidebar-section-title,
+        #app-sidebar.sidebar-collapsed .profile-text {
+            display: none !important;
+        }
+        /* Centra el icono cuando está colapsado */
+        #app-sidebar.sidebar-collapsed .nav-btn {
+            justify-content: center;
+            padding-left: 0;
+            padding-right: 0;
+        }
+        /* El menú superior y el contenedor flex principal aplican transición */
+        #main-content {
+            transition: margin-left 0.2s ease;
+        }
+        /* Evita wrap del logo/header al colapsar */
+        #sidebar-toggle-btn {
+            transition: transform 0.2s ease, background-color 0.2s ease;
+        }
+        #sidebar-toggle-btn:hover {
+            transform: scale(1.05);
+        }
     </style>
 </head>
 
@@ -92,6 +139,11 @@
     <header
         class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex flex-wrap justify-between items-center gap-4 sticky top-0 z-40 shadow-sm transition-colors duration-300">
         <div class="flex items-center gap-3">
+            <button id="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Minimizar/Ampliar menú lateral"
+                title="Minimizar / Ampliar menú"
+                class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 transition">
+                <i id="sidebar-toggle-icon" class="fa-solid fa-bars-staggered text-sm"></i>
+            </button>
             <div
                 class="bg-indigo-600 text-white p-2.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/10">
                 <i class="fa-solid fa-boxes-stacked text-lg"></i>
@@ -148,59 +200,67 @@
     <div class="flex flex-1 overflow-hidden h-[calc(100vh-57px)]">
 
         <!-- SIDEBAR NAVIGATION -->
-        <aside
+        <aside id="app-sidebar"
             class="w-64 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-4 flex flex-col gap-1 shrink-0 overflow-y-auto transition-colors duration-300">
             <span
-                class="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 px-3 mb-2 block tracking-wider">Módulos
+                class="sidebar-section-title text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 px-3 mb-2 block tracking-wider">Módulos
                 de Operación</span>
 
             <a href="{% url 'inventory:dashboard' %}" id="btn-tab-dashboard"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'dashboard' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-chart-line text-base w-5 text-center {% if request.resolver_match.url_name == 'dashboard' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Dashboard General
+                <i class="fa-solid fa-chart-line text-base w-5 text-center {% if request.resolver_match.url_name == 'dashboard' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Dashboard General</span>
             </a>
             <a href="{% url 'inventory:catalogo' %}" id="btn-tab-catalogo"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'catalogo' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-tags text-base w-5 text-center {% if request.resolver_match.url_name == 'catalogo' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Catálogo y Redes
+                <i class="fa-solid fa-tags text-base w-5 text-center {% if request.resolver_match.url_name == 'catalogo' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Catálogo y Redes</span>
             </a>
             <a href="{% url 'inventory:ventas' %}" id="btn-tab-ventas"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'ventas' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-file-invoice-dollar text-base w-5 text-center {% if request.resolver_match.url_name == 'ventas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Notas de Entrega (Venta)
+                <i class="fa-solid fa-file-invoice-dollar text-base w-5 text-center {% if request.resolver_match.url_name == 'ventas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Notas de Entrega (Venta)</span>
+            </a>
+            <a href="{% url 'inventory:listado_notas' %}" id="btn-tab-listado-notas"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'listado_notas' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-clock-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'listado_notas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Histórico de Ventas (NE / Facturas)</span>
             </a>
             <a href="{% url 'inventory:compras' %}" id="btn-tab-compras"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'compras' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-truck-ramp-box text-base w-5 text-center {% if request.resolver_match.url_name == 'compras' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Carga de Compras / Proveedores
+                <i class="fa-solid fa-truck-ramp-box text-base w-5 text-center {% if request.resolver_match.url_name == 'compras' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Carga de Compras / Proveedores</span>
+            </a>
+            <a href="{% url 'inventory:listado_compras' %}" id="btn-tab-listado-compras"
+                class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'listado_compras' %}active bg-amber-600/10 dark:bg-amber-600/15 text-amber-600 dark:text-amber-400 border-l-4 border-amber-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
+                <i class="fa-solid fa-clock-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'listado_compras' %}text-amber-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Histórico de Compras (DC)</span>
             </a>
             <a href="{% url 'inventory:reversos' %}" id="btn-tab-reversos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'reversos' %}active bg-red-600/10 dark:bg-red-600/15 text-red-600 dark:text-red-400 border-l-4 border-red-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'reversos' %}text-red-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Reversos y Anulaciones
+                <i class="fa-solid fa-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'reversos' %}text-red-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Reversos y Anulaciones</span>
             </a>
             <a href="{% url 'inventory:notas_credito' %}" id="btn-tab-notas-credito"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'notas_credito' or request.resolver_match.url_name == 'api_origen_detalle' or request.resolver_match.url_name == 'crear_nc' or request.resolver_match.url_name == 'detalle_nc' or request.resolver_match.url_name == 'pdf_nc' %}active bg-emerald-600/10 dark:bg-emerald-600/15 text-emerald-600 dark:text-emerald-400 border-l-4 border-emerald-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-file-circle-xmark text-base w-5 text-center {% if request.resolver_match.url_name == 'notas_credito' or request.resolver_match.url_name == 'api_origen_detalle' or request.resolver_match.url_name == 'crear_nc' or request.resolver_match.url_name == 'detalle_nc' or request.resolver_match.url_name == 'pdf_nc' %}text-emerald-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Notas de Crédito
+                <i class="fa-solid fa-file-circle-xmark text-base w-5 text-center {% if request.resolver_match.url_name == 'notas_credito' or request.resolver_match.url_name == 'api_origen_detalle' or request.resolver_match.url_name == 'crear_nc' or request.resolver_match.url_name == 'detalle_nc' or request.resolver_match.url_name == 'pdf_nc' %}text-emerald-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Notas de Crédito</span>
             </a>
             <a href="{% url 'inventory:articulos' %}" id="btn-tab-articulos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'articulos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-folder-plus text-base w-5 text-center {% if request.resolver_match.url_name == 'articulos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Fichas / Artículos
+                <i class="fa-solid fa-folder-plus text-base w-5 text-center {% if request.resolver_match.url_name == 'articulos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Fichas / Artículos</span>
             </a>
             <a href="{% url 'inventory:carga_masiva' %}" id="btn-tab-carga"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'carga_masiva' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-file-excel text-base w-5 text-center {% if request.resolver_match.url_name == 'carga_masiva' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Carga Masiva (Excel)
+                <i class="fa-solid fa-file-excel text-base w-5 text-center {% if request.resolver_match.url_name == 'carga_masiva' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Carga Masiva (Excel)</span>
             </a>
             <a href="{% url 'inventory:movimientos' %}" id="btn-tab-movimientos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'movimientos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-right-left text-base w-5 text-center {% if request.resolver_match.url_name == 'movimientos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Kárdex Integrado
+                <i class="fa-solid fa-right-left text-base w-5 text-center {% if request.resolver_match.url_name == 'movimientos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Kárdex Integrado</span>
             </a>
             <a href="{% url 'inventory:contactos' %}" id="btn-tab-contactos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'contactos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-users text-base w-5 text-center {% if request.resolver_match.url_name == 'contactos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Clientes y Proveedores
+                <i class="fa-solid fa-users text-base w-5 text-center {% if request.resolver_match.url_name == 'contactos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Clientes y Proveedores</span>
             </a>
             <a href="{% url 'inventory:configuracion' %}" id="btn-tab-config"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'configuracion' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-sliders text-base w-5 text-center {% if request.resolver_match.url_name == 'configuracion' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Configuración Global
+                <i class="fa-solid fa-sliders text-base w-5 text-center {% if request.resolver_match.url_name == 'configuracion' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Configuración Global</span>
             </a>
             <a href="{% url 'inventory:reportes' %}" id="btn-tab-reportes"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'reportes' or request.resolver_match.url_name == 'reporte_detalle' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-chart-pie text-base w-5 text-center {% if request.resolver_match.url_name == 'reportes' or request.resolver_match.url_name == 'reporte_detalle' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> Reportes
+                <i class="fa-solid fa-chart-pie text-base w-5 text-center {% if request.resolver_match.url_name == 'reportes' or request.resolver_match.url_name == 'reporte_detalle' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Reportes</span>
             </a>
 
             <!-- PROFILE SUMMARY -->
@@ -210,7 +270,7 @@
                     class="w-8 h-8 rounded-full bg-indigo-650 flex items-center justify-center font-bold text-white border border-indigo-500">
                     OP
                 </div>
-                <div class="flex-1 w-full overflow-hidden">
+                <div class="flex-1 w-full overflow-hidden profile-text">
                     <p class="font-bold text-slate-800 dark:text-slate-200 text-[11px] truncate">{{ request.user.username|title|default:"Operador" }}</p>
                     {% if request.user.perfil and request.user.perfil.empresas_permitidas.count > 1 %}
                         <form action="{% url 'inventory:cambiar_empresa' %}" method="POST" class="mt-1 w-full">
@@ -225,14 +285,17 @@
                         <p class="text-[9px] truncate">Empresa: <span class="text-indigo-600 dark:text-indigo-400 font-semibold">{{ request.user.perfil.empresa_activa.nombre|default:"No asignada"|truncatechars:15 }}</span></p>
                     {% endif %}
                 </div>
-                <a href="{% url 'inventory:logout' %}" title="Cerrar Sesión" class="ml-auto text-rose-500 hover:text-rose-400 bg-rose-50 dark:bg-rose-500/10 p-2 rounded-lg transition-colors">
-                    <i class="fa-solid fa-power-off"></i>
-                </a>
+                <form method="post" action="{% url 'inventory:logout' %}" class="ml-auto">
+                    {% csrf_token %}
+                    <button type="submit" title="Cerrar Sesión" class="text-rose-500 hover:text-rose-400 bg-rose-50 dark:bg-rose-500/10 p-2 rounded-lg transition-colors">
+                        <i class="fa-solid fa-power-off"></i>
+                    </button>
+                </form>
             </div>
         </aside>
 
         <!-- CONTENT VIEWPORT -->
-        <main class="flex-1 p-6 overflow-y-auto bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+        <main id="main-content" class="flex-1 p-6 overflow-y-auto bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
             {% if messages %}
                 <div class="mb-6 space-y-2">
                     {% for message in messages %}
@@ -250,6 +313,18 @@
 
     <!-- Theme and Global Utilities script -->
     <script>
+        // ── Sidebar toggle (colapsable) ─────────────────────────────────────
+        function toggleSidebar() {
+            const sb = document.getElementById('app-sidebar');
+            if (!sb) return;
+            const isCollapsed = sb.classList.toggle('sidebar-collapsed');
+            localStorage.setItem('sidebar-collapsed', isCollapsed ? 'true' : 'false');
+            const icon = document.getElementById('sidebar-toggle-icon');
+            if (icon) {
+                icon.className = isCollapsed ? 'fa-solid fa-bars text-sm' : 'fa-solid fa-bars-staggered text-sm';
+            }
+        }
+
         // ── CSRF helper global ──────────────────────────────────────────────
         // Funcion estandar de la documentacion de Django para leer csrftoken.
         // Debe ser global para que todos los fetch AJAX la usen sin duplicar

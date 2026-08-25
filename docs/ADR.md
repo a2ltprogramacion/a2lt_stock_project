@@ -1,6 +1,6 @@
 # Decisiones de Arquitectura (ADRs)
 
-**Última actualización:** 2026-07-10
+**Última actualización:** 2026-07-26
 
 Este archivo centraliza todas las Decisiones de Arquitectura (ADR – 
 *Architecture Decision Records*) referenciadas en el código y la 
@@ -369,6 +369,125 @@ del proveedor sin complejidad. Las Notas de Crédito ganan su propio
 módulo con trazabilidad desde el doc. original.  
 **Tests:** C24 (5 tests: 3 opciones + 2 choices viejos fallan).
 
+## ADR-30: Captura de seriales inline por fila (1.2.1)
+
+**Estado:** Aceptada (2026-07-26). Iteración UX.
+
+**Contexto:**
+
+El formulario de Compras (`compras.html`) implementaba la captura de 
+seriales (TKET #14-SAAS, Fase C1) con un **panel inferior** 
+(`#purchase-seriales-panel-container`) que listaba los seriales 
+DISPONIBLES ya existentes en el inventario, permitiendo al operador 
+"seleccionar" cuáles añadir. El frontend cargaba el panel vía 
+`loadSerialesForPurchaseItem()` hasta 3 llamadas AJAX, mantenía un 
+cache `serialesCache`, y `togglePurchaseSerial()` hacía add/remove 
+de cada IMEI.
+
+El problema: **las comprasregistran seriales NUEVOS que llegan en 
+la factura del proveedor**, no existentes. El panel de "selección desde 
+stock" era conceptualmente incorrecto y obligaba al operador a 
+trabajar dos veces: parsear la factura a mano afuera y luego hacer 
+click en cada serial uno por uno. Inusable para artículos con alta 
+rotación (AURI-001, antenas con IMEI).
+
+**Decisión:**
+
+- Remover el panel HTML + los 3 funciones JS 
+  (`loadSerialesForPurchaseItem`, `renderPurchaseSerialesPanel`, 
+  `togglePurchaseSerial`) + `serialesCache`.
+- Cada fila de item con `usa_serial=true` en la grilla de Compras 
+  muestra un `<input type="text">` inline para que el operador pegue 
+  / escriba los seriales que llegan en la factura, separados por 
+  `,`, `;` o saltos de línea. Útil para pegar listas de IMEIs desde 
+  el PDF o el correo del proveedor.
+- `parseSerialInput(str)` se encarga de normalizar (split por 
+  delimitadores, `.trim()`, dedupe, descarta vacíos) generando un 
+  array `seriales_parsed`.
+- Contador live `X/N` en el input: gris si 0, ámber si 
+  incompleto, verde si parseado == `qty`.
+- `processPurchase()` valida antesde enviar: si el item tiene 
+  `usa_serial=true`, `seriales_parsed.length` debe ser exactamente 
+  igual a `qty`. Si no, alerta y hace `focus()` al input.
+- El backend NO cambia: `registrar_compra_proveedor` en `services.py` 
+  ya esperaba `lista_items[].seriales: [...]` desde 1.1.0 y ya validaba 
+  `len(seriales) == cantidad` + `bulk_create` as `DISPONIBLE` + 
+  `compra_origen=documento`.
+- Para VENTAS el wizard de selección FIFO de seriales persiste 
+  intacto (ahí sí se elige desde stock DISPONIBLE).
+
+**Consecuencias:**
+
+- Menos clicks para registrar una compra con seriales: el operador 
+  pega la lista y continúa. No hay ida-vuelta al servidor para 
+  "cargar" seriales existentes.
+- Compatibilidad con el backend asegurada sin migración: 
+  el contrato `lista_items[].seriales: [str]` se respeta.
+- La UI de Ventas no se toca: su flujo FIFO de selección de 
+  seriales DISPONIBLES es correcto (los seriales ya están en stock a 
+  esa altura), no requiere cambio.
+- El bug C2 (multi-tenant leak en `vista_buscar_seriales_articulo`) 
+  sigue mitigado desde 1.1.0; no se reintroduce.
+
+**Tests:** sin tests nuevos. El contrato `seriales: [str]` en 
+`registrar_compra_proveedor` ya está cubierto por tests C22 desde 1.1.0. 
+Backend sin cambios.
+
+---
+
+## ADR-31: Sidebar colapsable con persistencia en localStorage (1.2.1)
+
+**Estado:** Aceptada (2026-07-26). Iteración UX.
+
+**Contexto:**
+
+El sidebar fijo en `base.html` ocupa 256 px de ancho permanente. En 
+pantallas 1366×768 (comunes en comercios venezolanos, electrodomésticos 
+reciclados como POS), esto deja ~1100 px para la zona de trabajo, 
+restándole张家空间 a las tablas largas (Compras, Ventas, Kardex) y a 
+los formularios de captura.
+
+**Decisión:**
+
+- Añadir `id="app-sidebar"` al `<aside>` y `id="main-content"` al 
+  `<main>` para anclar por JS.
+- CSS `.sidebar-collapsed` en el `<aside>` (`w-16`, hide text labels) 
+  + `.sidebar-collapsed + #main-content` hereda el anchoMayor 
+  automáticamente (sm:ml-64 → sm:ml-16).
+- Botón en el header (icono `fa-bars` / `fa-angles-left` según estado) 
+  invoca `toggleSidebar()`.
+- `localStorage` clave `a2lt_sidebar_collapsed` (boolean) persiste 
+  entre sesiones.
+- Script **anti-flash** inyectado en el `<head>` antes del render 
+  del body: lee `localStorage` y agrega la clase `sidebar-collapsed` 
+  al `<html>` tag si corresponde, para que el primer paint ya muestre 
+  el sidebar colapsado/expandido correcto y evitar FOUC.
+- Los 14 enlaces del menú envuelven su texto en 
+  `<span class="nav-label">`. CSS 
+  `.sidebar-collapsed .nav-label { display: none }` oculta el texto 
+  cuando colapsa, dejando sólo iconos.
+- El título de sección del sidebar y los datos del perfil del usuario 
+  también colapsan (clase `sidebar-section-title` en el span de 
+  título, clase `profile-text` en el div de datos del usuario).
+
+**Consecuencias:**
+
+- Cliente + operador recuperan ~192 px de ancho de trabajo en tablas 
+  y formularios. La captura de Compras en 1366×768 ahora es viable 
+  sin scroll horizontal en la grilla.
+- Estado persistente entre pestañas y recargas (no se reinicia al 
+  navegar).
+- Compatible con dark mode: el script anti-flash no toca el 
+  `localStorage` del tema, son ortogonales.
+- Sin cambios en backend, sin vistas nuevas. Cambio puramente UI 
+  en `base.html`.
+
+**Tests:** sin tests nuevos. El `base.html` ya se cubre por tests C3 
+(getCookie + block extra_js) y la mayoría de pruebas de render que 
+verifican el layout base.
+
+---
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 
@@ -408,6 +527,8 @@ desarrollo formal en este archivo:
 | 27 | IVA individual por línea con override (1.1.1) | `procesar_venta`, `registrar_compra_proveedor`, `ivas_disponibles_json` |
 | 28 | Tipo de Documento Compra 3 opciones (1.1.1) | `DocumentoCompra.TIPO_DOCUMENTO_CHOICES`, migración 0013 |
 | 29 | Notas de Crédito como módulo aparte 1-NC-1-origen (1.2.0 / TKET #18-NC) | `NotaCredito`/`DetalleNotaCredito`, `procesar_devolucion_{venta,compra}`, ruta `/notas-credito/` |
+| 30 | Captura de seriales inline por fila en Compras (1.2.1) | `compras.html` (`parseSerialInput`, `updatePurchaseSerial`, contador live) |
+| 31 | Sidebar colapsable con persistencia localStorage (1.2.1) | `base.html` (`toggleSidebar`, script anti-flash, CSS `.sidebar-collapsed`) |
 
 ## ADR-29: Notas de Crédito con diseño 1-NC-1-origen (1.2.0 / TKET #18-NC)
 

@@ -1,11 +1,20 @@
 {% extends 'inventory/base.html' %}
 {% block content %}
-<section id="tab-ventas" class="tab-content space-y-6"><div class="flex justify-between items-center">
+<section id="tab-ventas" class="tab-content space-y-6">
+
+                <!-- TOAST CONTAINER (notificaciones no bloqueantes) -->
+                <div id="toast-container-ventas" class="fixed top-4 right-4 z-[100] space-y-2 w-80 pointer-events-none"></div>
+
+                <div class="flex justify-between items-center">
                     <div>
                         <h2 class="text-xl font-bold text-slate-900 dark:text-white">Emisión de Notas de Entrega</h2>
                         <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de salida rápidos y
                             calcula conversión exacta para el cliente.</p>
                     </div>
+                    <a href="{% url 'inventory:listado_notas' %}"
+                       class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-2 px-4 rounded-lg transition flex items-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-clock-rotate-left text-indigo-500"></i> Ver Histórico
+                    </a>
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -85,6 +94,7 @@
                                         <th class="pb-2 font-semibold">Almacén</th>
                                         <th class="pb-2 text-center">Cantidad</th>
                                         <th class="pb-2 text-right">Precio ($)</th>
+                                        <th class="pb-2 text-center">Desc. %</th>
                                         <th class="pb-2 text-center">IVA %</th>
                                         <th class="pb-2 text-right text-emerald-600 dark:text-emerald-400">Total ($)
                                         </th>
@@ -94,7 +104,7 @@
                                 <tbody id="note-items-tbody"
                                     class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
                                     <tr id="empty-note-row">
-                                        <td colspan="8"
+                                        <td colspan="9"
                                             class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                                             <i
                                                 class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
@@ -207,9 +217,18 @@
                                 </div>
                                 <div class="border-t border-slate-200 dark:border-slate-800 my-2"></div>
                                 <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 dark:text-slate-400">Descuento Individual:</span>
+                                    <span class="text-rose-600 dark:text-rose-400 font-bold"
+                                        id="note-discount-individual">-$0.00</span>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
                                     <span class="text-slate-500 dark:text-slate-400">Descuento Global:</span>
                                     <span class="text-rose-600 dark:text-rose-400 font-bold"
                                         id="note-discount-global">-$0.00</span>
+                                </div>
+                                <div class="flex justify-between items-center text-[10px] text-slate-400 dark:text-slate-500 italic">
+                                    <span>Total Descuentos:</span>
+                                    <span class="font-bold" id="note-discount-total">-$0.00</span>
                                 </div>
                                 <div class="border-t border-dashed border-slate-200 dark:border-slate-800 my-1"></div>
                                 <div class="flex justify-between items-center text-sm">
@@ -265,6 +284,10 @@
 <script>
     let globalFactor = Number("{{ config.factor_cobertura|stringformat:'.4f'|default:'1.0000' }}");
     let globalBCV = Number("{{ config.tasa_bcv|stringformat:'.4f'|default:'0.0000' }}");
+    // Flag expuesto desde ConfiguracionEmpresa: si True permite ventas/NE
+    // sin stock físico (drop-ship / forward). Cuando está activo, las validaciones
+    // bloqueantes del frontend se relajan y se delega la decisión al backend.
+    const permiteVentaSinStock = {% if config.permite_venta_sin_stock %}true{% else %}false{% endif %};
 
     function escapeHtml(str) {
         if (str === null || str === undefined) return '';
@@ -292,12 +315,24 @@
                 confirmBtn.disabled = true;
                 confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
             }
+            // FACTURA restaura el IVA del catálogo para cada item que aún tiene 0
+            // pero su iva_porcentaje_catalog es distinto (evita pisar ediciones manuales).
+            draftNoteItems.forEach(item => {
+                if (item.iva_porcentaje === 0 && item.iva_porcentaje_catalog && item.iva_porcentaje_catalog > 0) {
+                    item.iva_porcentaje = item.iva_porcentaje_catalog;
+                }
+            });
         } else {
             invoiceContainer.classList.add('hidden');
             document.getElementById('note-invoice-ref').value = '';
             confirmBtn.disabled = false;
             confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            // NOTA DE ENTREGA → IVA 0% por defecto para todos los items.
+            draftNoteItems.forEach(item => {
+                item.iva_porcentaje = 0;
+            });
         }
+        renderNoteItems();
         recalculateNoteTotal();
     }
 
@@ -435,7 +470,53 @@
     }
 
     let draftNoteItems = [];
-    
+
+    // Sistema de notificaciones (toasts) no bloqueantes para ventas.
+    function showToast({ tipo = 'info', titulo = '', mensaje = '', duracion = 5000 } = {}) {
+        const cont = document.getElementById('toast-container-ventas');
+        if (!cont) { console.warn('toast-container-ventas no existe'); return; }
+
+        const styles = {
+            info:    { bg: 'bg-indigo-600',  icon: 'fa-circle-info',     ring: 'border-indigo-300'  },
+            warning: { bg: 'bg-amber-500',   icon: 'fa-triangle-exclamation', ring: 'border-amber-300' },
+            error:   { bg: 'bg-rose-600',    icon: 'fa-circle-xmark',    ring: 'border-rose-300'   },
+            success: { bg: 'bg-emerald-600', icon: 'fa-circle-check',    ring: 'border-emerald-300'},
+        };
+        const s = styles[tipo] || styles.info;
+
+        const toast = document.createElement('div');
+        toast.className = [
+            'pointer-events-auto flex items-start gap-3 p-3 rounded-xl shadow-2xl text-white text-xs',
+            'border-l-4', s.bg, s.ring,
+            'transform translate-x-6 opacity-0 transition duration-200 ease-out'
+        ].join(' ');
+        toast.innerHTML = `
+            <i class="fa-solid ${s.icon} text-base mt-0.5 flex-shrink-0"></i>
+            <div class="flex-1 min-w-0">
+                <p class="font-bold leading-tight">${escapeHtml(titulo)}</p>
+                <p class="text-[11px] opacity-90 leading-snug mt-1">${escapeHtml(mensaje)}</p>
+            </div>
+            <button onclick="this.parentElement.remove()" class="text-white/80 hover:text-white transition flex-shrink-0" title="Cerrar">
+                <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
+        `;
+        cont.appendChild(toast);
+        // Animar entrada (forzar reflow)
+        requestAnimationFrame(() => {
+            toast.classList.remove('translate-x-6', 'opacity-0');
+        });
+        // Auto-eliminar tras N ms
+        const timeoutId = setTimeout(() => dismissToast(toast), duracion);
+        toast.dataset.timeoutId = timeoutId;
+    }
+
+    function dismissToast(toast) {
+        if (!toast || !toast.parentElement) return;
+        clearTimeout(parseInt(toast.dataset.timeoutId || '0'));
+        toast.classList.add('translate-x-6', 'opacity-0');
+        setTimeout(() => toast.remove(), 200);
+    }
+
     async function addItemToNote() {
         const skuInput = document.getElementById('sale-item-selected-sku');
         const sku = skuInput.value;
@@ -443,27 +524,94 @@
         const precio = parseFloat(skuInput.dataset.precio);
         const tipo = skuInput.dataset.tipo;
         const usaSerial = skuInput.dataset.usaSerial === '1';
-        const ivaPorcentaje = parseFloat(skuInput.dataset.ivaPorcentaje) || 0;
+        const ivaPorcentajeCatalog = parseFloat(skuInput.dataset.ivaPorcentaje) || 0;
+        // Por defecto de IVA depende del tipo de documento: NOTA_ENTREGA → 0%, FACTURA → catálogo.
+        const docTypeActual = document.querySelector('input[name="doc-type"]:checked').value;
+        const ivaPorcentaje = docTypeActual === 'NOTA_ENTREGA' ? 0 : ivaPorcentajeCatalog;
         const almacenId = document.getElementById('sale-warehouse-select').value;
         const qty = parseInt(document.getElementById('sale-item-qty').value);
-        
+
         if(!sku || qty <= 0) return;
 
-        // Validar contra backend
+        const warehouseSelect = document.getElementById('sale-warehouse-select');
+        const warehouseName = warehouseSelect.options[warehouseSelect.selectedIndex].text;
+
+        // Validar contra backend. Si la empresa permite ventas sin stock
+        // (drop-ship / forward), relajamos las validaciones bloqueantes y
+        // dejamos que la carga llegue al backend, que sí maneja el flag de
+        // ConfiguracionEmpresa al registrar la SALIDA en Kardex.
         const response = await fetch(`/ventas/validar_stock/${sku}/${almacenId}/`);
         if(!response.ok) {
-            alert('Error o stock insuficiente según base de datos.');
+            if (permiteVentaSinStock) {
+                // 404 (artículo o almacén no existe): backdrop: permiteVentaSinStock
+                // no significa "inventar IDs". Pero si el artículo o almacén no
+                // existen, NO se puede cargar nada. Mostramos error claro.
+                showToast({
+                    tipo: 'error',
+                    titulo: 'Artículo o almacén no encontrado',
+                    mensaje: `No se encontró "${nombre}" (SKU=${sku}) en "${warehouseName}". Verifica el SKU o activa la carga inicial.`
+                });
+                return;
+            }
+            showToast({
+                tipo: 'warning',
+                titulo: 'Artículo no disponible',
+                mensaje: `El artículo "${nombre}" no se encuentra en el almacén "${warehouseName}". Selecciona otro almacén o agrega stock vía carga/compra.`
+            });
             return;
         }
         const data = await response.json();
-        if(data.stock_disponible < qty) {
-             alert('Stock insuficiente. Disponible: ' + data.stock_disponible);
-             return;
+        if(data.stock_disponible <= 0) {
+            if (permiteVentaSinStock) {
+                // La venta se va a registrar con stock_resultante NEGATIVO.
+                // Advertimos al operador pero dejamos pasar.
+                showToast({
+                    tipo: 'info',
+                    titulo: 'Venta sin stock físico',
+                    mensaje: `"${nombre}" se agregará a la nota aunque "${warehouseName}" no tiene existencia. El saldo en Kardex quedará NEGATIVO hasta que llegue la mercancía del proveedor.`,
+                    duracion: 6000
+                });
+            } else {
+                showToast({
+                    tipo: 'warning',
+                    titulo: 'Artículo sin existencia',
+                    mensaje: `"${nombre}" no tiene existencia en "${warehouseName}". Disponible: 0. Cambia de almacén o registra stock vía compra/transferencia.`
+                });
+                return;
+            }
+        } else if(data.stock_disponible < qty) {
+            if (permiteVentaSinStock) {
+                showToast({
+                    tipo: 'info',
+                    titulo: 'Cantidad superior al stock actual',
+                    mensaje: `Solicitaste ${qty} pero "${warehouseName}" solo tiene ${data.stock_disponible}. La venta dejará el saldo del Kardex en NEGATIVO (configuración drop-ship activa).`,
+                    duracion: 6000
+                });
+            } else {
+                showToast({
+                    tipo: 'warning',
+                    titulo: 'Stock insuficiente',
+                    mensaje: `En "${warehouseName}" solo hay ${data.stock_disponible} unidad(es) de "${nombre}". Solicitado: ${qty}.`
+                });
+                return;
+            }
         }
 
+        // 3 casos al agregar:
+        //   (a) SKU ya en el mismo almacén → acumula cantidad (qty).
+        //   (b) SKU ya en OTRO almacén → crea fila nueva y notifica al usuario.
+        //   (c) SKU nuevo → crea fila nueva sin aviso (camino normal).
         const existingItem = draftNoteItems.find(item => item.sku === sku && item.almacen === almacenId);
+        const sameSkuOtherWarehouse = draftNoteItems.find(item => item.sku === sku && item.almacen !== almacenId);
+
         if (existingItem) {
             existingItem.qty += qty;
+            showToast({
+                tipo: 'info',
+                titulo: 'Cantidad añadida',
+                mensaje: `+${qty} unidad(es) de "${nombre}" en "${warehouseName}". Total en este almacén: ${existingItem.qty}.`,
+                duracion: 3000
+            });
         } else {
             draftNoteItems.push({
                 sku: sku,
@@ -474,9 +622,28 @@
                 tipo: tipo,
                 usa_serial: usaSerial,
                 iva_porcentaje: ivaPorcentaje,
+                iva_porcentaje_catalog: ivaPorcentajeCatalog,
+                descuento: 0,
                 cobertura_ind: null,
                 seriales_seleccionados: []
             });
+            if (sameSkuOtherWarehouse) {
+                // El usuario agregó el mismo SKU pero desde distinto almacén.
+                // Mostrar aviso claro: existe en otro(s) almacén(es), se creó línea separada.
+                const otrosAlmacenes = draftNoteItems
+                    .filter(i => i.sku === sku && i.almacen !== almacenId)
+                    .map(i => {
+                        const opt = document.querySelector(`#sale-warehouse-select option[value="${i.almacen}"]`);
+                        return opt ? opt.text : `Almacén ${i.almacen}`;
+                    })
+                    .join(', ');
+                showToast({
+                    tipo: 'info',
+                    titulo: 'Línea separada por almacén',
+                    mensaje: `"${nombre}" ya existe en: ${otrosAlmacenes}. Se añadió una nueva fila para "${warehouseName}" (no se acumula entre almacenes).`,
+                    duracion: 7000
+                });
+            }
         }
 
         document.getElementById('sale-item-search').value = '';
@@ -504,7 +671,7 @@
         if (draftNoteItems.length === 0) {
             tbody.innerHTML = `
                 <tr id="empty-note-row">
-                    <td colspan="8" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
+                    <td colspan="9" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                         <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
                         Aún no has agregado artículos a esta nota de entrega.
                     </td>
@@ -514,8 +681,12 @@
         }
 
         draftNoteItems.forEach((item, index) => {
-            const itemTotal = item.precio * item.qty;
-            const ivaActual = item.iva_porcentaje || 16;
+            const descuentoInd = item.descuento || 0;
+            const itemTotal = item.precio * item.qty * (1 - descuentoInd / 100);
+            // Preservar 0 explícito (Nota de Entrega); fallback a 16 sólo si la prop no existe aún.
+            const ivaActual = (item.iva_porcentaje === 0 || item.iva_porcentaje)
+                ? Number(item.iva_porcentaje)
+                : 16;
             const ivaOptions = ivasDisponibles.map(v =>
                 `<option value="${v}" ${Number(v) === Number(ivaActual) ? 'selected' : ''}>${v}%</option>`
             ).join('');
@@ -531,6 +702,11 @@
                 <td class="py-3 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
                 <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.precio.toFixed(2)}</td>
                 <td class="py-3 px-2 text-center">
+                    <input type="number" min="0" max="100" step="0.01" value="${descuentoInd}"
+                        onchange="updateNoteItemDescuento(${index}, this.value)"
+                        class="w-16 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-1 py-0.5 text-xs font-mono text-center text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500" title="Descuento individual (%)">
+                </td>
+                <td class="py-3 px-2 text-center">
                     <select onchange="updateNoteItemIva(${index}, this.value)"
                         class="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-1.5 py-0.5 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500">${ivaOptions}</select>
                 </td>
@@ -545,6 +721,16 @@
         });
     }
 
+    function updateNoteItemDescuento(index, newValue) {
+        if (!draftNoteItems[index]) return;
+        let v = parseFloat(newValue) || 0;
+        if (v < 0) v = 0;
+        if (v > 100) v = 100;
+        draftNoteItems[index].descuento = v;
+        renderNoteItems();
+        recalculateNoteTotal();
+    }
+
     function updateNoteItemIva(index, newIva) {
         if (draftNoteItems[index]) {
             draftNoteItems[index].iva_porcentaje = parseFloat(newIva);
@@ -554,40 +740,55 @@
 
     function recalculateNoteTotal() {
         let subtotal = 0;
+        let subtotalNeto = 0;  // subtotal tras descuentos individuales
         let weightedFactorSum = 0;
         let totalWeight = 0;
 
+        // Descuento global
+        const descuentoGlobalPercent = parseFloat(document.getElementById('note-discount-percent').value) || 0;
+
         draftNoteItems.forEach(item => {
-            const itemTotal = item.precio * item.qty;
-            subtotal += itemTotal;
+            const descuentoInd = item.descuento || 0;
+            const itemBruto = item.precio * item.qty;
+            const itemNeto = itemBruto * (1 - descuentoInd / 100);
+            subtotal += itemBruto;
+            subtotalNeto += itemNeto;
             const factor = item.cobertura_ind ? item.cobertura_ind : globalFactor;
-            weightedFactorSum += factor * itemTotal;
-            totalWeight += itemTotal;
+            weightedFactorSum += factor * itemNeto;
+            totalWeight += itemNeto;
         });
 
         const exactFactor = totalWeight > 0 ? (weightedFactorSum / totalWeight) : globalFactor;
 
-        // Descuento global
-        const descuentoGlobalPercent = parseFloat(document.getElementById('note-discount-percent').value) || 0;
-        const descuentoGlobal = subtotal * (descuentoGlobalPercent / 100);
-        const subtotalAfterDiscount = subtotal - descuentoGlobal;
+        // Descuento_GLOBAL aplica sobre el subtotal ya neto de descuentos individuales
+        const descuentoGlobal = subtotalNeto * (descuentoGlobalPercent / 100);
+        const subtotalAfterGlobalDiscount = subtotalNeto - descuentoGlobal;
 
-        // IVA (siempre se calcula individual por articulo)
+        // IVA (siempre se calcula individual por articulo) sobre base neta 
+        // tras descuento individual + descuento global proporcional
         let ivaUSD = 0;
         draftNoteItems.forEach(item => {
-            const itemTotal = item.precio * item.qty;
-            const itemDiscounted = itemTotal * (1 - descuentoGlobalPercent / 100);
+            const descuentoInd = item.descuento || 0;
+            const itemBruto = item.precio * item.qty;
+            const itemNetoInd = itemBruto * (1 - descuentoInd / 100);
+            const itemDiscounted = itemNetoInd * (1 - descuentoGlobalPercent / 100);
             const itemIvaPct = item.iva_porcentaje || 0;
             ivaUSD += itemDiscounted * (itemIvaPct / 100);
         });
 
-        const totalUSD = subtotalAfterDiscount;
+        const totalUSD = subtotalAfterGlobalDiscount;
         const totalBCVUSD = totalUSD * exactFactor;
         const totalIVA_BS = ivaUSD * globalBCV;
         const totalVES = (totalBCVUSD + ivaUSD) * globalBCV;
 
+        // Suma total de descuentos individuales para mostrar
+        const totalDescuentoInd = subtotal - subtotalNeto;
+
         document.getElementById('note-subtotal-usd').innerText = `$${subtotal.toFixed(2)}`;
+        // Separación visual de descuentos: individual ≠ global.
+        document.getElementById('note-discount-individual').innerText = `-$${totalDescuentoInd.toFixed(2)}`;
         document.getElementById('note-discount-global').innerText = `-$${descuentoGlobal.toFixed(2)}`;
+        document.getElementById('note-discount-total').innerText = `-$${(totalDescuentoInd + descuentoGlobal).toFixed(2)}`;
         document.getElementById('note-total-usd').innerText = `$${totalUSD.toFixed(2)}`;
         document.getElementById('note-total-bcv-usd').innerText = `$${totalBCVUSD.toFixed(2)}`;
 
@@ -719,8 +920,9 @@
                 cantidad: i.qty,
                 precio_unitario_usd: i.precio,
                 precio_base: i.precio,
-                descuento_aplicado: 0,
-                iva_porcentaje: i.iva_porcentaje || 16,
+                descuento_aplicado: i.descuento || 0,
+                iva_porcentaje: (i.iva_porcentaje === 0 || i.iva_porcentaje) ? i.iva_porcentaje : 16,
+                almacen_id: parseInt(i.almacen),
                 seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
             }))
         };
@@ -749,10 +951,39 @@
                 const notaId = data.nota_id;
                 const correlativo = data.correlativo;
                 const detailUrl = `/ventas/${notaId}/`;
-                if (confirm(`Venta registrada con éxito. ${data.tipo_documento || 'Documento'} Interno: ${correlativo}\n\n¿Desea ver el documento ahora?`)) {
-                    window.location.href = detailUrl;
+
+                // Toasts:
+                // 1) éxito (siempre).
+                // 2) advertencia si hubo stock_resultante negativo (drop-ship / forward).
+                showToast({
+                    tipo: 'success',
+                    titulo: 'Venta registrada',
+                    mensaje: `${data.tipo_documento || 'Documento'} Interno: ${correlativo}. Stock actualizado en Kardex.`,
+                    duracion: 4000
+                });
+                if (data.hubo_saldo_negativo) {
+                    const detalle = (data.alertas_stock_negativo || [])
+                        .map(a => `• ${a.articulo} @ ${a.almacen}: stock = ${a.saldo_resultante}`)
+                        .join('\n');
+                    showToast({
+                        tipo: 'warning',
+                        titulo: 'Stock en negativo (Drop-ship / Forward)',
+                        mensaje: `Los siguientes artículos quedaron con stock_resultante < 0 en su Kardex. Esto ocurre cuando la empresa vende sin tener existencia física (configuración activa). El stock volverá a positivo cuando llegue la mercancía del proveedor.\n\n${detalle}`,
+                        duracion: 12000
+                    });
+                    if (typeof confirm === 'function') {
+                        setTimeout(() => {
+                            window.location.href = detailUrl;
+                        }, 500);
+                    } else {
+                        window.location.href = detailUrl;
+                    }
                 } else {
-                    window.location.reload();
+                    if (confirm(`Venta registrada con éxito. ${data.tipo_documento || 'Documento'} Interno: ${correlativo}\n\n¿Desea ver el documento ahora?`)) {
+                        window.location.href = detailUrl;
+                    } else {
+                        window.location.reload();
+                    }
                 }
             } else {
                 alert(`Error: ${data.error}`);

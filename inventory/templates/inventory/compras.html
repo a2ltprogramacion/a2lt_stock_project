@@ -6,12 +6,16 @@
                         <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de entrada rápidos y
                             calcula conversión exacta para el proveedor.</p>
                     </div>
+                    <a href="{% url 'inventory:listado_compras' %}"
+                       class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-2 px-4 rounded-lg transition flex items-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-clock-rotate-left text-amber-500"></i> Ver Histórico
+                    </a>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
                     <!-- DETALLE DE FACTURACION Y SELECCION DE PRODUCTO -->
                     <div
-                        class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        class="xl:col-span-2 bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
                         <div
                             class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
                             <h3
@@ -23,18 +27,18 @@
 
                         <!-- AGREGAR ITEM FORM (Buscador Altamente Eficiente) -->
                         <div
-                            class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">
+                            class="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-850">
 
                             <!-- Searchable input dropdown container -->
-                            <div class="md:col-span-6 relative" id="searchable-purchase-item-container">
+                            <div class="md:col-span-5 relative" id="searchable-purchase-item-container">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Buscar
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Buscar
                                     y Seleccionar Artículo</label>
                                 <div class="relative">
                                     <input id="purchase-item-search" oninput="filterPurchaseItemDropdown()"
                                         onfocus="showPurchaseItemDropdown()" type="text"
                                         placeholder="Escribe SKU o nombre del producto..."
-                                        class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
+                                        class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
                                     <button onclick="clearPurchaseSearch()"
                                         class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
                                         <i class="fa-solid fa-circle-xmark"></i>
@@ -51,39 +55,37 @@
 
                             <div class="md:col-span-2">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Almacén
                                     Destino</label>
                                 <select id="purchase-warehouse-select"
-                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold">
                                     {% for almacen in almacenes %}
                                     <option value="{{ almacen.id }}">{{ almacen.nombre }}</option>
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="md:col-span-2">
+                            <div class="md:col-span-1">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Cant.</label>
                                 <input id="purchase-item-qty" type="number" min="1" value="1"
-                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-1 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
                             <div class="md:col-span-2">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Costo Factura ($)</label>
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Costo Factura ($)</label>
                                 <input id="purchase-item-cost" type="number" min="0" step="0.01" value="0.00"
-                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
                             <div class="md:col-span-2">
                                 <label
-                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Descuento Item (%)</label>
+                                    class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Desc. Item (%)</label>
                                 <input id="purchase-item-discount" type="number" min="0" max="100" step="0.01" value="0.00"
-                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
+                                    class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
-                            <div class="md:col-span-2">
-                                <button onclick="addItemToPurchase()"
-                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow">
-                                    <i class="fa-solid fa-plus"></i> Añadir
-                                </button>
-                            </div>
+                            <div class="md:col-span-12"><button onclick="addItemToPurchase()"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-1.5 rounded-md transition flex items-center justify-center gap-1.5 shadow">
+                                    <i class="fa-solid fa-plus"></i> Añadir Artículo
+                                </button></div>
                         </div>
 
                         <!-- ITEMS TABLE IN PURCHASE -->
@@ -107,7 +109,7 @@
                                 <tbody id="purchase-items-tbody"
                                     class="divide-y divide-slate-100 dark:divide-slate-800/60 font-mono text-slate-800 dark:text-slate-300">
                                     <tr id="empty-purchase-row">
-                                        <td colspan="8"
+                                        <td colspan="9"
                                             class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                                             <i
                                                 class="fa-solid fa-truck-ramp-box text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
@@ -270,13 +272,6 @@
                                     class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-medium"></textarea>
                             </div>
 
-                            <div id="purchase-seriales-panel-container" class="hidden space-y-3">
-                                <div class="flex items-center gap-2 pb-1 border-b border-slate-100 dark:border-slate-800">
-                                    <i class="fa-solid fa-barcode text-amber-500 text-xs"></i>
-                                    <span class="font-bold text-slate-800 dark:text-slate-200 text-[10px] uppercase tracking-wider">Asignación de Seriales</span>
-                                </div>
-                                <div id="purchase-seriales-sections"></div>
-                            </div>
 
                             <button onclick="processPurchase()" id="confirm-purchase-btn"
                                 class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
@@ -475,7 +470,9 @@
         const skuInput = document.getElementById('purchase-item-selected-sku');
         const sku = skuInput.value;
         const nombre = skuInput.dataset.nombre;
-        const costo = parseFloat(skuInput.dataset.costo);
+        const costoInputEl = document.getElementById('purchase-item-cost');
+        const costoFromInput = parseFloat(costoInputEl.value);
+        const costo = isNaN(costoFromInput) || costoFromInput <= 0 ? parseFloat(skuInput.dataset.costo) || 0 : costoFromInput;
         const tipo = skuInput.dataset.tipo;
         const usaSerial = skuInput.dataset.usaSerial === '1';
         const ivaPorcentaje = parseFloat(skuInput.dataset.ivaPorcentaje) || 0;
@@ -519,7 +516,7 @@
                 usa_serial: usaSerial,
                 iva_porcentaje: ivaPorcentaje,
                 descuento_item: descuentoItem,
-                seriales_seleccionados: []
+                seriales_input: ''
             });
         }
 
@@ -527,18 +524,24 @@
         document.getElementById('purchase-item-selected-sku').value = '';
         renderPurchaseItems();
         recalculatePurchaseTotal();
-
-        if (usaSerial) {
-            loadSerialesForPurchaseItem(draftPurchaseItems.find(i => i.sku === sku && i.almacen === almacenId) || {sku, almacen: almacenId});
-            setTimeout(() => renderPurchaseSerialesPanel(), 300);
-        }
     }
 
     function removePurchaseItem(index) {
-        const removed = draftPurchaseItems.splice(index, 1);
+        draftPurchaseItems.splice(index, 1);
         renderPurchaseItems();
         recalculatePurchaseTotal();
-        renderPurchaseSerialesPanel();
+    }
+
+    function parseSerialInput(value) {
+        if (!value) return [];
+        return Array.from(
+            new Set(
+                String(value)
+                    .split(/[\n,;]+/)
+                    .map(s => s.trim())
+                    .filter(s => s.length > 0)
+            )
+        );
     }
 
     function renderPurchaseItems() {
@@ -566,27 +569,54 @@
             const row = document.createElement('tr');
             row.className = "hover:bg-slate-100 dark:hover:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800/60";
             row.innerHTML = `
-                <td class="py-3 px-2 text-slate-500 dark:text-slate-400 font-bold">${escapeHtml(item.sku)}</td>
-                <td class="py-3 px-2 text-slate-800 dark:text-slate-200 font-medium">
+                <td class="py-2 px-2 text-slate-500 dark:text-slate-400 font-bold">${escapeHtml(item.sku)}</td>
+                <td class="py-2 px-2 text-slate-800 dark:text-slate-200 font-medium">
                     ${escapeHtml(item.nombre)}
                     ${item.tipo === 'COMBO' ? '<span class="text-[9px] bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/30 px-1 py-0.5 rounded ml-1">Combo</span>' : ''}
+                    ${item.usa_serial ? '<span class="text-[9px] bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800/30 px-1 py-0.5 rounded ml-1">Serial</span>' : ''}
                 </td>
-                <td class="py-3 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
-                <td class="py-3 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
-                <td class="py-3 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.costo.toFixed(2)}</td>
-                <td class="py-3 px-2 text-center font-bold text-slate-600 dark:text-slate-400">${(item.descuento_item || 0).toFixed(2)}%</td>
-                <td class="py-3 px-2 text-center">
+                <td class="py-2 px-2 text-slate-600 dark:text-slate-400 font-semibold">${item.almacen}</td>
+                <td class="py-2 px-2 text-center font-bold text-slate-800 dark:text-slate-200">${item.qty}</td>
+                <td class="py-2 px-2 text-right text-slate-600 dark:text-slate-400 font-bold">$${item.costo.toFixed(2)}</td>
+                <td class="py-2 px-2 text-center font-bold text-slate-600 dark:text-slate-400">${(item.descuento_item || 0).toFixed(2)}%</td>
+                <td class="py-2 px-2 text-center">
                     <select onchange="updatePurchaseItemIva(${index}, this.value)"
                         class="bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md px-1.5 py-0.5 text-xs font-mono text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500">${ivaOptions}</select>
                 </td>
-                <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
-                <td class="py-3 px-2 text-center">
+                <td class="py-2 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
+                <td class="py-2 px-2 text-center">
                     <button onclick="removePurchaseItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                 </td>
             `;
             tbody.appendChild(row);
+
+            if (item.usa_serial) {
+                const parsedNow = parseSerialInput(item.seriales_input);
+                const counterClass = parsedNow.length === item.qty
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
+                    : (parsedNow.length > 0
+                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400');
+                const serialRow = document.createElement('tr');
+                serialRow.className = "bg-amber-50/30 dark:bg-amber-900/10";
+                serialRow.innerHTML = `
+                    <td colspan="9" class="py-2 px-3">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-barcode text-amber-500 text-xs"></i>
+                            <label class="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">Seriales</label>
+                            <span id="serial-counter-${index}" class="text-[10px] font-bold px-2 py-0.5 rounded ${counterClass}">${parsedNow.length}/${item.qty}</span>
+                            <input id="serial-input-${index}" type="text"
+                                value="${escapeHtml(item.seriales_input || '')}"
+                                placeholder="SN-001,SN-002;SN-003 (separar con , o ;)"
+                                oninput="updatePurchaseSerial(${index}, this.value)"
+                                class="flex-1 bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700/50 rounded-md py-1 px-2 text-xs font-mono text-slate-700 dark:text-slate-200 focus:outline-none focus:border-amber-500">
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(serialRow);
+            }
         });
     }
 
@@ -594,6 +624,25 @@
         if (draftPurchaseItems[index]) {
             draftPurchaseItems[index].iva_porcentaje = parseFloat(newIva);
             recalculatePurchaseTotal();
+        }
+    }
+
+    function updatePurchaseSerial(index, value) {
+        if (!draftPurchaseItems[index]) return;
+        draftPurchaseItems[index].seriales_input = value;
+        const item = draftPurchaseItems[index];
+        const parsed = parseSerialInput(value);
+        const counterEl = document.getElementById(`serial-counter-${index}`);
+        if (counterEl) {
+            const ok = parsed.length === item.qty;
+            counterEl.textContent = `${parsed.length}/${item.qty}`;
+            counterEl.className = 'text-[10px] font-bold px-2 py-0.5 rounded ' + (
+                ok
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
+                    : (parsed.length > 0
+                        ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400')
+            );
         }
     }
 
@@ -649,90 +698,6 @@
         document.getElementById('purchase-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
     }
 
-    let serialesCache = {};
-
-    async function loadSerialesForPurchaseItem(item) {
-        const cacheKey = `${item.sku}_${item.almacen}`;
-        if (serialesCache[cacheKey]) return;
-        try {
-            const res = await fetch(`/ventas/seriales/${item.sku}/${item.almacen}/`);
-            const data = await res.json();
-            if (data.ok) {
-                serialesCache[cacheKey] = data.data;
-            }
-        } catch(e) {
-            serialesCache[cacheKey] = [];
-        }
-    }
-
-    function renderPurchaseSerialesPanel() {
-        const container = document.getElementById('purchase-seriales-panel-container');
-        const sectionsDiv = document.getElementById('purchase-seriales-sections');
-        const serialItems = draftPurchaseItems.filter(i => i.usa_serial);
-
-        if (serialItems.length === 0) {
-            container.classList.add('hidden');
-            sectionsDiv.innerHTML = '';
-            return;
-        }
-
-        container.classList.remove('hidden');
-        sectionsDiv.innerHTML = '';
-
-        serialItems.forEach((item, idx) => {
-            const cacheKey = `${item.sku}_${item.almacen}`;
-            const disponibles = serialesCache[cacheKey] || [];
-            const seleccionados = item.seriales_seleccionados || [];
-            const completado = seleccionados.length === item.qty;
-            const progreso = `${seleccionados.length}/${item.qty}`;
-
-            const section = document.createElement('div');
-            section.className = "bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-xl p-3 space-y-2";
-
-            let html = `<div class="flex justify-between items-center">
-                <span class="font-bold text-xs text-slate-800 dark:text-slate-200">${escapeHtml(item.nombre)} <span class="font-mono text-[10px] text-slate-500">(${escapeHtml(item.sku)})</span></span>
-                <span class="text-[10px] font-bold px-2 py-0.5 rounded ${completado ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'}">${completado ? 'Completo' : 'Pendiente'} — ${progreso}</span>
-            </div>`;
-
-            if (disponibles.length === 0) {
-                html += `<div class="text-[10px] text-slate-400 text-center py-2">Cargando seriales...</div>`;
-            } else {
-                html += `<div class="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1">`;
-                disponibles.forEach(s => {
-                    const checked = seleccionados.includes(s.serial);
-                    const disabled = !checked && completado;
-                    html += `<label class="flex items-center gap-2 text-[10px] p-1.5 rounded-lg cursor-pointer transition ${checked ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-800/40' : disabled ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-slate-900' : 'hover:bg-slate-100 dark:hover:bg-slate-800 border border-transparent'}">
-                        <input type="checkbox" class="serial-checkbox accent-indigo-600" data-item-sku="${escapeHtml(item.sku)}" data-item-almacen="${item.almacen}" data-serial="${escapeHtml(s.serial)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="togglePurchaseSerial(this)">
-                        <span class="font-mono font-bold text-slate-800 dark:text-slate-200">${escapeHtml(s.serial)}</span>
-                    </label>`;
-                });
-                html += `</div>`;
-            }
-
-            section.innerHTML = html;
-            sectionsDiv.appendChild(section);
-        });
-    }
-
-    function togglePurchaseSerial(checkbox) {
-        const sku = checkbox.dataset.itemSku;
-        const almacen = checkbox.dataset.itemAlmacen;
-        const serial = checkbox.dataset.serial;
-        const item = draftPurchaseItems.find(i => i.sku === sku && i.almacen === almacen);
-        if (!item) return;
-
-        if (checkbox.checked) {
-            if (item.seriales_seleccionados.length >= item.qty) {
-                checkbox.checked = false;
-                return;
-            }
-            item.seriales_seleccionados.push(serial);
-        } else {
-            item.seriales_seleccionados = item.seriales_seleccionados.filter(s => s !== serial);
-        }
-        renderPurchaseSerialesPanel();
-    }
-
     function processPurchase() {
         if (draftPurchaseItems.length === 0) {
             alert("No hay productos en la factura de compra.");
@@ -741,10 +706,14 @@
 
         const serialItems = draftPurchaseItems.filter(i => i.usa_serial);
         for (const item of serialItems) {
-            if ((item.seriales_seleccionados || []).length !== item.qty) {
-                alert(`Debe seleccionar ${item.qty} serial(es) para "${item.nombre}" (${item.sku}). Actualmente tiene ${(item.seriales_seleccionados || []).length}.`);
+            const parsed = parseSerialInput(item.seriales_input);
+            if (parsed.length !== item.qty) {
+                const inputEl = document.getElementById(`serial-input-${draftPurchaseItems.indexOf(item)}`);
+                if (inputEl) inputEl.focus();
+                alert(`Debe ingresar exactamente ${item.qty} serial(es) para "${item.nombre}" (${item.sku}).\n\nActualmente tiene ${parsed.length}.\nSepare los seriales con "," o ";".`);
                 return;
             }
+            item.seriales_parsed = parsed;
         }
 
         const proveedorId = document.getElementById('purchase-provider-select').value;
@@ -768,14 +737,14 @@
             numero_factura: numeroFactura,
             fecha_compra: fechaCompra,
             descuento_global: descuentoGlobal,
-            items: draftPurchaseItems.map(i => ({
+            lista_items: draftPurchaseItems.map(i => ({
                 sku: i.sku,
                 cantidad: i.qty,
                 costo_factura: i.costo,
                 costo_base: i.costo,
                 descuento_aplicado: i.descuento_item || 0,
                 iva_porcentaje: i.iva_porcentaje || 0,
-                seriales: i.usa_serial ? (i.seriales_seleccionados || []) : []
+                seriales: i.usa_serial ? (i.seriales_parsed || []) : []
             }))
         };
 

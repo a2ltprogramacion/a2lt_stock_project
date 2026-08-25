@@ -27,6 +27,28 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Rate-limiting de login (mitigación de fuerza bruta, sin dependencias externas)
+# ─────────────────────────────────────────────────────────────────────────────
+from django.core.cache import cache
+
+LOGIN_MAX_INTENTOS = 5
+LOGIN_VENTANA_SEGUNDOS = 5 * 60
+LOGIN_BLOQUEO_SEGUNDOS = 15 * 60
+
+
+def _ip_cliente(request):
+    # Respeta X-Forwarded-For si hay proxy reverso; toma el primero.
+    xff = request.META.get('HTTP_X_FORWARDED_FOR')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', '')
+
+
+def _clave_intentos_login(ip):
+    return f"login_fail:{ip}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 0. AUTENTICACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -35,10 +57,18 @@ def login_view(request):
         return redirect('inventory:dashboard')
         
     if request.method == 'POST':
+        ip = _ip_cliente(request)
+        clave = _clave_intentos_login(ip)
+        intentos = cache.get(clave) or 0
+        if intentos >= LOGIN_MAX_INTENTOS:
+            messages.error(request, 'Demasiados intentos fallidos. Intente nuevamente más tarde.')
+            return render(request, 'inventory/login.html')
+
         u = request.POST.get('username')
         p = request.POST.get('password')
         user = authenticate(request, username=u, password=p)
         if user is not None:
+            cache.delete(clave)
             login(request, user)
             from .models import Empresa
             
@@ -65,10 +95,13 @@ def login_view(request):
                         request.session['empresa_id'] = primera.id
                     return redirect('inventory:dashboard')
         else:
+            intentos = cache.get(clave) or 0
+            cache.set(clave, intentos + 1, LOGIN_VENTANA_SEGUNDOS)
             messages.error(request, 'Credenciales inválidas.')
             
     return render(request, 'inventory/login.html')
 
+@require_POST
 def logout_view(request):
     logout(request)
     return redirect('inventory:login')
@@ -684,11 +717,33 @@ def vista_crear_venta(request):
             descuento_global=Decimal(str(data.get('descuento_global', '0'))),
         )
 
+        # Detectar ventas forward / drop-ship (stock_resultante negativo).
+        # Esto sólo ocurre si ConfiguracionEmpresa.permite_venta_sin_stock=True.
+        from .models import MovimientoKardex
+        from django.db.models import Q
+        alertas_stock_negativo = []
+        movimientos_negativos = MovimientoKardex.objects.filter(
+            nota_entrega=nota,
+            tipo='SALIDA',
+            saldo_resultante__lt=0,
+        ).select_related('articulo', 'almacen')
+        for mov in movimientos_negativos:
+            alertas_stock_negativo.append({
+                'sku': mov.articulo.sku,
+                'articulo': mov.articulo.nombre,
+                'almacen': mov.almacen.nombre,
+                'saldo_resultante': float(mov.saldo_resultante),
+                'cantidad': float(mov.cantidad),
+            })
+        hubo_saldo_negativo = bool(alertas_stock_negativo)
+
         return JsonResponse({
             'ok': True,
             'nota_id': nota.pk,
             'correlativo': nota.numero,
-            'tipo_documento': nota.tipo_documento
+            'tipo_documento': nota.tipo_documento,
+            'hubo_saldo_negativo': hubo_saldo_negativo,
+            'alertas_stock_negativo': alertas_stock_negativo,
         })
     except ValueError as e:
         # Error de negocio (ej. falta de stock) -> Rollback automático en procesar_venta
@@ -866,6 +921,9 @@ def generar_pdf_nota(request, nota_id):
 
     subtotal_usd = sum(d.cantidad * d.precio_base for d in detalles)
     total_iva_usd = sum(d.iva_usd for d in detalles)
+    # Total Bs basado en precio_ajustado_bcv (incluye factor_cobertura),
+    # coherente con vista_detalle_nota y vista_imprimir_nota.
+    subtotal_bs = sum(d.cantidad * d.precio_ajustado_bcv for d in detalles)
     total_iva_bs = sum(d.iva_bs for d in detalles)
     # Aplicar descuento_global (%) al subtotal y al IVA en USD.
     descuento_global = nota.descuento_global or Decimal('0')
@@ -873,7 +931,7 @@ def generar_pdf_nota(request, nota_id):
     subtotal_usd_neto = (subtotal_usd * factor_desc).quantize(Decimal('0.01'))
     total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
     monto_descuento_usd = (subtotal_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
-    total_bs = subtotal_usd_neto * nota.tasa_bcv_aplicada + total_iva_bs
+    total_bs = ((subtotal_bs + total_iva_bs) * factor_desc).quantize(Decimal('0.01'))
 
     story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
     if monto_descuento_usd > 0:
@@ -1017,7 +1075,7 @@ def generar_pdf_compra(request, compra_id):
             d.almacen.nombre[:10],
             str(d.cantidad),
             f'{d.costo_base:.2f}',
-            f'{(d.cantidad * d.costo_base):.2f}',
+            f'{d.subtotal_usd:.2f}',
             f'{d.iva_porcentaje:.2f}',
             f'{d.iva_usd:.2f}',
             f'{d.iva_bs:.2f}',
@@ -1041,9 +1099,9 @@ def generar_pdf_compra(request, compra_id):
     story.append(t)
     story.append(Spacer(1, 6*mm))
 
-    subtotal_usd = sum(d.cantidad * d.costo_base for d in detalles)
+    subtotal_usd = documento.subtotal_usd
     total_iva_usd = sum(d.iva_usd for d in detalles)
-    total_iva_bs = sum(d.iva_bs for d in detalles)
+    total_iva_bs = documento.total_iva_bs
     # Aplicar descuento_global (%) al subtotal y al IVA en USD.
     descuento_global = documento.descuento_global or Decimal('0')
     factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
@@ -1098,18 +1156,31 @@ def vista_sincronizar_tasa(request):
 @login_required
 def vista_movimientos(request):
     """
-    Renderiza la tabla histórica de MovimientoKardex con filtros avanzados.
-    Aplica select_related para evitar el problema N+1 queries.
+    Renderiza la tabla histórica de MovimientoKardex con filtros avanzados
+    y PAGINACIÓN SERVER-SIDE (50 movimientos por página por defecto).
+
+    Acepta query params:
+      - sku: substring match en Articulo.sku
+      - almacen_id: FK exacta
+      - tipo: 'ENTRADA' o 'SALIDA'
+      - fecha_desde / fecha_hasta: rango de fecha_hora
+      - documento_numero: NE-N / DC-N / '1' / substring (mismo mapeo del reporte_kardex)
+      - page: número de página (default 1)
+      - per_page: 50, 100 o 200 (default 50)
     """
+    from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
     from .models import MovimientoKardex, Almacen, Articulo
 
-    movimientos = MovimientoKardex.objects.select_related('articulo', 'almacen', 'nota_entrega', 'documento_compra').all().order_by('-fecha_hora')
+    movimientos = MovimientoKardex.objects.select_related(
+        'articulo', 'almacen', 'nota_entrega', 'documento_compra'
+    ).order_by('-fecha_hora')
 
     almacen_id = request.GET.get('almacen_id')
     sku = request.GET.get('sku')
     tipo = request.GET.get('tipo')
     fecha_desde = request.GET.get('fecha_desde')
     fecha_hasta = request.GET.get('fecha_hasta')
+    documento_numero = request.GET.get('documento_numero')
 
     if almacen_id:
         movimientos = movimientos.filter(almacen_id=almacen_id)
@@ -1121,12 +1192,56 @@ def vista_movimientos(request):
         movimientos = movimientos.filter(fecha_hora__date__gte=fecha_desde)
     if fecha_hasta:
         movimientos = movimientos.filter(fecha_hora__date__lte=fecha_hasta)
+    if documento_numero:
+        from django.db.models import Q
+        raw = (documento_numero or '').strip()
+        cleaned = raw.upper().replace('NE-', '').replace('DC-', '') \
+                             .replace('NE:', '').replace('DC:', '').strip()
+        try:
+            id_int = int(cleaned)
+            movimientos = movimientos.filter(
+                Q(nota_entrega__numero=id_int) |
+                Q(nota_entrega__pk=id_int) |
+                Q(documento_compra__pk=id_int) |
+                Q(documento_compra__numero_interno=cleaned)
+            )
+        except (ValueError, TypeError):
+            movimientos = movimientos.filter(
+                Q(nota_entrega__numero__icontains=cleaned) |
+                Q(documento_compra__numero_interno__icontains=cleaned)
+            )
+
+    # Paginación server-side.
+    per_page_raw = request.GET.get('per_page', '50')
+    try:
+        per_page = int(per_page_raw)
+        if per_page not in (50, 100, 200):
+            per_page = 50
+    except (ValueError, TypeError):
+        per_page = 50
+
+    page_num = request.GET.get('page', '1')
+    paginator = Paginator(movimientos, per_page)
+    try:
+        page_obj = paginator.page(int(page_num))
+    except (PageNotAnInteger, EmptyPage):
+        page_obj = paginator.page(1)
 
     almacenes = Almacen.objects.filter(activo=True)
     articulos = Articulo.objects.filter(activo=True).order_by('nombre')
 
+    # Construir querystring base (sin page ni format) para los enlaces de paginación.
+    qs_params = request.GET.copy()
+    qs_params.pop('page', None)
+
     context = {
-        'movimientos': movimientos,
+        'movimientos': page_obj.object_list,
+        'page_obj': page_obj,
+        'paginator': paginator,
+        'per_page': per_page,
+        'total_count': paginator.count,
+        'range_start': page_obj.start_index() if paginator.count > 0 else 0,
+        'range_end': page_obj.end_index() if paginator.count > 0 else 0,
         'almacenes': almacenes,
         'articulos': articulos,
         'filtros': {
@@ -1135,7 +1250,9 @@ def vista_movimientos(request):
             'tipo': tipo or '',
             'fecha_desde': fecha_desde or '',
             'fecha_hasta': fecha_hasta or '',
-        }
+            'documento_numero': documento_numero or '',
+        },
+        'qs_base': qs_params.urlencode(),
     }
     return render(request, 'inventory/movimientos.html', context)
 
@@ -1481,8 +1598,12 @@ def configuracion_view(request):
     """
     from decimal import Decimal
     from .models import ConfiguracionEmpresa, AuditoriaTasa
-    
-    config = ConfiguracionEmpresa.objects.first()
+    from .services import es_url_api_segura
+
+    empresa_id = get_current_empresa()
+    if not empresa_id:
+        return redirect('inventory:login')
+    config, _ = ConfiguracionEmpresa.objects.get_or_create(defaults={'empresa_id': empresa_id})
     
     if request.method == 'POST':
         try:
@@ -1505,12 +1626,19 @@ def configuracion_view(request):
             config.usa_almacen_cuarentena = 'usa_almacen_cuarentena' in request.POST
             
             # API
-            config.api_url = request.POST.get('api_url', '').strip()
+            api_url_raw = request.POST.get('api_url', '').strip()
+            if api_url_raw and not es_url_api_segura(api_url_raw):
+                messages.error(request, 'La URL de la API no es válida o apunta a una dirección no permitida.')
+                return redirect('inventory:configuracion')
+            config.api_url = api_url_raw
             config.response_selector = request.POST.get('response_selector', '').strip()
 
             # Social Selling (Cross-Selling)
             config.cross_selling_header = request.POST.get('cross_selling_header', '').strip()
             config.cross_selling_footer = request.POST.get('cross_selling_footer', '').strip()
+
+            # Reglas de Negocio: Permitir ventas sin stock físico (drop-ship / forward).
+            config.permite_venta_sin_stock = 'permite_venta_sin_stock' in request.POST
 
             config.save()
             
@@ -1527,6 +1655,7 @@ def configuracion_view(request):
             messages.success(request, 'Configuración global actualizada de manera exitosa.')
             return redirect('inventory:configuracion')
         except Exception as e:
+            logger.exception("Error al guardar configuración global")
             messages.error(request, f'Error al guardar la configuración: {str(e)}')
 
     auditorias = AuditoriaTasa.objects.all().order_by('-fecha_hora')[:30]
@@ -1574,6 +1703,253 @@ def compras_view(request):
     }
     return render(request, 'inventory/compras.html', context)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTÓRICO / LISTADO DE DOCUMENTOS EMITIDOS (reimpresión)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@login_required
+def vista_listado_notas_entrega(request):
+    """
+    Histórico de Notas de Entrega / Facturas emitidas con filtros avanzados
+    y PAGINACIÓN server-side (50 por página por defecto).
+
+    Filtros disponibles:
+      - cliente_id: busqueda por nombre/identificacion del cliente
+      - numero: NE-N o número puro (match contra numero / numero_nota / numero_factura)
+      - estado: 'PROCESADO' | 'ANULADO'
+      - tipo_documento: 'NOTA_ENTREGA' | 'FACTURA'
+      - almacen_id: FK exacta
+      - fecha_desde / fecha_hasta: rango de `fecha` (auto_now_add)
+      - page, per_page
+    """
+    from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+    from .models import NotaEntrega, Almacen, Contacto
+    from .managers import get_current_empresa
+
+    notas = NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa').all()
+
+    empresa_id = get_current_empresa()
+    if empresa_id:
+        notas = notas.filter(empresa_id=empresa_id)
+
+    numero_q = request.GET.get('numero', '').strip()
+    cliente_q = request.GET.get('cliente', '').strip()
+    estado = request.GET.get('estado', '').strip()
+    tipo_doc = request.GET.get('tipo_documento', '').strip()
+    almacen_id = request.GET.get('almacen_id', '').strip()
+    fecha_desde = request.GET.get('fecha_desde', '').strip()
+    fecha_hasta = request.GET.get('fecha_hasta', '').strip()
+
+    from django.db.models import Q
+
+    if numero_q:
+        cleaned = numero_q.upper().replace('NE-', '').replace('NE:', '').strip()
+        try:
+            id_int = int(cleaned)
+            notas = notas.filter(
+                Q(numero=id_int) |
+                Q(numero_nota__icontains=cleaned) |
+                Q(numero_factura__icontains=cleaned)
+            )
+        except (ValueError, TypeError):
+            notas = notas.filter(
+                Q(numero_nota__icontains=numero_q) |
+                Q(numero_factura__icontains=numero_q)
+            )
+
+    if cliente_q:
+        notas = notas.filter(
+            Q(cliente__nombre__icontains=cliente_q) |
+            Q(cliente__identificacion__icontains=cliente_q)
+        )
+
+    if estado in ('PROCESADO', 'ANULADO'):
+        notas = notas.filter(estado=estado)
+
+    if tipo_doc in ('NOTA_ENTREGA', 'FACTURA'):
+        notas = notas.filter(tipo_documento=tipo_doc)
+
+    if almacen_id:
+        notas = notas.filter(almacen_id=almacen_id)
+
+    if fecha_desde:
+        notas = notas.filter(fecha__date__gte=fecha_desde)
+    if fecha_hasta:
+        notas = notas.filter(fecha__date__lte=fecha_hasta)
+
+    # Pre-calcular totales por nota para mostrar en la tabla (optimización: select_related ya hecho).
+    filas = []
+    for n in notas:
+        detalles = n.detalles.all()
+        total_usd = sum((d.cantidad * d.precio_base) for d in detalles)
+        desc_global = n.descuento_global or Decimal('0')
+        factor_desc = Decimal('1') - (desc_global / Decimal('100'))
+        subtotal_usd_neto = (total_usd * factor_desc).quantize(Decimal('0.01'))
+        total_iva_usd = sum(d.iva_usd for d in detalles)
+        total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
+        n.total_usd_listado = subtotal_usd_neto
+        n.total_iva_usd_listado = total_iva_usd_neto
+        n.total_doc_usd_listado = (subtotal_usd_neto + total_iva_usd_neto).quantize(Decimal('0.01'))
+        n.items_count_listado = detalles.count()
+        filas.append(n)
+    total_count_real = len(filas)
+
+    # Paginación manual sobre lista ya materializada
+    per_page_raw = request.GET.get('per_page', '50')
+    try:
+        per_page = int(per_page_raw)
+        if per_page not in (25, 50, 100, 200):
+            per_page = 50
+    except (ValueError, TypeError):
+        per_page = 50
+
+    paginator = Paginator(range(len(filas)), per_page)
+    page_num = request.GET.get('page', '1')
+    try:
+        page = paginator.page(int(page_num))
+    except (PageNotAnInteger, EmptyPage):
+        page = paginator.page(1)
+    start = page.start_index() - 1
+    end = page.end_index()
+    page_rows = filas[start:end]
+
+    # querystring base (sin page)
+    qs_params = request.GET.copy()
+    qs_params.pop('page', None)
+
+    almacenes = Almacen.objects.filter(activo=True).order_by('-es_principal', 'nombre')
+
+    context = {
+        'notas': page_rows,
+        'paginator': paginator,
+        'page_obj': page,
+        'total_count': total_count_real,
+        'range_start': page.start_index() if total_count_real > 0 else 0,
+        'range_end': page.end_index() if total_count_real > 0 else 0,
+        'per_page': per_page,
+        'almacenes': almacenes,
+        'filtros': {
+            'numero': numero_q,
+            'cliente': cliente_q,
+            'estado': estado,
+            'tipo_documento': tipo_doc,
+            'almacen_id': almacen_id,
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta,
+        },
+        'qs_base': qs_params.urlencode(),
+    }
+    return render(request, 'inventory/listado_notas.html', context)
+
+
+@login_required
+def vista_listado_documentos_compra(request):
+    """
+    Histórico de documentos de compra (Facturas/NE proveedor/Registro menor)
+    con filtros y PAGINACIÓN server-side (50 por página por defecto).
+
+    Filtros:
+      - proveedor: nombre/identificacion del proveedor
+      - numero: DC-N o número puro (match numero_interno / numero_factura / numero)
+      - estado: 'PROCESADO' | 'ANULADO'
+      - tipo_documento: 'FACTURA_COMPRA' | 'NOTA_ENTREGA_PROVEEDOR' | 'REGISTRO_MENOR'
+      - fecha_desde / fecha_hasta: rango de fecha_compra
+      - page, per_page
+    """
+    from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+    from .models import DocumentoCompra
+    from .managers import get_current_empresa
+    from django.db.models import Q
+
+    docs = DocumentoCompra.objects.select_related('proveedor', 'empresa').all()
+
+    empresa_id = get_current_empresa()
+    if empresa_id:
+        docs = docs.filter(empresa_id=empresa_id)
+
+    numero_q = request.GET.get('numero', '').strip()
+    proveedor_q = request.GET.get('proveedor', '').strip()
+    estado = request.GET.get('estado', '').strip()
+    tipo_doc = request.GET.get('tipo_documento', '').strip()
+    fecha_desde = request.GET.get('fecha_desde', '').strip()
+    fecha_hasta = request.GET.get('fecha_hasta', '').strip()
+
+    if numero_q:
+        cleaned = numero_q.upper().replace('DC-', '').replace('DC:', '').strip()
+        try:
+            id_int = int(cleaned)
+            docs = docs.filter(
+                Q(numero=id_int) |
+                Q(numero_interno__icontains=cleaned) |
+                Q(numero_factura__icontains=cleaned) |
+                Q(pk=id_int)
+            )
+        except (ValueError, TypeError):
+            docs = docs.filter(
+                Q(numero_interno__icontains=numero_q) |
+                Q(numero_factura__icontains=numero_q)
+            )
+
+    if proveedor_q:
+        docs = docs.filter(
+            Q(proveedor__nombre__icontains=proveedor_q) |
+            Q(proveedor__identificacion__icontains=proveedor_q)
+        )
+
+    if estado in ('PROCESADO', 'ANULADO'):
+        docs = docs.filter(estado=estado)
+
+    if tipo_doc in ('FACTURA_COMPRA', 'NOTA_ENTREGA_PROVEEDOR', 'REGISTRO_MENOR'):
+        docs = docs.filter(tipo_documento=tipo_doc)
+
+    if fecha_desde:
+        docs = docs.filter(fecha_compra__gte=fecha_desde)
+    if fecha_hasta:
+        docs = docs.filter(fecha_compra__lte=fecha_hasta)
+
+    total_count_real = docs.count()
+
+    # Paginación sobre queryset
+    per_page_raw = request.GET.get('per_page', '50')
+    try:
+        per_page = int(per_page_raw)
+        if per_page not in (25, 50, 100, 200):
+            per_page = 50
+    except (ValueError, TypeError):
+        per_page = 50
+
+    page_num = request.GET.get('page', '1')
+    paginator = Paginator(docs, per_page)
+    try:
+        page = paginator.page(int(page_num))
+    except (PageNotAnInteger, EmptyPage):
+        page = paginator.page(1)
+
+    qs_params = request.GET.copy()
+    qs_params.pop('page', None)
+
+    context = {
+        'documentos': page.object_list,
+        'paginator': paginator,
+        'page_obj': page,
+        'total_count': total_count_real,
+        'range_start': page.start_index() if total_count_real > 0 else 0,
+        'range_end': page.end_index() if total_count_real > 0 else 0,
+        'per_page': per_page,
+        'filtros': {
+            'numero': numero_q,
+            'proveedor': proveedor_q,
+            'estado': estado,
+            'tipo_documento': tipo_doc,
+            'fecha_desde': fecha_desde,
+            'fecha_hasta': fecha_hasta,
+        },
+        'qs_base': qs_params.urlencode(),
+    }
+    return render(request, 'inventory/listado_compras.html', context)
+
+
 from .services import registrar_compra_proveedor
 
 @login_required
@@ -1609,7 +1985,7 @@ def registrar_compra_api(request):
             item['iva_porcentaje'] = Decimal(str(item.get('iva_porcentaje', '16.00')))
             # Los seriales ya vienen como lista de strings en item.get('seriales')
 
-        registrar_compra_proveedor(
+        resultado = registrar_compra_proveedor(
             empresa_id=empresa_id,
             proveedor_id=proveedor_id,
             numero_factura=numero_factura,
@@ -1622,10 +1998,14 @@ def registrar_compra_api(request):
             observaciones=observaciones
         )
 
-        return JsonResponse({'ok': True, 'mensaje': 'Compra registrada exitosamente.'})
+        if not isinstance(resultado, dict):
+            return JsonResponse({'ok': True, 'mensaje': 'Compra registrada exitosamente.'})
 
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)}, status=400)
+        return JsonResponse(resultado)
+
+    except Exception:
+        logger.exception("Error inesperado al registrar compra proveedor (API)")
+        return JsonResponse({'ok': False, 'error': 'Ocurrió un error interno. Contacte al administrador.'}, status=400)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1669,8 +2049,9 @@ def api_reversar_venta(request):
             
         resultado = svc.reversar_nota_entrega(empresa_id, nota_id, motivo)
         return JsonResponse(resultado)
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+    except Exception:
+        logger.exception("Error inesperado en reversión/creación de nota de crédito (API)")
+        return JsonResponse({'ok': False, 'error': 'Ocurrió un error interno. Contacte al administrador.'}, status=500)
 
 @require_http_methods(["POST"])
 @login_required
@@ -1689,8 +2070,9 @@ def api_reversar_compra(request):
 
         resultado = svc.reversar_documento_compra(empresa_id, compra_id, motivo)
         return JsonResponse(resultado)
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+    except Exception:
+        logger.exception("Error inesperado en reversión/creación de nota de crédito (API)")
+        return JsonResponse({'ok': False, 'error': 'Ocurrió un error interno. Contacte al administrador.'}, status=500)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1742,6 +2124,7 @@ def vista_reporte_detalle(request, nombre):
     hasta = request.GET.get('hasta')
     limite = request.GET.get('limite')
     dias_sin = request.GET.get('dias_sin_movimiento')
+    documento_numero = request.GET.get('documento_numero')
 
     if articulo_sku:
         params['articulo_sku'] = articulo_sku
@@ -1749,6 +2132,8 @@ def vista_reporte_detalle(request, nombre):
         params['almacen_id'] = almacen_id
     if desde:
         params['desde'] = desde
+    if documento_numero:
+        params['documento_numero'] = documento_numero
     if hasta:
         params['hasta'] = hasta
     if limite:
@@ -1802,6 +2187,7 @@ def vista_reporte_detalle(request, nombre):
             'hasta': hasta or '',
             'limite': limite or '',
             'dias_sin_movimiento': dias_sin or '',
+            'documento_numero': documento_numero or '',
         },
     }
     return render(request, 'inventory/reportes/detalle.html', context)
@@ -1938,8 +2324,9 @@ def api_origen_detalle(request):
             'doc_label': f"{doc.tipo_documento} {doc.numero_interno}",
             'items': items,
         })
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+    except Exception:
+        logger.exception("Error inesperado en reversión/creación de nota de crédito (API)")
+        return JsonResponse({'ok': False, 'error': 'Ocurrió un error interno. Contacte al administrador.'}, status=500)
 
 
 @login_required
@@ -1990,8 +2377,9 @@ def api_crear_nc(request):
             return JsonResponse({'ok': False, 'error': 'tipo debe ser venta|compra.'}, status=400)
 
         return JsonResponse(result)
-    except Exception as e:
-        return JsonResponse({'ok': False, 'error': str(e)}, status=500)
+    except Exception:
+        logger.exception("Error inesperado en reversión/creación de nota de crédito (API)")
+        return JsonResponse({'ok': False, 'error': 'Ocurrió un error interno. Contacte al administrador.'}, status=500)
 
 
 @login_required

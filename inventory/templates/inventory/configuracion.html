@@ -141,6 +141,27 @@
                 </label>
             </div>
 
+            <!-- REGLAS DE NEGOCIO: PERMITIR VENTAS SIN STOCK -->
+            <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-4">
+                <div class="flex-1 min-w-0">
+                    <h3 class="font-bold text-slate-850 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-plane-departure text-amber-500"></i> Permitir Ventas / Notas de Entrega sin Stock
+                    </h3>
+                    <p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                        Si está activo: tu empresa puede emitir Notas de Entrega y Facturas aunque
+                        el artículo no tenga existencia física en el almacén (drop-ship / forward
+                        con proveedor). El Kardex registrará la salida y el <code>saldo_resultante</code>
+                        quedará <strong>NEGATIVO</strong> en rojo hasta que llegue la mercancía.
+                        Si está <strong>desactivado</strong> (por seguridad default): la venta se
+                        bloquea con "Stock insuficiente".
+                    </p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                    <input type="checkbox" name="permite_venta_sin_stock" class="sr-only peer" {% if config.permite_venta_sin_stock %}checked{% endif %}>
+                    <div class="w-9 h-5 bg-slate-200 dark:bg-slate-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+            </div>
+
             <!-- SOCIAL SELLING: CROSS-SELLING MESSAGES -->
             <div class="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
                 <h3 class="font-bold text-slate-850 dark:text-slate-200 flex items-center gap-2 text-xs uppercase tracking-wider">

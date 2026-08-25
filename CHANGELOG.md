@@ -8,6 +8,89 @@ vez público.
 
 ---
 
+## [1.2.1] — 2026-07-26
+
+Iteración de **UX** sobre el módulo de Compras y el layout base. Resuelve 
+3 observaciones reales de pantalla (1366×768): sidebar demasiado ancho, 
+captura de seriales pocousable, yCompra Detalle con bloques mal 
+distribuidos. **Sin migraciones, sin cambios en backend de services** 
+(el backend ya soportaba `seriales` por item desde 1.1.0).
+
+### Changed (Features cambiadas)
+
+- **Sidebar colapsable (`base.html`):** botón de toggle en el header que 
+  colapsa el `<aside>` a sólo iconos (`w-16`) y expande el `<main>`. El 
+  estado se persiste en `localStorage` (clave `a2lt_sidebar_collapsed`). 
+  Script anti-flash en el `<head>` aplica la clase antes de pintar el 
+  DOM. Todos los 14 enlaces del menú envuelven su texto en 
+  `<span class="nav-label">` para ocultarlos vía CSS `.sidebar-collapsed 
+  .nav-label { display:none }`. El título de sección y los datos del 
+  perfil del usuario también colapsan.
+- **Captura de seriales inline (`compras.html`):** el viejo panel 
+  inferior (`#purchase-seriales-panel-container`) que listaba los 
+  seriales DISPONIBLES existentes para "seleccionar" fue removido. En 
+  su lugar, cada fila de item con `usa_serial=true` muestra un input 
+  inline para escribir los IMEIs/seriales que **llegan en la factura**, 
+  separados por `,` `;` o saltos de línea. Contador live `X/N`:
+  - Gris `0/N`: vacío.
+  - Ámbar `1..N-1/N`: faltan seriales.
+  - Verde `N/N`: cantidad coincide con `qty`.
+ \Validation: si al confirmar la compra el conteo parseado != `qty`, 
+  se alerta y se hace `focus()` al input problemático. 
+- **Layout de `compra_detalle.html`:** grid reorganizado a 
+  `lg:grid-cols-3` con el bloque **Detalle del Documento** a la 
+  izquierda (`lg:col-span-1`, ~1/3) y la tabla de **Ítems** a la 
+  derecha (`lg:col-span-2`, ~2/3). En pantallas `<lg` ambos apilan al 
+  100%. Antes el bloque completo era 100% y los ítems caían al final 
+  chiquitos → inviable en 1366×768.
+
+### Fixed (Bug fixes)
+
+- **Bug payload key mismatch:** `processPurchase()` enviaba 
+  `items: [...]` pero `registrar_compra_api` en `views.py` esperaba 
+  `lista_items: [...]` (nombre fijado por 
+  `registrar_compra_proveedor` en services.py). Corregido el payload 
+  para enviar `lista_items`.
+- **Bug 404 post-registro:** `registrar_compra_api` descartaba el 
+  dict retornado por `registrar_compra_proveedor` (que incluye 
+  `documento_id`, `numero_interno`) y devolvía un JSON plano. La UI 
+  intentaba navegar a `/compras/<id>/` con `id` undefined → 404. 
+  Corregido: ahora `views.py` propaga el dict completo vía 
+  `JsonResponse`.
+- **Bug override de costo ignorado:** `addItemToPurchase()` usaba 
+  siempre `dataset.costo` del `<option>` seleccionado, ignorando el 
+  input manual `#purchase-item-cost`. Ahora lee primero el input; sólo 
+  cae a `dataset.costo` si el input está vacío o es 0.
+- **Form sizing para 1366×768:** grid del formulario de Compras 
+  cambiado `xl:grid-cols-3` (antes `md:grid-cols-2` que en pantallas 
+  medianas apilaba demasiado). Paddings compactados (`p-5`→`p-3`, 
+  `p-4`→`p-2.5`), inputs `py-1.5 rounded-md`, botón "Añadir" mueve a 
+  su propia fila `md:col-span-12`.
+
+### Internal (Refactors)
+
+- **Limpieza JS en `compras.html`:** removidas 3 funciones muertas 
+  (`loadSerialesForPurchaseItem`, `renderPurchaseSerialesPanel`, 
+  `togglePurchaseSerial`) + el cache `serialesCache` + el container 
+  HTML `#purchase-seriales-panel-container`. Agregada utilidad 
+  `parseSerialInput(str)` que divide por `,` `;` `\n`, hace `.trim()`, 
+  dedupea y descarta vacíos. `updatePurchaseSerial()` refresca el 
+  contador en vivo. La inicialización del item cambió 
+  `seriales_seleccionados: []` → `seriales_input: ''` + 
+  `seriales_parsed: []`.
+
+### Estadísticas
+
+- 0 migraciones (sin cambios de esquema).
+- 0 tests nuevos (behavior backend sin cambios; servicio 
+  `registrar_compra_proveedor` ya validaba `seriales` desde 1.1.0 
+  Fase C1). La suite de 276 tests sigue verde.
+- Templates modificados: `base.html`, `compras.html`, 
+  `compra_detalle.html`. Vistas: `registrar_compra_api` en 
+  `views.py` (un dict-correction de 3 líneas).
+
+---
+
 ## [1.2.0] — 2026-07-13
 
 Iteración que cierra el **TKET #18-NC** (Notas de Crédito / Devoluciones):

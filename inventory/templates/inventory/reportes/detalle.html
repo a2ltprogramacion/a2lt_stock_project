@@ -43,6 +43,10 @@
                 <option value="{{ a.sku }}" {% if filtros.articulo_sku == a.sku %}selected{% endif %}>{{ a.sku }} — {{ a.nombre }}</option>
                 {% endfor %}
             </select>
+            <input type="text" name="documento_numero" value="{{ filtros.documento_numero }}"
+                placeholder="Nº Doc (NE-1, DC-12)"
+                class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100 font-mono"
+                title="Buscar por número de documento origen (NE=Nota de Entrega, DC=Documento de Compra). Acepta prefijo o solo número.">
             {% endif %}
             {% if nombre == 'kardex' or nombre == 'ventas' or nombre == 'top_vendidos' or nombre == 'estado_resultados' %}
             <input type="date" name="desde" value="{{ filtros.desde }}" class="text-xs border border-slate-300 dark:border-slate-700 rounded px-2 py-1.5 bg-slate-50 dark:bg-slate-800 dark:text-slate-100" placeholder="Desde">
@@ -67,7 +71,13 @@
                 <thead class="bg-indigo-600 dark:bg-indigo-700 text-white">
                     <tr>
                         {% for key, label in columns %}
-                        <th class="px-3 py-3 font-bold uppercase tracking-wider text-[10px] whitespace-nowrap">{{ label }}</th>
+                        <th class="px-3 py-3 font-bold uppercase tracking-wider text-[10px] whitespace-nowrap cursor-pointer select-none hover:bg-indigo-500 dark:hover:bg-indigo-600 transition"
+                            data-sort-key="{{ key }}"
+                            onclick="sortReportTable(this)"
+                            title="Clic para ordenar por {{ label }}">
+                            {{ label }}
+                            <i class="fa-solid fa-sort text-[8px] opacity-60 ml-1 sort-icon"></i>
+                        </th>
                         {% endfor %}
                     </tr>
                 </thead>
@@ -113,5 +123,64 @@ document.addEventListener('DOMContentLoaded', () => {
         window.print();
     }
 });
+
+// Ordenamiento por columna (client-side, sin recarga).
+// Detecta el tipo de valor por la primera celda (numero vs texto) y alterna ASC/DESC.
+function sortReportTable(thElement) {
+    const table = thElement.closest('table');
+    const tbody = table.querySelector('tbody');
+    if (!tbody) return;
+
+    const thIndex = Array.from(thElement.parentNode.children).indexOf(thElement);
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    if (rows.length === 0) return;
+
+    // Empty-row (colspan) — salir sin ordenar para no romper la grilla.
+    if (rows.length === 1 && rows[0].children.length === 1) return;
+
+    // Detección de orden actual: ciclo asc -> desc -> asc
+    const currentOrder = thElement.dataset.sortOrder || 'none';
+    let nextOrder;
+    if (currentOrder === 'none' || currentOrder === 'desc') {
+        nextOrder = 'asc';
+    } else {
+        nextOrder = 'desc';
+    }
+    // Limpiar otros headers
+    thElement.parentNode.querySelectorAll('th').forEach(th => {
+        th.dataset.sortOrder = 'none';
+        const icon = th.querySelector('.sort-icon');
+        if (icon) icon.className = 'fa-solid fa-sort text-[8px] opacity-60 ml-1 sort-icon';
+    });
+    thElement.dataset.sortOrder = nextOrder;
+    const icon = thElement.querySelector('.sort-icon');
+    if (icon) {
+        icon.className = (nextOrder === 'asc'
+            ? 'fa-solid fa-sort-up text-[9px] ml-1 sort-icon text-amber-300'
+            : 'fa-solid fa-sort-down text-[9px] ml-1 sort-icon text-amber-300');
+    }
+
+    // Detección de tipo: número si celda empieza con dígito o signo - o $.
+    const sampleCell = rows.find(r => r.children[thIndex])?.children[thIndex]?.textContent.trim() ?? '';
+    const isNumeric = /^-?[\$]?[\d.,]+(?:\.\d+)?%?$/.test(sampleCell) || /^-?\d/.test(sampleCell);
+
+    const sorted = rows.slice().sort((a, b) => {
+        const aText = (a.children[thIndex]?.textContent ?? '').trim();
+        const bText = (b.children[thIndex]?.textContent ?? '').trim();
+        if (isNumeric) {
+            const aNum = parseFloat(aText.replace(/[\$,%]/g, '').replace(/,/g, '.')) || 0;
+            const bNum = parseFloat(bText.replace(/[\$,%]/g, '').replace(/,/g, '.')) || 0;
+            return nextOrder === 'asc' ? aNum - bNum : bNum - aNum;
+        } else {
+            const cmp = aText.localeCompare(bText, 'es', { numeric: true, sensitivity: 'base' });
+            return nextOrder === 'asc' ? cmp : -cmp;
+        }
+    });
+
+    // Re-insertar manteniendo referencia DOM (sin re-render) para no perder estado.
+    const fragment = document.createDocumentFragment();
+    sorted.forEach(r => fragment.appendChild(r));
+    tbody.appendChild(fragment);
+}
 </script>
 {% endblock %}

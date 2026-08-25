@@ -840,3 +840,148 @@ Implementar el script de mantenimiento operativo automatizado del sistema local 
     *   **C-N5:** código muerto de `procesar_devolucion_venta` legacy (TKET #15-SAAS, firma posicional con `tipo_costo`/`cuarentena`/`merma`) eliminado de `services.py`. Los tests legacy de `TestNotasDeCreditoPOS` (4) y `TestSaneamiento...test_costo_historico_snapshot_venta_vs_actual` (1) se marcaron `@skip(reason=…)` por incompatibilidad de contrato (su funcionalidad fue reemplazada por `TestNotasCreditoBackend`).
     *   **Encoding:** corregidos ~470 caracteres mojibake en `tests.py` (origen: ediciones a mano donde el encoding del editor no fue UTF-8) que bloquearán varios tests.
 *   **Estado:** ✅ **COMPLETADO** en iteración 1.2.0 (ADR-29). Suite 276 tests verde + 5 skipped legacy (~190s).
+
+---
+
+### ITERACIÓN 1.2.1 — UX Compras + Sidebar Colapsable (2026-07-26)
+*   **Iniciado:** 2026-07-26
+*   **Commits:** (este commit).
+*   **Tests:** sin cambios (suite 276 sigue verde). Cambios UI sin tocar backend.
+*   **Resumen:** 3 observaciones reales del operador en pantalla 1366×768:
+    sidebar demasiado ancho, captura de seriales inusable en Compras, 
+    y `compra_detalle.html` con bloques mal distribuidos.
+
+### TICKET #19-UX-ITER1: Sidebar Colapsable (base.html) — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-26.
+*   **Alcance:**
+    *   `<aside id="app-sidebar">` y `<main id="main-content">` 
+        anclados para JS.
+    *   Botón toggle en el header con `toggleSidebar()`:
+        agrega/remueve clase `.sidebar-collapsed` al `<html>`.
+    *   Persistencia vía `localStorage['a2lt_sidebar_collapsed']` 
+        (boolean).
+    *   **Script anti-flash** en `<head>` (antes del body): aplica 
+        la clase desde el primer paint, evitando FOUC.
+    *   CSS `.sidebar-collapsed`:
+        - reducir `w-64` → `w-16` en el sidebar.
+        - ocultar `.nav-label` (textos de los 14 enlaces).
+        - ocultar `.sidebar-section-title` y el div `.profile-text`.
+        - empujar el `<main>` (margin cambiado).
+    *   Todos los 14 enlaces envuelven texto en `<span class="nav-label">`.
+    *   Título de sección del sidebar con clase `sidebar-section-title`.
+    *   Div con datos del perfil (`profile-text`) también colapsa.
+*   **ADR formal:** ADR-31 (Sidebar colapsable con persistencia 
+    en localStorage).
+*   **DoD:**
+    *   [x] Toggle persiste entre recargas.
+    *   [x] Sin FOUC al cargar página con sidebar colapsado.
+    *   [x] Dark mode intacto (variables ortogonales).
+    *   [x] Iconos solos legibles en colapsado; texto legible en expandido.
+*   **Estado:** ✅ Completado.
+
+### TICKET #19-UX-ITER2: Captura de Seriales Inline en Compras — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-26.
+*   **Contexto:**
+    El viejo panel `#purchase-seriales-panel-container` listaba los 
+    seriales DISPONIBLES existentes para "seleccionar" — concepto 
+    errado: las compras registran seriales NUEVOS que llegan en la 
+    factura del proveedor. Inusable para alto volumen de IMEIs 
+    (ej. AURI-001 antenas).
+*   **Alcance:**
+    *   **Removido:** `#purchase-seriales-panel-container` HTML, 
+        `loadSerialesForPurchaseItem`, `renderPurchaseSerialesPanel`, 
+        `togglePurchaseSerial`, `serialesCache`.
+    *   **Agregado:** `parseSerialInput(str)` — split por `,` `;` `\n`, 
+        `.trim()`, dedupe, descarta vacíos. Retorna array.
+    *   **Agregado:** por cada fila con `usa_serial=true`, un 
+        `<input>` inline con `placeholder="IMEIs separados por , o ;"`.
+    *   **Agregado:** `updatePurchaseSerial(sku)` recalcula el 
+        contador `X/N` según el input + qty:
+        - Gris `0/N`: vacío.
+        - Ámbar `1..n-1/n`: faltan seriales.
+        - Verde `n/n`: completos.
+    *   **Agregado:** validación final en `processPurchase()` — si 
+        item con `usa_serial=true` y `seriales_parsed.length != qty`, 
+        alertar y hacer `focus()` al input problemático.
+    *   Item init cambia de `seriales_seleccionados: []` a 
+        `seriales_input: ''` + `seriales_parsed: []`.
+    *   Payload final envía `lista_items[].seriales: [...]` (no 
+        `seriales_seleccionados`). **BACKEND SIN CAMBIOS**: 
+        `registrar_compra_proveedor` ya esperaba este contrato 
+        desde 1.1.0 Fase C1.
+*   **ADR formal:** ADR-30 (Captura de seriales inline por fila).
+*   **DoD:**
+    *   [x] Operador puede pegar una lista de IMEIs y el sistema los 
+        parsea + cuenta automáticamente.
+    *   [x] No hay llamada AJAX para "cargar" seriales existentes.
+    *   [x] Validación bloquea el submit si faltan seriales.
+    *   [x] Backend crea los `SerialArticulo` como DISPONIBLE vinculado 
+        a la compra (comportamiento preexistente).
+*   **Estado:** ✅ Completado.
+
+### TICKET #19-UX-ITER3: Fix payload + 404 post-registro + override de costo — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-26.
+*   **Alcance: 3 bug-fixes en el flujo de Compras:**
+    *   **Bug payload key mismatch:** `processPurchase()` enviaba 
+        `items: [...]` pero `registrar_compra_api` en `views.py` 
+        esperaba `lista_items: [...]`. Corregido payload a 
+        `lista_items`.
+    *   **Bug 404 post-registro:** `registrar_compra_api` descartaba el 
+        dict retornado por `registrar_compra_proveedor` (que 
+        incluye `documento_id`, `numero_interno`). La UI navegaba a 
+        `/compras/undefined/`. Corregido: ahora el view propaga el 
+        dict completo vía `JsonResponse`.
+    *   **Bug override de costo:** `addItemToPurchase()` siempre usaba 
+        `dataset.costo` del `<option>` del artículo, ignorando el input 
+        `#purchase-item-cost`. Ahora lee el input primero, cae a 
+        `dataset.costo` sólo si está vacío o es 0.
+*   **DoD:**
+    *   [x] Compra de AURI-001 con costo override persiste el costo 
+        editado (no el del catálogo).
+    *   [x] Tras confirmar la compra, navega a `/compras/<id>/` 
+        correctamente.
+    *   [x] Backend recibe el payload con key `lista_items`.
+*   **Estado:** ✅ Completado.
+
+### TICKET #19-UX-ITER4: Layout de compra_detalle.html + Form Sizing — ✅ COMPLETADO
+*   **Iniciado:** 2026-07-26.
+*   **Alcance:**
+    *   `compra_detalle.html` reescrito con grid `lg:grid-cols-3`:
+        - **Detalle del Documento** (1/3, `lg:col-span-1`) a la 
+          izquierda: tipo, fecha, almacén, proveedor, totales, 
+          botón PDF.
+        - **Ítems** (2/3, `lg:col-span-2`) a la derecha: tabla 
+          completa de detalles.
+        - Ambos con `h-fit` para no estirar si el otro es más corto.
+        - En pantallas `<lg` ambos apilan al 100% (móvil o pantallas 
+          chicas).
+    *   **Form sizing en `compras.html`:** grid principal cambiado a 
+        `xl:grid-cols-3` (antes `md:grid-cols-2` apilaba en pantallas 
+        medianas). Paddings compactados. Inputs más pequeños 
+        (`py-1.5 rounded-md`). Botón "Añadir" mueve a su propia fila.
+    *   Bloque "Observaciones" se mueve fuera del grid (debajo) 
+      para ocupar todo el ancho.
+*   **DoD:**
+    *   [x] En 1366×768, la grilla de ítems en `compra_detalle` ocupa 
+        ~2/3 del ancho y se lee sin scroll horizontal.
+    *   [x] El bloque Detalle queda a la izquierda con la info clave 
+        del documento y el botón PDF visible.
+    *   [x] Formulario de Compras compacto sin sacrificar legibilidad.
+*   **Estado:** ✅ Completado.
+
+---
+
+### Resumen 1.2.1
+
+*   **Commits:** (este commit).
+*   **Migraciones:** 0 (sin cambios de esquema).
+*   **Tests:** 276 (sin cambios, suite sigue verde ~190s).
+*   **ADRs formalizadas:** ADR-30 (seriales inline) + ADR-31 (sidebar 
+    colapsable).
+*   **Templates modificados:** `base.html`, `compras.html`, 
+    `compra_detalle.html`.
+*   **Views modificadas:** `registrar_compra_api` (propagación del 
+    dict response — 3 líneas).
+*   **Patrones nuevos:** inputs inline con contador live `X/N`; 
+    `parseSerialInput()` para normalizar strings de seriales; 
+    persistencia UI via localStorage con script anti-flash en el head.

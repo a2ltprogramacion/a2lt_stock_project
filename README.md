@@ -70,6 +70,13 @@ cambiaria, con snapshots inmutables de tasas en cada transacción.
   liberación FIFO de seriales (VENDIDO→DISPONIBLE en ventas; 
   DISPONIBLE→ANULADO_COMPRA en compras) y snapshots inmutables de 
   precio/IVA por línea. PDF A4 portrait + vista detalle con botón PDF.
+- **Sidebar colapsable + UX Compras** — *iteración 1.2.1* (ADR-30 + 
+  ADR-31). Sidebar plegable a sólo iconos con localStorage y script 
+  anti-flash; captura de seriales inline por fila en Compras con 
+  contador live `X/N` (parsea `,` `;` `\n`, dedupe); layout 
+  `compra_detalle.html` reorganizado (1/3 Detalle + 2/3 Ítems); 
+  fixes de payload key, propagación de dict response y override de 
+  costo. Sin migraciones, sin tests nuevos (suite 276 sigue verde).
 
 ## Stack
 
@@ -115,19 +122,21 @@ Abrir http://127.0.0.1:8000
   extendidos a 4 precios por detalle (ADR-24)**, mapa de 
   `services.py`, 12 migraciones numeradas, 29 modelos y tests C1-C23.
 - `docs/ADR.md` — Decisiones de Arquitectura formales 
-  (ADR-01 a ADR-29 con saltos; ADR-29 añade el módulo Notas de 
-  Crédito con diseño 1-NC-1-origen).
+  (ADR-01 a ADR-31 con saltos; ADR-29 añade el módulo Notas de 
+  Crédito con diseño 1-NC-1-origen; ADR-30 añade captura de seriales 
+  inline en Compras; ADR-31 añade sidebar colapsable).
 - `docs/BACKLOG.md` — 30+ tickets de desarrollo con estado 
-  (incluye tickets #14-#17 iteración 1.1.0).
+  (incluye tickets #14-#17 iteración 1.1.0 + iteración 1.2.1 UX 
+  Compras/Sidebar).
 - `docs/ROADMAP.md` — features post-100% (cuentas por cobrar/pagar, 
   factura electrónica Seniat, bitácora de auditoría).
 - `docs/OPERACION.md` — guía de instalación detallada, módulos, 
   **tokens de variables de precio**, troubleshooting y reglas 
   operativas.
 - `CHANGELOG.md` — registro de cambios por release (Keep a 
-  Changelog). **1.2.0 (2026-07-13) cierra el TICKET #18-NC con 
-  el módulo Notas de Crédito (`/notas-credito/`), ADR-29 y 29 tests 
-  nuevos.**
+  Changelog). **1.2.1 (2026-07-26) completa la iteración UX: 
+  sidebar colapsable, captura de seriales inline en Compras, 
+  layout de `compra_detalle.html`, fixes de payload/views/costo.**
 
 ## Producción
 
@@ -170,12 +179,22 @@ python manage.py test inventory.tests.TestDashboardLiveData -v 2    # rápidos
    `get_object_or_404(Modelo, pk=id, empresa_id=session['empresa_id'])` 
    — nunca simple `get_object_or_404(Modelo, pk=id)`.
 6. **Tokens de precio** (1.1.0, ADR-25): los tokens `$[PRECIO_USD]`, 
-   `$[PRECIO_BCV]`, `$[PRECIO_BS_BASE]`, `$[PRECIO_BS]` se persisten 
-   como texto literal en `social_quick`/`social_cross`. La 
-   sustitución ocurre solo en frontend (`catalogo.html`). La toolbar 
-   de `articulos.html` NO envía datos al servidor: `injectToken()` 
-   edita el texto localmente y `saveProduct()` persiste el token 
-   literal al guardar.
+    `$[PRECIO_BCV]`, `$[PRECIO_BS_BASE]`, `$[PRECIO_BS]` se persisten 
+    como texto literal en `social_quick`/`social_cross`. La 
+    sustitución ocurre solo en frontend (`catalogo.html`). La toolbar 
+    de `articulos.html` NO envía datos al servidor: `injectToken()` 
+    edita el texto localmente y `saveProduct()` persiste el token 
+    literal al guardar.
+7. **Seriales en Compras** (1.2.1, ADR-30): la captura de seriales 
+    en Compras usa input inline por fila con `parseSerialInput()` 
+    para escribir seriales NUEVOS que llegan en la factura del 
+    proveedor (no los DISPONIBLES existentes como en Ventas). El 
+    contador live `X/N` debe estar verde antes de submit; el 
+    backend `registrar_compra_proveedor` valida `len(seriales)==qty`.
+8. **Sidebar colapsable** (1.2.1, ADR-31): el estado colapsado se 
+    persiste en `localStorage['a2lt_sidebar_collapsed']` con script 
+    anti-flash en el `<head>`. NO usar cookies ni backend; el estado 
+    es puramente del navegador y ortogonal al dark mode.
 
 ## Licencia
 
