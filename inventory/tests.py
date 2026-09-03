@@ -1,4 +1,4 @@
-﻿"""
+"""
 inventory/tests.py
 ==================
 Suite de pruebas unitarias del sistema A2LT Stock â€” Tickets #2 y #3.
@@ -8720,6 +8720,254 @@ class TestListadosDocumentosEmitidos(TransactionTestCase):
         self.assertEqual(r.status_code, 200)
         # Aparece el primer documento
         self.assertContains(r, doc1.numero_interno)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUDITORÍA: Tests de Verificación de Remediaciones
+# ─────────────────────────────────────────────────────────────────────────────
+class TestAuditoriaRemediacion(TransactionTestCase):
+    """Verifica las remediaciones de seguridad, cálculo y aislamiento multi-tenant."""
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from inventory.models import Empresa, ConfiguracionEmpresa, Almacen, Articulo, Contacto, SerialArticulo
+
+        self.empresa = crear_empresa(nombre='Empresa Audit', rif='J-AUDIT-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.0000')
+        self.config.factor_cobertura = Decimal('1.2000')
+        self.config.save()
+
+        self.user = User.objects.create_user('operador_audit', password='password123')
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+
+        self.almacen = crear_almacen(self.empresa, nombre='Alm Audit')
+        self.art = crear_articulo_fisico(self.empresa, sku='AUD-01', nombre='Art Audit')
+        self.art.precio_divisa = Decimal('50.00')
+        self.art.save()
+
+        self.client.login(username='operador_audit', password='password123')
+        s = self.client.session
+        s['empresa_id'] = self.empresa.id
+        s.save()
+
+    def test_articulos_view_renderiza_json_script_seguro(self):
+        """articulos.html debe renderizar json_script y no inyección |safe."""
+        r = self.client.get(reverse('inventory:articulos'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'id="articulos-data"')
+        self.assertNotContains(r, '{{ articulos_json|safe }}')
+
+    def test_configuracion_view_bloquea_post_a_usuario_no_staff(self):
+        """Un usuario sin is_staff/is_superuser no puede mutar la configuración global."""
+        r = self.client.post(reverse('inventory:configuracion'), {
+            'tasa_bcv': '999.0000',
+            'tasa_mercado': '999.0000',
+            'factor_cobertura': '2.0000',
+        })
+        self.assertRedirects(r, reverse('inventory:configuracion'))
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_bcv, Decimal('40.0000'))
+
+    def test_reversar_compra_con_serial_vendido_falla(self):
+        """No se puede anular una compra si alguno de sus seriales ya fue vendido."""
+        self.art.usa_serial = True
+        self.art.save()
+
+        prov = Contacto.objects.create(
+            empresa=self.empresa, identificacion='J-PROV-AUD',
+            tipo='PROVEEDOR', nombre='Prov Aud'
+        )
+        res_compra = svc.registrar_compra_proveedor(
+            proveedor_id=str(prov.pk),
+            numero_factura='FAC-AUD-1',
+            fecha_compra='2026-08-01',
+            almacen_id=self.almacen.pk,
+            lista_items=[{
+                'sku': self.art.sku,
+                'cantidad': Decimal('1.00'),
+                'costo_factura': Decimal('20.00'),
+                'seriales': ['SN-AUD-001'],
+            }],
+            usuario='operador_audit',
+        )
+        # Vender ese serial
+        cli = Contacto.objects.create(
+            empresa=self.empresa, identificacion='V-CLI-AUD',
+            tipo='CLIENTE', nombre='Cli Aud'
+        )
+        svc.procesar_venta(
+            cliente_id=cli.pk,
+            lista_items=[{
+                'articulo_sku': self.art.sku,
+                'cantidad': 1,
+                'precio_base': Decimal('50.00'),
+                'almacen_id': self.almacen.pk,
+                'seriales': ['SN-AUD-001'],
+            }],
+            almacen_id=self.almacen.pk,
+            usuario='operador_audit',
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            svc.reversar_documento_compra(
+                self.empresa.pk, res_compra['documento_id'], 'Anulación test'
+            )
+        self.assertIn("ya fueron vendidos a clientes", str(ctx.exception))
+
+    def test_cliente_generico_en_dos_empresas_no_colisiona(self):
+        """Ventas sin cliente en distintas empresas no colisionan en la BD."""
+        from inventory.managers import set_current_empresa, reset_current_empresa
+        empresa2 = crear_empresa(nombre='Empresa 2 Audit', rif='J-AUDIT-002')
+        alm2 = crear_almacen(empresa2, nombre='Alm 2')
+        art2 = crear_articulo_fisico(empresa2, sku='AUD2-01', nombre='Art 2')
+        art2.precio_divisa = Decimal('10.00')
+        art2.save()
+        svc.registrar_movimiento(self.art, self.almacen, 'ENTRADA', Decimal('10'), 'Stock Inicial')
+        svc.registrar_movimiento(art2, alm2, 'ENTRADA', Decimal('10'), 'Stock Inicial')
+
+        # Venta empresa 1 sin cliente
+        token1 = set_current_empresa(self.empresa.id)
+        try:
+            n1 = svc.procesar_venta(
+                cliente_id=None,
+                lista_items=[{'articulo_sku': self.art.sku, 'cantidad': 1, 'precio_base': Decimal('50.00')}],
+                almacen_id=self.almacen.pk,
+            )
+        finally:
+            reset_current_empresa(token1)
+
+        # Venta empresa 2 sin cliente
+        token2 = set_current_empresa(empresa2.id)
+        try:
+            n2 = svc.procesar_venta(
+                cliente_id=None,
+                lista_items=[{'articulo_sku': art2.sku, 'cantidad': 1, 'precio_base': Decimal('10.00')}],
+                almacen_id=alm2.pk,
+            )
+        finally:
+            reset_current_empresa(token2)
+
+        self.assertIsNotNone(n1)
+        self.assertIsNotNone(n2)
+        self.assertNotEqual(n1.cliente.identificacion, n2.cliente.identificacion)
+
+    def test_generar_pdf_compra_con_descuento_genera_200(self):
+        """El PDF de compra debe generarse sin errores y responder 200 con Content-Type application/pdf."""
+        prov = Contacto.objects.create(
+            empresa=self.empresa, identificacion='J-PROV-PDF',
+            tipo='PROVEEDOR', nombre='Prov PDF'
+        )
+        res = svc.registrar_compra_proveedor(
+            proveedor_id=str(prov.pk),
+            numero_factura='FAC-PDF-1',
+            fecha_compra='2026-08-01',
+            almacen_id=self.almacen.pk,
+            descuento_global=Decimal('10.00'),
+            lista_items=[{
+                'sku': self.art.sku,
+                'cantidad': Decimal('2.00'),
+                'costo_factura': Decimal('30.00'),
+                'iva_porcentaje': Decimal('16.00'),
+            }],
+            usuario='operador_audit',
+        )
+        r = self.client.get(reverse('inventory:pdf_compra', args=[res['documento_id']]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+
+    def test_articulos_view_escapa_payload_xss(self):
+        """Campos de texto con payloads XSS maliciosos deben escapar en json_script."""
+        from inventory.models import Articulo
+        Articulo.objects.create(
+            empresa=self.empresa,
+            sku='XSS-01',
+            nombre='<script>alert("PWNED")</script>',
+            descripcion='</script><img src=x onerror=alert(1)>',
+            precio_divisa=Decimal('10.00'),
+            costo=Decimal('5.00'),
+            activo=True,
+        )
+        r = self.client.get(reverse('inventory:articulos'))
+        self.assertEqual(r.status_code, 200)
+        # json_script escapa '<' como '\u003C' y '>' como '\u003E'
+        html = r.content.decode('utf-8')
+        self.assertIn('\\u003Cscript\\u003Ealert(\\"PWNED\\")\\u003C/script\\u003E', html)
+        self.assertNotIn('<script>alert("PWNED")</script>', html)
+
+    def test_configuracion_view_permite_post_a_usuario_staff(self):
+        """Un usuario con is_staff=True sí puede mutar la configuración global."""
+        self.user.is_staff = True
+        self.user.save()
+
+        r = self.client.post(reverse('inventory:configuracion'), {
+            'tasa_bcv': '45.5000',
+            'tasa_mercado': '55.0000',
+            'factor_cobertura': '1.3000',
+        })
+        self.assertRedirects(r, reverse('inventory:configuracion'))
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_bcv, Decimal('45.5000'))
+        self.assertEqual(self.config.factor_cobertura, Decimal('1.3000'))
+        # El modelo calcula automaticamente tasa_mercado = bcv * factor (45.50 * 1.30 = 59.1500)
+        self.assertEqual(self.config.tasa_mercado, Decimal('59.1500'))
+
+    def test_ip_cliente_ignora_x_forwarded_for_por_defecto(self):
+        """_ip_cliente debe usar REMOTE_ADDR y no X-Forwarded-For para evitar spoofing."""
+        import os
+        from unittest import mock
+        from django.test import RequestFactory
+        from inventory.views import _ip_cliente
+
+        rf = RequestFactory()
+        req = rf.get('/login/', HTTP_X_FORWARDED_FOR='198.51.100.1, 203.0.113.1', REMOTE_ADDR='10.0.0.99')
+
+        with mock.patch.dict(os.environ, {'USE_X_FORWARDED_FOR': 'False'}, clear=False):
+            ip = _ip_cliente(req)
+            self.assertEqual(ip, '10.0.0.99')
+
+        with mock.patch.dict(os.environ, {'USE_X_FORWARDED_FOR': 'True'}, clear=False):
+            ip = _ip_cliente(req)
+            self.assertEqual(ip, '198.51.100.1')
+
+    def test_reversar_compra_con_seriales_disponibles_anula_todos(self):
+        """Si ningún serial fue vendido, el reverso anula la compra y todos los seriales exitosamente."""
+        from inventory.models import DocumentoCompra, SerialArticulo, Contacto
+        self.art.usa_serial = True
+        self.art.save()
+
+        prov = Contacto.objects.create(
+            empresa=self.empresa, identificacion='J-PROV-HAPPY',
+            tipo='PROVEEDOR', nombre='Prov Happy'
+        )
+        res_compra = svc.registrar_compra_proveedor(
+            proveedor_id=str(prov.pk),
+            numero_factura='FAC-HAPPY-1',
+            fecha_compra='2026-08-01',
+            almacen_id=self.almacen.pk,
+            lista_items=[{
+                'sku': self.art.sku,
+                'cantidad': Decimal('2.00'),
+                'costo_factura': Decimal('25.00'),
+                'seriales': ['SN-HAP-1', 'SN-HAP-2'],
+            }],
+            usuario='operador_audit',
+        )
+        res_reverso = svc.reversar_documento_compra(
+            self.empresa.pk, res_compra['documento_id'], 'Reverso normal'
+        )
+        self.assertTrue(res_reverso['ok'])
+
+        doc = DocumentoCompra.objects.get(pk=res_compra['documento_id'])
+        self.assertEqual(doc.estado, 'ANULADO')
+
+        s1 = SerialArticulo.objects.get(serial='SN-HAP-1')
+        s2 = SerialArticulo.objects.get(serial='SN-HAP-2')
+        self.assertEqual(s1.estado, 'ANULADO_COMPRA')
+        self.assertEqual(s2.estado, 'ANULADO_COMPRA')
 
 
 

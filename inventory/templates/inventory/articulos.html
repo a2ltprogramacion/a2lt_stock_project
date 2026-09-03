@@ -196,9 +196,10 @@
     </div>
 </div>
 
+{{ articulos_lista|json_script:"articulos-data" }}
 <script>
 // ── Modal Producto ──
-let allArticulos = {{ articulos_json|safe }};
+let allArticulos = JSON.parse(document.getElementById('articulos-data').textContent);
 
 function openProductForm(sku) {
     document.getElementById('modal-product').classList.remove('hidden');

@@ -146,7 +146,7 @@ def registrar_movimiento(
         saldo = inv.cantidad_disponible
 
         logger.info(
-            "[KARDEX ENTRADA] %s @ %s | +%s → Saldo: %s | Concepto: %s",
+            "[KARDEX ENTRADA] %s @ %s | +%s -> Saldo: %s | Concepto: %s",
             articulo.sku, almacen.nombre, cantidad, saldo, concepto,
         )
 
@@ -189,7 +189,7 @@ def registrar_movimiento(
 
         if permite_saldo_negativo and inv.cantidad_disponible < cantidad:
             logger.warning(
-                "[KARDEX SALIDA] %s @ %s | -%s → Stock queda NEGATIVO: %s (permite_saldo_negativo=True).",
+                "[KARDEX SALIDA] %s @ %s | -%s -> Stock queda NEGATIVO: %s (permite_saldo_negativo=True).",
                 articulo.sku, almacen.nombre, cantidad,
                 inv.cantidad_disponible - cantidad,
             )
@@ -201,7 +201,7 @@ def registrar_movimiento(
         saldo = inv.cantidad_disponible
 
         logger.info(
-            "[KARDEX SALIDA] %s @ %s | -%s → Saldo: %s | Concepto: %s",
+            "[KARDEX SALIDA] %s @ %s | -%s -> Saldo: %s | Concepto: %s",
             articulo.sku, almacen.nombre, cantidad, saldo, concepto,
         )
 
@@ -1146,11 +1146,11 @@ def resolver_colision(
         movimientos_ids.append(m_entrada.pk)
         mensaje = (
             f"SUSTITUIR: Stock de '{articulo.nombre}' en '{almacen.nombre}' "
-            f"reemplazado: {stock_actual} → {cantidad_excel} unidades. "
+            f"reemplazado: {stock_actual} -> {cantidad_excel} unidades. "
             f"Registrados {len(movimientos_ids)} movimientos en el Kárdex."
         )
         logger.info(
-            "[COLISIÓN SUSTITUIR] SKU '%s' | %s→%s | Lote: %s",
+            "[COLISIÓN SUSTITUIR] SKU '%s' | %s->%s | Lote: %s",
             sku, stock_actual, cantidad_excel, lote_id,
         )
 
@@ -1279,13 +1279,22 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
     if cliente_id:
         cliente = Contacto.objects.get(pk=cliente_id)
     else:
-        # Cliente genérico por defecto
-        cliente, _ = Contacto.objects.get_or_create(
+        # Cliente genérico por defecto (aislado por empresa para prevenir colisión de PK global)
+        ident_generica = f'GEN-{almacen.empresa_id:04d}'
+        cliente = Contacto.objects.filter(
             empresa=almacen.empresa,
             tipo='CLIENTE',
             nombre='Cliente Genérico',
-            defaults={'identificacion': 'V-00000000'}
-        )
+        ).first()
+        if not cliente:
+            cliente = Contacto.objects.filter(identificacion='V-00000000', empresa=almacen.empresa).first()
+            if not cliente:
+                cliente = Contacto.objects.create(
+                    empresa=almacen.empresa,
+                    tipo='CLIENTE',
+                    nombre='Cliente Genérico',
+                    identificacion=ident_generica,
+                )
 
     # 3. Creación de la Cabecera (Nota de Entrega o Factura)
     nota_entrega = NotaEntrega.objects.create(
@@ -2263,6 +2272,11 @@ def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str) -> d
     if compra.estado == 'ANULADO':
         raise ValueError("El Documento de Compra ya se encuentra anulado.")
     
+    # Validar que ningún serial de esta compra haya sido vendido a clientes
+    seriales = SerialArticulo.objects.filter(compra_origen=compra, empresa_id=empresa_id)
+    if seriales.filter(estado='VENDIDO').exists():
+        raise ValueError("No se puede anular la compra: existen seriales de esta compra que ya fueron vendidos a clientes.")
+
     compra.estado = 'ANULADO'
     compra.motivo_anulacion = motivo
     compra.save(update_fields=['estado', 'motivo_anulacion'])
@@ -2283,9 +2297,8 @@ def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str) -> d
             documento_compra=compra
         )
     
-    # Anular seriales provenientes de esta compra
-    seriales = SerialArticulo.objects.filter(compra_origen=compra, empresa_id=empresa_id)
-    seriales.update(estado='ANULADO_COMPRA')
+    # Anular seriales que siguen DISPONIBLES
+    seriales.filter(estado='DISPONIBLE').update(estado='ANULADO_COMPRA')
     
     return {'ok': True, 'mensaje': f"Compra Factura {compra.numero_factura} reversada exitosamente."}
 

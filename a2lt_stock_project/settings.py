@@ -159,17 +159,19 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True  # silencia W021 del check --deploy
-    SECURE_HSTS_SECONDS = 31536000  # 1 anio
     X_FRAME_OPTIONS = 'DENY'
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
     # On-premise over HTTP LAN: no forzar HTTPS redirect (delega a
     # reverse-proxy si lo hubiere). Si se quiere HTTPS obligatorio,
     # definir SECURE_SSL_REDIRECT=True via env var.
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Cookies y HSTS solo bajo HTTPS real para permitir operar en LAN local sobre HTTP sin romper auth
+    SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
+    CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT
+    if SECURE_SSL_REDIRECT:
+        SECURE_HSTS_SECONDS = 31536000  # 1 anio
+        SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+        SECURE_HSTS_PRELOAD = True  # silencia W021 del check --deploy
 
 
 # ─────────────────────────────────────────────────────────────────────────────

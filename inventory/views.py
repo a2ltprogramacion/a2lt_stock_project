@@ -8,6 +8,7 @@ Las vistas actúan como adaptadores HTTP → servicios, sin lógica de negocio p
 Retornan JSON para compatibilidad con AJAX/fetch desde el frontend.
 """
 
+import os
 import json
 import logging
 
@@ -37,10 +38,12 @@ LOGIN_BLOQUEO_SEGUNDOS = 15 * 60
 
 
 def _ip_cliente(request):
-    # Respeta X-Forwarded-For si hay proxy reverso; toma el primero.
-    xff = request.META.get('HTTP_X_FORWARDED_FOR')
-    if xff:
-        return xff.split(',')[0].strip()
+    # Por defecto se utiliza REMOTE_ADDR para evitar spoofing de IP.
+    # Solo si el entorno define USE_X_FORWARDED_FOR=True (proxy inverso de confianza) se evalúa la cabecera.
+    if os.environ.get('USE_X_FORWARDED_FOR', 'False').lower() == 'true':
+        xff = request.META.get('HTTP_X_FORWARDED_FOR')
+        if xff:
+            return xff.split(',')[0].strip()
     return request.META.get('REMOTE_ADDR', '')
 
 
@@ -1099,27 +1102,30 @@ def generar_pdf_compra(request, compra_id):
     story.append(t)
     story.append(Spacer(1, 6*mm))
 
-    subtotal_usd = documento.subtotal_usd
+    subtotal_usd = sum(d.cantidad * d.costo_base for d in detalles)
+    total_bs = sum(d.cantidad * d.costo_ajustado_bcv for d in detalles)
     total_iva_usd = sum(d.iva_usd for d in detalles)
-    total_iva_bs = documento.total_iva_bs
-    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
+    total_iva_bs = sum(d.iva_bs for d in detalles)
+
+    # Aplicar descuento_global (%) al subtotal y al IVA en USD y Bs.
     descuento_global = documento.descuento_global or Decimal('0')
     factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
     subtotal_usd_neto = (subtotal_usd * factor_desc).quantize(Decimal('0.01'))
     total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
     monto_descuento_usd = (subtotal_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
-    total_bs = subtotal_usd_neto * documento.tasa_bcv_aplicada + total_iva_bs
+    total_iva_bs_neto = (total_iva_bs * factor_desc).quantize(Decimal('0.01'))
+    total_bs_neto = ((total_bs * factor_desc) + total_iva_bs_neto).quantize(Decimal('0.01'))
 
     story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
     if monto_descuento_usd > 0:
         story.append(Paragraph(f"Descuento ({descuento_global:.2f}%): -${monto_descuento_usd:.2f}", right_style))
     story.append(Paragraph(f"Total IVA USD: ${total_iva_usd_neto:.2f}", right_style))
-    story.append(Paragraph(f"Total IVA Bs: {total_iva_bs:.2f} Bs", right_style))
+    story.append(Paragraph(f"Total IVA Bs: {total_iva_bs_neto:.2f} Bs", right_style))
     story.append(Spacer(1, 2*mm))
     story.append(HRFlowable(width="40%", thickness=0.5, color=colors.black))
     story.append(Spacer(1, 2*mm))
     story.append(Paragraph(f"TOTAL USD: ${subtotal_usd_neto + total_iva_usd_neto:.2f}", ParagraphStyle('Total', parent=styles['Heading3'], fontSize=11, textColor=colors.HexColor('#27ae60'), alignment=TA_RIGHT)))
-    story.append(Paragraph(f"TOTAL Bs: {total_bs:.2f} Bs", ParagraphStyle('TotalBs', parent=styles['Heading3'], fontSize=10, alignment=TA_RIGHT)))
+    story.append(Paragraph(f"TOTAL Bs: {total_bs_neto:.2f} Bs", ParagraphStyle('TotalBs', parent=styles['Heading3'], fontSize=10, alignment=TA_RIGHT)))
     story.append(Spacer(1, 5*mm))
 
     story.append(Paragraph(f"Tasa BCV: {documento.tasa_bcv_aplicada:.4f}  |  Factor: {documento.factor_cobertura_aplicado:.4f}  |  Tasa Mercado: {documento.tasa_mercado_aplicada:.4f}", header_style))
@@ -1580,13 +1586,15 @@ def articulos_view(request):
         return JsonResponse({'ok': True, 'created': created, 'sku': articulo.sku})
 
     articulos = Articulo.objects.filter(activo=True).order_by('nombre')
-    articulos_json = json.dumps(list(articulos.values(
+    articulos_lista = list(articulos.values(
         'sku', 'nombre', 'categoria', 'tipo',
         'costo', 'precio_divisa', 'descripcion',
         'ficha_tecnica', 'social_quick', 'social_cross',
-    )), default=str)
+    ))
+    articulos_json = json.dumps(articulos_lista, default=str)
     return render(request, 'inventory/articulos.html', {
         'articulos': articulos,
+        'articulos_lista': articulos_lista,
         'articulos_json': articulos_json,
     })
 
@@ -1599,6 +1607,7 @@ def configuracion_view(request):
     from decimal import Decimal
     from .models import ConfiguracionEmpresa, AuditoriaTasa
     from .services import es_url_api_segura
+    from .managers import get_current_empresa
 
     empresa_id = get_current_empresa()
     if not empresa_id:
@@ -1606,6 +1615,9 @@ def configuracion_view(request):
     config, _ = ConfiguracionEmpresa.objects.get_or_create(defaults={'empresa_id': empresa_id})
     
     if request.method == 'POST':
+        if not (request.user.is_staff or request.user.is_superuser):
+            messages.error(request, 'Acceso Denegado: solo personal administrativo puede modificar la configuración global.')
+            return redirect('inventory:configuracion')
         try:
             bcv_old = config.tasa_bcv
             mercado_old = config.tasa_mercado
