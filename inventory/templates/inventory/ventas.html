@@ -5,7 +5,7 @@
                 <!-- TOAST CONTAINER (notificaciones no bloqueantes) -->
                 <div id="toast-container-ventas" class="fixed top-4 right-4 z-[100] space-y-2 w-80 pointer-events-none"></div>
 
-                <div class="flex justify-between items-center">
+                <div class="flex justify-between items-center flex-wrap gap-3">
                     <div>
                         <h2 class="text-xl font-bold text-slate-900 dark:text-white">Emisión de Notas de Entrega</h2>
                         <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de salida rápidos y
@@ -13,29 +13,29 @@
                     </div>
                     <a href="{% url 'inventory:listado_notas' %}"
                        class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-2 px-4 rounded-lg transition flex items-center gap-2 shadow-sm">
-                        <i class="fa-solid fa-clock-rotate-left text-indigo-500"></i> Ver Histórico
+                        <i class="bi bi-clock-history text-indigo-500" aria-hidden="true"></i> Ver Histórico
                     </a>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
                     <!-- DETALLE DE FACTURACION Y SELECCION DE PRODUCTO -->
                     <div
-                        class="lg:col-span-2 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 shadow-sm">
+                        class="xl:col-span-2 bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
                         <div
-                            class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                            class="flex justify-between items-center flex-wrap gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
                             <h3
                                 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-cart-plus text-indigo-500"></i> Agregar Artículos a la Nota
+                                <i class="bi bi-cart-plus-fill text-indigo-500" aria-hidden="true"></i> Agregar Artículos a la Nota
                             </h3>
                             <span class="text-[10px] text-slate-400">Paso 1: Agrega items y cantidades</span>
                         </div>
 
                         <!-- AGREGAR ITEM FORM (Buscador Altamente Eficiente) -->
                         <div
-                            class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">
+                            class="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-850">
 
                             <!-- Searchable input dropdown container -->
-                            <div class="md:col-span-6 relative" id="searchable-sale-item-container">
+                            <div class="col-span-2 md:col-span-6 relative" id="searchable-sale-item-container">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Buscar
                                     y Seleccionar Artículo</label>
@@ -44,9 +44,9 @@
                                         onfocus="showSaleItemDropdown()" type="text"
                                         placeholder="Escribe SKU o nombre del producto..."
                                         class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
-                                    <button onclick="clearSaleSearch()"
-                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
-                                        <i class="fa-solid fa-circle-xmark"></i>
+                                    <button onclick="clearSaleSearch()" aria-label="Limpiar búsqueda de artículo"
+                                        class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs p-1.5 rounded-md">
+                                        <i class="bi bi-x-circle-fill" aria-hidden="true"></i>
                                     </button>
                                 </div>
                                 <input type="hidden" id="sale-item-selected-sku" value="">
@@ -58,7 +58,7 @@
                                 </div>
                             </div>
 
-                            <div class="md:col-span-2">
+                            <div class="md:col-span-3">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Almacén
                                     Origen</label>
@@ -69,16 +69,16 @@
                                     {% endfor %}
                                 </select>
                             </div>
-                            <div class="md:col-span-2">
+                            <div class="md:col-span-1">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-1 uppercase font-bold">Cantidad</label>
                                 <input id="sale-item-qty" type="number" min="1" value="1"
                                     class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
-                            <div class="md:col-span-2">
+                            <div class="col-span-2 md:col-span-2">
                                 <button onclick="addItemToNote()"
-                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow">
-                                    <i class="fa-solid fa-plus"></i> Añadir
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow whitespace-nowrap">
+                                    <i class="bi bi-plus" aria-hidden="true"></i> Añadir
                                 </button>
                             </div>
                         </div>
@@ -107,7 +107,7 @@
                                         <td colspan="9"
                                             class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                                             <i
-                                                class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                                class="bi bi-cart-x text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
                                             Aún no has agregado artículos a esta nota de entrega.
                                         </td>
                                     </tr>
@@ -122,7 +122,7 @@
                         <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
                             <h3
                                 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-receipt text-indigo-500"></i> Resumen de Pago y Cliente
+                                <i class="bi bi-receipt-cutoff text-indigo-500" aria-hidden="true"></i> Resumen de Pago y Cliente
                             </h3>
                         </div>
 
@@ -136,9 +136,9 @@
                                         <input id="client-search-input" oninput="filterClientDropdown()" onfocus="showClientDropdown()" type="text"
                                             placeholder="Buscar cliente por nombre o RIF..."
                                             class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold pr-8">
-                                        <button onclick="clearClientSearch()"
-                                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
-                                            <i class="fa-solid fa-circle-xmark"></i>
+                                        <button onclick="clearClientSearch()" aria-label="Limpiar búsqueda de cliente"
+                                            class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs p-1.5 rounded-md">
+                                            <i class="bi bi-x-circle-fill" aria-hidden="true"></i>
                                         </button>
                                         <div id="client-dropdown"
                                             class="hidden absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
@@ -149,7 +149,7 @@
                                 <button onclick="quickSetGenericClient()"
                                     class="mt-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-750 text-[10px] font-bold px-2.5 py-2 rounded-xl transition whitespace-nowrap"
                                     title="Establecer Cliente Genérico">
-                                    <i class="fa-solid fa-user-tag mr-1"></i> Genérico
+                                    <i class="bi bi-person-badge-fill mr-1" aria-hidden="true"></i> Genérico
                                 </button>
                             </div>
 
@@ -159,8 +159,8 @@
                                     <span id="client-card-id" class="font-mono text-[10px] text-slate-500 dark:text-slate-400"></span>
                                 </div>
                                 <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400">
-                                    <span><i class="fa-solid fa-phone mr-1"></i><span id="client-card-phone">--</span></span>
-                                    <span><i class="fa-solid fa-location-dot mr-1"></i><span id="client-card-address">--</span></span>
+                                    <span><i class="bi bi-telephone-fill mr-1" aria-hidden="true"></i><span id="client-card-phone">--</span></span>
+                                    <span><i class="bi bi-geo-alt-fill mr-1" aria-hidden="true"></i><span id="client-card-address">--</span></span>
                                 </div>
                             </div>
 
@@ -266,7 +266,7 @@
 
                             <div id="seriales-panel-container" class="hidden space-y-3">
                                 <div class="flex items-center gap-2 pb-1 border-b border-slate-100 dark:border-slate-800">
-                                    <i class="fa-solid fa-barcode text-amber-500 text-xs"></i>
+                                    <i class="bi bi-upc-scan text-amber-500 text-xs" aria-hidden="true"></i>
                                     <span class="font-bold text-slate-800 dark:text-slate-200 text-[10px] uppercase tracking-wider">Asignación de Seriales</span>
                                 </div>
                                 <div id="seriales-sections"></div>
@@ -274,7 +274,7 @@
 
                             <button onclick="processSale()" id="confirm-sale-btn"
                                 class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
-                                <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Venta
+                                <i class="bi bi-file-earmark-check-fill" aria-hidden="true"></i> Confirmar y Registrar Venta
                             </button>
                         </div>
                     </div>
@@ -288,6 +288,13 @@
     // sin stock físico (drop-ship / forward). Cuando está activo, las validaciones
     // bloqueantes del frontend se relajan y se delega la decisión al backend.
     const permiteVentaSinStock = {% if config.permite_venta_sin_stock %}true{% else %}false{% endif %};
+    // Redondeo global opcional (solo preview; el backend redondea los snapshots).
+    const redondeoOn = {% if config.redondeo_activo %}true{% else %}false{% endif %};
+    const factorRedondeo = Number("{{ config.factor_redondeo|default:'5.00' }}") || 5;
+    function redondearMultiploJS(v) {
+        if (!redondeoOn || !(factorRedondeo > 0)) return v;
+        return Math.floor(v / factorRedondeo + 0.5 + 1e-9) * factorRedondeo;
+    }
 
     function escapeHtml(str) {
         if (str === null || str === undefined) return '';
@@ -477,10 +484,10 @@
         if (!cont) { console.warn('toast-container-ventas no existe'); return; }
 
         const styles = {
-            info:    { bg: 'bg-indigo-600',  icon: 'fa-circle-info',     ring: 'border-indigo-300'  },
-            warning: { bg: 'bg-amber-500',   icon: 'fa-triangle-exclamation', ring: 'border-amber-300' },
-            error:   { bg: 'bg-rose-600',    icon: 'fa-circle-xmark',    ring: 'border-rose-300'   },
-            success: { bg: 'bg-emerald-600', icon: 'fa-circle-check',    ring: 'border-emerald-300'},
+            info:    { bg: 'bg-indigo-600',  icon: 'bi-info-circle-fill',     ring: 'border-indigo-300'  },
+            warning: { bg: 'bg-amber-500',   icon: 'bi-exclamation-triangle-fill', ring: 'border-amber-300' },
+            error:   { bg: 'bg-rose-600',    icon: 'bi-x-circle-fill',    ring: 'border-rose-300'   },
+            success: { bg: 'bg-emerald-600', icon: 'bi-check-circle-fill',    ring: 'border-emerald-300'},
         };
         const s = styles[tipo] || styles.info;
 
@@ -491,13 +498,13 @@
             'transform translate-x-6 opacity-0 transition duration-200 ease-out'
         ].join(' ');
         toast.innerHTML = `
-            <i class="fa-solid ${s.icon} text-base mt-0.5 flex-shrink-0"></i>
+            <i class="bi ${s.icon} text-base mt-0.5 flex-shrink-0" aria-hidden="true"></i>
             <div class="flex-1 min-w-0">
                 <p class="font-bold leading-tight">${escapeHtml(titulo)}</p>
                 <p class="text-[11px] opacity-90 leading-snug mt-1">${escapeHtml(mensaje)}</p>
             </div>
-            <button onclick="this.parentElement.remove()" class="text-white/80 hover:text-white transition flex-shrink-0" title="Cerrar">
-                <i class="fa-solid fa-xmark text-sm"></i>
+            <button onclick="this.parentElement.remove()" aria-label="Cerrar notificación" class="text-white/80 hover:text-white transition flex-shrink-0 p-1 rounded-md" title="Cerrar">
+                <i class="bi bi-x text-sm" aria-hidden="true"></i>
             </button>
         `;
         cont.appendChild(toast);
@@ -672,7 +679,7 @@
             tbody.innerHTML = `
                 <tr id="empty-note-row">
                     <td colspan="9" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
-                        <i class="fa-solid fa-cart-shopping text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                        <i class="bi bi-cart-x text-2xl mb-2 block text-slate-300 dark:text-slate-700" aria-hidden="true"></i>
                         Aún no has agregado artículos a esta nota de entrega.
                     </td>
                 </tr>
@@ -712,8 +719,8 @@
                 </td>
                 <td class="py-3 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
                 <td class="py-3 px-2 text-center">
-                    <button onclick="removeNoteItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
-                        <i class="fa-solid fa-trash"></i>
+                    <button onclick="removeNoteItem(${index})" aria-label="Quitar artículo de la nota" class="text-rose-600 hover:text-rose-500 transition text-sm p-1 rounded-md">
+                        <i class="bi bi-trash-fill" aria-hidden="true"></i>
                     </button>
                 </td>
             `;
@@ -795,14 +802,16 @@
         // IVA row visibility (solo si hay IVA calculado)
         const ivaRow = document.getElementById('iva-row');
         const ivaAmountEl = document.getElementById('note-iva-amount');
+        const totalIVA_BS_show = redondearMultiploJS(totalIVA_BS);
+        const totalVES_show = redondearMultiploJS(totalVES);
         if (ivaUSD > 0) {
             ivaRow.classList.remove('hidden');
-            ivaAmountEl.innerText = `${totalIVA_BS.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+            ivaAmountEl.innerText = `${totalIVA_BS_show.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
         } else {
             ivaRow.classList.add('hidden');
         }
 
-        document.getElementById('note-total-ves').innerText = `${totalVES.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
+        document.getElementById('note-total-ves').innerText = `${totalVES_show.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Bs`;
     }
 
     let serialesCache = {};
@@ -930,7 +939,7 @@
         const confirmBtn = document.getElementById('confirm-sale-btn');
         const originalHtml = confirmBtn.innerHTML;
         confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+        confirmBtn.innerHTML = '<i class="bi bi-arrow-repeat animate-spin inline-block" aria-hidden="true"></i> Procesando...';
 
         fetch('/ventas/crear/', {
             method: 'POST',

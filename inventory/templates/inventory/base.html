@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="es">
 
@@ -5,10 +6,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>A2LT Stock - Sistema de Control y Social Selling</title>
+    <link rel="icon" type="image/svg+xml" href="{% static 'inventory/img/favicon.svg' %}">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome para Iconos -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Bootstrap Icons (icons.getbootstrap.com) para Iconos -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
     <script>
         // Init theme from localStorage
@@ -34,27 +36,76 @@
             }
         })();
         
+        // Paleta de marca A2LT: verde bosque (#2E6F40) como primario,
+        // verde jade (#00BB77) como acento brillante, naranja para alertas.
+        // Se sobrescribe la escala `indigo` para que TODAS las clases
+        // indigo-* existentes (botones, nav activo, focos, badges) pasen a
+        // verde sin tocar cada template. El naranja (amber/orange) no se toca.
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
+                        // Superficies modo oscuro: negros neutros (fondo #0A0A0A).
+                        // Se sobrescribe la escala `slate` en tonos oscuros para
+                        // que TODAS las vistas hereden el fondo sin editar cada
+                        // template. Los tonos claros (50-700) no se tocan.
                         slate: {
-                            850: '#1e293b',
-                            950: '#0b0f19',
+                            800: '#262626',
+                            850: '#1c1c1c',
+                            900: '#131313',
+                            950: '#0A0A0A',
+                        },
+                        // Verde bosque: primario corporativo (reemplaza al violeta)
+                        forest: {
+                            DEFAULT: '#2E6F40',
+                            50: '#eff6f1',
+                            100: '#d7e9dc',
+                            200: '#b0d3bc',
+                            300: '#7fb695',
+                            400: '#54976c',
+                            500: '#357a4f',
+                            600: '#2E6F40',
+                            700: '#265c35',
+                            800: '#204c2d',
+                            900: '#1c4027',
+                            950: '#0e2415',
+                        },
+                        // Verde jade: acento brillante (hovers, highlights, modo oscuro)
+                        jade: {
+                            DEFAULT: '#00BB77',
+                            300: '#5cdb9f',
+                            400: '#2bcf82',
+                            500: '#00BB77',
+                            600: '#009e64',
+                            700: '#077a50',
+                        },
+                        // Override: indigo -> verde bosque (migración global del violeta)
+                        indigo: {
+                            50: '#eff6f1',
+                            100: '#d7e9dc',
+                            200: '#b0d3bc',
+                            300: '#7fb695',
+                            400: '#54976c',
+                            500: '#357a4f',
+                            600: '#2E6F40',
+                            700: '#265c35',
+                            800: '#204c2d',
+                            900: '#1c4027',
+                            950: '#0e2415',
                         },
                         corporate: {
-                            50: '#eef2ff',
-                            100: '#e0e7ff',
-                            200: '#c7d2fe',
-                            300: '#a5b4fc',
-                            400: '#818cf8',
-                            500: '#6366f1',
-                            600: '#4f46e5',
-                            700: '#4338ca',
-                            800: '#3730a3',
-                            900: '#312e81',
-                            950: '#1e1b4b',
+                            50: '#eff6f1',
+                            100: '#d7e9dc',
+                            200: '#b0d3bc',
+                            300: '#7fb695',
+                            400: '#54976c',
+                            500: '#357a4f',
+                            600: '#2E6F40',
+                            700: '#265c35',
+                            800: '#204c2d',
+                            900: '#1c4027',
+                            950: '#0e2415',
                         }
                     },
                     fontFamily: {
@@ -83,7 +134,7 @@
         }
 
         .dark ::-webkit-scrollbar-track {
-            background: #0b0f19;
+            background: #0A0A0A;
         }
 
         ::-webkit-scrollbar-thumb {
@@ -96,7 +147,7 @@
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #6366f1;
+            background: #2E6F40;
         }
 
         /* ── Sidebar desplegable (toggle persistente) ───────────────────── */
@@ -122,6 +173,18 @@
         #main-content {
             transition: margin-left 0.2s ease;
         }
+        /* Bootstrap Icons del sidebar: tamaño uniforme, no dependen de FA */
+        #app-sidebar .nav-btn > i.bi,
+        #app-sidebar .nav-btn > svg.sidebar-svg {
+            width: 1.25rem;
+            font-size: 1rem;
+            line-height: 1;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        #app-sidebar .nav-btn > svg.sidebar-svg {
+            height: 1rem;
+        }
         /* Evita wrap del logo/header al colapsar */
         #sidebar-toggle-btn {
             transition: transform 0.2s ease, background-color 0.2s ease;
@@ -142,11 +205,11 @@
             <button id="sidebar-toggle-btn" onclick="toggleSidebar()" aria-label="Minimizar/Ampliar menú lateral"
                 title="Minimizar / Ampliar menú"
                 class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 transition">
-                <i id="sidebar-toggle-icon" class="fa-solid fa-bars-staggered text-sm"></i>
+                <i id="sidebar-toggle-icon" class="bi bi-list text-sm"></i>
             </button>
             <div
-                class="bg-indigo-600 text-white p-2.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-600/10">
-                <i class="fa-solid fa-boxes-stacked text-lg"></i>
+                class="bg-white dark:bg-slate-800 p-1.5 rounded-xl flex items-center justify-center shadow-md border border-slate-200 dark:border-slate-700">
+                <img src="{% static 'inventory/img/logo.svg' %}" alt="A2LT Stock" class="w-8 h-8 object-contain">
             </div>
             <div>
                 <h1 class="font-bold text-base leading-none flex items-center gap-2">
@@ -172,7 +235,7 @@
             <div class="w-[1px] h-4 bg-slate-300 dark:bg-slate-800 hidden md:block"></div>
             <!-- Factor Cobertura: Azul para estabilidad de cobertura de costos -->
             <div class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                <i class="fa-solid fa-shield-halved text-[10px]"></i>
+                <i class="bi bi-shield-check text-[10px]"></i>
                 <span class="font-semibold text-slate-500 dark:text-slate-400">F. Cobertura:</span>
                 <span id="header-factor-display"
                     class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ config.factor_cobertura|stringformat:".2f"|default:"1.00" }}x</span>
@@ -180,7 +243,7 @@
             <div class="w-[1px] h-4 bg-slate-300 dark:bg-slate-800 hidden md:block"></div>
             <!-- Tasa Ajustada: Naranja para advertir que es la tasa con factor de protección aplicado -->
             <div class="flex items-center gap-2 text-orange-600 dark:text-orange-400">
-                <i class="fa-solid fa-calculator text-[10px]"></i>
+                <i class="bi bi-calculator-fill text-[10px]"></i>
                 <span class="font-semibold text-slate-500 dark:text-slate-400">Tasa Ajustada:</span>
                 <span id="header-adjusted-display"
                     class="font-mono bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded border border-slate-200 dark:border-slate-800 font-bold shadow-sm">{{ tasa_ajustada|stringformat:".2f"|default:config.tasa_mercado|stringformat:".2f"|default:"0.00" }} Bs</span>
@@ -191,7 +254,7 @@
             <button onclick="toggleTheme()"
                 class="bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 transition"
                 title="Cambiar Tema">
-                <i id="theme-toggle-icon" class="fa-solid fa-moon"></i>
+                <i id="theme-toggle-icon" class="bi bi-moon-fill"></i>
             </button>
         </div>
     </header>
@@ -208,66 +271,66 @@
 
             <a href="{% url 'inventory:dashboard' %}" id="btn-tab-dashboard"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'dashboard' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-chart-line text-base w-5 text-center {% if request.resolver_match.url_name == 'dashboard' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Dashboard General</span>
+                <i class="bi bi-speedometer2 text-base w-5 text-center {% if request.resolver_match.url_name == 'dashboard' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Dashboard General</span>
             </a>
             <a href="{% url 'inventory:catalogo' %}" id="btn-tab-catalogo"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'catalogo' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-tags text-base w-5 text-center {% if request.resolver_match.url_name == 'catalogo' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Catálogo y Redes</span>
+                <i class="bi bi-tags-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'catalogo' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Catálogo y Redes</span>
             </a>
             <a href="{% url 'inventory:ventas' %}" id="btn-tab-ventas"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'ventas' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-file-invoice-dollar text-base w-5 text-center {% if request.resolver_match.url_name == 'ventas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Notas de Entrega (Venta)</span>
+                <i class="bi bi-receipt-cutoff text-base w-5 text-center {% if request.resolver_match.url_name == 'ventas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Notas de Entrega (Venta)</span>
             </a>
             <a href="{% url 'inventory:listado_notas' %}" id="btn-tab-listado-notas"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'listado_notas' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-clock-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'listado_notas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Histórico de Ventas (NE / Facturas)</span>
+                <i class="bi bi-clock-history text-base w-5 text-center {% if request.resolver_match.url_name == 'listado_notas' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Histórico de Ventas (NE / Facturas)</span>
             </a>
             <a href="{% url 'inventory:compras' %}" id="btn-tab-compras"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'compras' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-truck-ramp-box text-base w-5 text-center {% if request.resolver_match.url_name == 'compras' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Carga de Compras / Proveedores</span>
+                <i class="bi bi-truck-front-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'compras' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Carga de Compras / Proveedores</span>
             </a>
             <a href="{% url 'inventory:listado_compras' %}" id="btn-tab-listado-compras"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'listado_compras' %}active bg-amber-600/10 dark:bg-amber-600/15 text-amber-600 dark:text-amber-400 border-l-4 border-amber-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-clock-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'listado_compras' %}text-amber-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Histórico de Compras (DC)</span>
+                <i class="bi bi-archive-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'listado_compras' %}text-amber-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Histórico de Compras (DC)</span>
             </a>
             <a href="{% url 'inventory:reversos' %}" id="btn-tab-reversos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'reversos' %}active bg-red-600/10 dark:bg-red-600/15 text-red-600 dark:text-red-400 border-l-4 border-red-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-rotate-left text-base w-5 text-center {% if request.resolver_match.url_name == 'reversos' %}text-red-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Reversos y Anulaciones</span>
+                <i class="bi bi-arrow-counterclockwise text-base w-5 text-center {% if request.resolver_match.url_name == 'reversos' %}text-red-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Reversos y Anulaciones</span>
             </a>
             <a href="{% url 'inventory:notas_credito' %}" id="btn-tab-notas-credito"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'notas_credito' or request.resolver_match.url_name == 'api_origen_detalle' or request.resolver_match.url_name == 'crear_nc' or request.resolver_match.url_name == 'detalle_nc' or request.resolver_match.url_name == 'pdf_nc' %}active bg-emerald-600/10 dark:bg-emerald-600/15 text-emerald-600 dark:text-emerald-400 border-l-4 border-emerald-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-file-circle-xmark text-base w-5 text-center {% if request.resolver_match.url_name == 'notas_credito' or request.resolver_match.url_name == 'api_origen_detalle' or request.resolver_match.url_name == 'crear_nc' or request.resolver_match.url_name == 'detalle_nc' or request.resolver_match.url_name == 'pdf_nc' %}text-emerald-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Notas de Crédito</span>
+                <i class="bi bi-file-earmark-minus-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'notas_credito' or request.resolver_match.url_name == 'api_origen_detalle' or request.resolver_match.url_name == 'crear_nc' or request.resolver_match.url_name == 'detalle_nc' or request.resolver_match.url_name == 'pdf_nc' %}text-emerald-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Notas de Crédito</span>
             </a>
             <a href="{% url 'inventory:articulos' %}" id="btn-tab-articulos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'articulos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-folder-plus text-base w-5 text-center {% if request.resolver_match.url_name == 'articulos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Fichas / Artículos</span>
+                <i class="bi bi-box-seam-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'articulos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Fichas / Artículos</span>
             </a>
             <a href="{% url 'inventory:carga_masiva' %}" id="btn-tab-carga"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'carga_masiva' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-file-excel text-base w-5 text-center {% if request.resolver_match.url_name == 'carga_masiva' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Carga Masiva (Excel)</span>
+                <i class="bi bi-file-earmark-spreadsheet-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'carga_masiva' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Carga Masiva (Excel)</span>
             </a>
             <a href="{% url 'inventory:movimientos' %}" id="btn-tab-movimientos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'movimientos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-right-left text-base w-5 text-center {% if request.resolver_match.url_name == 'movimientos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Kárdex Integrado</span>
+                <i class="bi bi-arrow-left-right text-base w-5 text-center {% if request.resolver_match.url_name == 'movimientos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Kárdex Integrado</span>
             </a>
             <a href="{% url 'inventory:contactos' %}" id="btn-tab-contactos"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'contactos' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-users text-base w-5 text-center {% if request.resolver_match.url_name == 'contactos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Clientes y Proveedores</span>
+                <i class="bi bi-people-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'contactos' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Clientes y Proveedores</span>
             </a>
             <a href="{% url 'inventory:configuracion' %}" id="btn-tab-config"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'configuracion' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-sliders text-base w-5 text-center {% if request.resolver_match.url_name == 'configuracion' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Configuración Global</span>
+                <i class="bi bi-gear-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'configuracion' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Configuración Global</span>
             </a>
             <a href="{% url 'inventory:reportes' %}" id="btn-tab-reportes"
                 class="nav-btn flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition text-left text-xs font-semibold {% if request.resolver_match.url_name == 'reportes' or request.resolver_match.url_name == 'reporte_detalle' %}active bg-indigo-600/10 dark:bg-indigo-600/15 text-indigo-600 dark:text-indigo-400 border-l-4 border-indigo-500{% else %}text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200 border-l-4 border-transparent{% endif %}">
-                <i class="fa-solid fa-chart-pie text-base w-5 text-center {% if request.resolver_match.url_name == 'reportes' or request.resolver_match.url_name == 'reporte_detalle' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Reportes</span>
+                <i class="bi bi-bar-chart-fill text-base w-5 text-center {% if request.resolver_match.url_name == 'reportes' or request.resolver_match.url_name == 'reporte_detalle' %}text-indigo-500{% else %}text-slate-400 dark:text-slate-500{% endif %}"></i> <span class="nav-label">Reportes</span>
             </a>
 
             <!-- PROFILE SUMMARY -->
             <div
                 class="mt-auto pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
                 <div
-                    class="w-8 h-8 rounded-full bg-indigo-650 flex items-center justify-center font-bold text-white border border-indigo-500">
+                    class="w-8 h-8 rounded-full bg-indigo-700 flex items-center justify-center font-bold text-white border border-indigo-500">
                     OP
                 </div>
                 <div class="flex-1 w-full overflow-hidden profile-text">
@@ -288,7 +351,7 @@
                 <form method="post" action="{% url 'inventory:logout' %}" class="ml-auto">
                     {% csrf_token %}
                     <button type="submit" title="Cerrar Sesión" class="text-rose-500 hover:text-rose-400 bg-rose-50 dark:bg-rose-500/10 p-2 rounded-lg transition-colors">
-                        <i class="fa-solid fa-power-off"></i>
+                        <i class="bi bi-power"></i>
                     </button>
                 </form>
             </div>
@@ -321,7 +384,7 @@
             localStorage.setItem('sidebar-collapsed', isCollapsed ? 'true' : 'false');
             const icon = document.getElementById('sidebar-toggle-icon');
             if (icon) {
-                icon.className = isCollapsed ? 'fa-solid fa-bars text-sm' : 'fa-solid fa-bars-staggered text-sm';
+                icon.className = isCollapsed ? 'bi bi-list text-sm' : 'bi bi-layout-sidebar-inset text-sm';
             }
         }
 
@@ -350,10 +413,10 @@
             const themeIcon = document.getElementById('theme-toggle-icon');
             if (isDark) {
                 localStorage.setItem('theme', 'dark');
-                if (themeIcon) themeIcon.className = 'fa-solid fa-sun text-yellow-400';
+                if (themeIcon) themeIcon.className = 'bi bi-sun-fill text-yellow-400';
             } else {
                 localStorage.setItem('theme', 'light');
-                if (themeIcon) themeIcon.className = 'fa-solid fa-moon text-slate-700';
+                if (themeIcon) themeIcon.className = 'bi bi-moon-fill text-slate-700';
             }
         }
 
@@ -362,9 +425,9 @@
             const themeIcon = document.getElementById('theme-toggle-icon');
             if (themeIcon) {
                 if (document.documentElement.classList.contains('dark')) {
-                    themeIcon.className = 'fa-solid fa-sun text-yellow-400';
+                    themeIcon.className = 'bi bi-sun-fill text-yellow-400';
                 } else {
-                    themeIcon.className = 'fa-solid fa-moon text-slate-700';
+                    themeIcon.className = 'bi bi-moon-fill text-slate-700';
                 }
             }
         });

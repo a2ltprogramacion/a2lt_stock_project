@@ -108,13 +108,36 @@ class ConfiguracionEmpresa(models.Model):
         max_digits=5,
         decimal_places=2,
         default=30.00,
-        verbose_name='Margen de Ganancia Global (%)',
+        verbose_name='Margen / Markup Global (%)',
+        help_text='Porcentaje aplicado con el Método de Ganancia Global.',
+    )
+    metodo_ganancia_global = models.CharField(
+        max_length=10,
+        choices=[
+            ('MARGIN', 'Margen de Utilidad (correcto: Costo ÷ (1 − Margen))'),
+            ('MARKUP', 'Markup / Recargo (Costo × (1 + Markup))'),
+        ],
+        default='MARGIN',
+        verbose_name='Método de Ganancia Global',
+        help_text='MARGIN: precio = costo / (1 − m/100). MARKUP: precio = costo × (1 + m/100).',
     )
     descuento_global = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=5.00,
         verbose_name='Descuento Global (%)',
+    )
+    redondeo_activo = models.BooleanField(
+        default=False,
+        verbose_name='Redondeo de Precios',
+        help_text='Si está activo, los precios de venta (USD y Bs) se redondean al múltiplo del factor.',
+    )
+    factor_redondeo = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=5.00,
+        verbose_name='Factor de Redondeo',
+        help_text='Múltiplo al que se redondea (5, 4, 7, 2, 9, 1…). Debe ser mayor a 0.',
     )
     prefijo_nota_entrega = models.CharField(
         max_length=20,
@@ -402,8 +425,8 @@ class Articulo(models.Model):
         ('OTROS', 'Otros'),
     ]
     METODO_GANANCIA_CHOICES = [
-        ('MARKUP', 'Markup (sobre el costo)'),
-        ('MARGIN', 'Margen Real (sobre el precio de venta)'),
+        ('MARGIN', 'Margen de Utilidad (correcto: Costo ÷ (1 − Margen))'),
+        ('MARKUP', 'Markup / Recargo (Costo × (1 + Markup))'),
     ]
 
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='articulos')
@@ -458,8 +481,9 @@ class Articulo(models.Model):
     metodo_ganancia = models.CharField(
         max_length=10,
         choices=METODO_GANANCIA_CHOICES,
-        default='MARKUP',
-        verbose_name='Método de Cálculo de Ganancia',
+        default='MARGIN',
+        verbose_name='Método de Ganancia Individual',
+        help_text='MARGIN: precio = costo / (1 − m/100). MARKUP: precio = costo × (1 + m/100).',
     )
     margen_ind = models.DecimalField(
         max_digits=5,

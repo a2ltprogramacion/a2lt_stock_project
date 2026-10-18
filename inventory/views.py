@@ -307,14 +307,23 @@ def catalogo(request):
     articulos_page = page_obj.object_list
 
     articulos_con_precios = []
+    from .services import redondear_a_multiplo as _redondear
+    _redondeo_on = bool(getattr(config, 'redondeo_activo', False))
+    _factor_red = getattr(config, 'factor_redondeo', None) or Decimal('5')
     for a in articulos_page:
         precio_usd = a.precio_divisa
         precio_usd_ajustado = (precio_usd * factor).quantize(Decimal('0.01'))
         precio_bs_base = (precio_usd * tasa_bcv).quantize(Decimal('0.01'))
         precio_bs_bcv = (precio_usd_ajustado * tasa_bcv).quantize(Decimal('0.01'))
+        if _redondeo_on:
+            # Encadenado igual que en venta: USD primero, Bs desde USD redondeado.
+            precio_usd = _redondear(precio_usd, _factor_red)
+            precio_usd_ajustado = _redondear(precio_usd_ajustado, _factor_red)
+            precio_bs_base = _redondear(precio_usd * tasa_bcv, _factor_red)
+            precio_bs_bcv = _redondear(precio_usd_ajustado * tasa_bcv, _factor_red)
         articulos_con_precios.append({
             'articulo': a,
-            'precio_divisa': a.precio_divisa,
+            'precio_divisa': precio_usd,
             'precio_usd_ajustado': precio_usd_ajustado,
             'precio_bs_base': precio_bs_base,
             'precio_bs_bcv': precio_bs_bcv,
@@ -649,6 +658,7 @@ def api_buscar_articulos(request):
     ).order_by('nombre')[:20]
 
     empresa_id = get_current_empresa()
+    config = None
     try:
         config = ConfiguracionEmpresa.objects.get(empresa_id=empresa_id)
         factor = config.factor_cobertura if config else Decimal('1.0000')
@@ -656,8 +666,13 @@ def api_buscar_articulos(request):
         factor = Decimal('1.0000')
 
     results = []
+    from .services import redondear_a_multiplo as _redondear_api
+    _api_redondeo = bool(getattr(config, 'redondeo_activo', False))
+    _api_factor = getattr(config, 'factor_redondeo', None) or Decimal('5')
     for a in articulos:
         precio_ajustado = (a.precio_divisa * factor).quantize(Decimal('0.01'))
+        if _api_redondeo:
+            precio_ajustado = _redondear_api(precio_ajustado, _api_factor)
         results.append({
             'sku': a.sku,
             'nombre': a.nombre,
@@ -1576,6 +1591,23 @@ def articulos_view(request):
             'social_quick': data.get('social_quick', ''),
             'social_cross': data.get('social_cross', ''),
         }
+        # Método + porcentaje individuales (opcionales; si no vienen, el modelo
+        # aplica MARGIN por defecto y services usa el % global como fallback).
+        metodo_ind = (data.get('metodo_ganancia') or '').strip().upper() if isinstance(data.get('metodo_ganancia'), str) else ''
+        if metodo_ind:
+            if metodo_ind not in ('MARGIN', 'MARKUP'):
+                return JsonResponse({'ok': False, 'error': 'Método de ganancia inválido (use MARGIN o MARKUP).'}, status=400)
+            defaults['metodo_ganancia'] = metodo_ind
+        if data.get('margen_ind') not in (None, ''):
+            try:
+                margen_ind = Decimal(str(data.get('margen_ind')))
+            except Exception:
+                return JsonResponse({'ok': False, 'error': 'Margen individual inválido.'}, status=400)
+            if metodo_ind == 'MARGIN' and not (Decimal('0') <= margen_ind < Decimal('100')):
+                return JsonResponse({'ok': False, 'error': 'El margen de utilidad debe estar entre 0 y 99.99%.'}, status=400)
+            if margen_ind < 0:
+                return JsonResponse({'ok': False, 'error': 'El margen/markup no puede ser negativo.'}, status=400)
+            defaults['margen_ind'] = margen_ind
 
         articulo, created = Articulo.objects.update_or_create(
             sku=sku,
@@ -1590,12 +1622,24 @@ def articulos_view(request):
         'sku', 'nombre', 'categoria', 'tipo',
         'costo', 'precio_divisa', 'descripcion',
         'ficha_tecnica', 'social_quick', 'social_cross',
+        'metodo_ganancia', 'margen_ind',
     ))
     articulos_json = json.dumps(articulos_lista, default=str)
+    from .models import ConfiguracionEmpresa as _CfgEmp
+    _empresa_ctx = get_current_empresa()
+    try:
+        _cfg = _CfgEmp.objects.get(empresa_id=_empresa_ctx)
+        _margen_cfg = str(_cfg.margen_global)
+        _metodo_cfg = _cfg.metodo_ganancia_global or 'MARGIN'
+    except _CfgEmp.DoesNotExist:
+        _margen_cfg = '30.00'
+        _metodo_cfg = 'MARGIN'
     return render(request, 'inventory/articulos.html', {
         'articulos': articulos,
         'articulos_lista': articulos_lista,
         'articulos_json': articulos_json,
+        'cfg_margen_global': _margen_cfg,
+        'cfg_metodo_global': _metodo_cfg,
     })
 
 
@@ -1627,7 +1671,24 @@ def configuracion_view(request):
             config.tasa_mercado = Decimal(request.POST.get('tasa_mercado', '0.0000'))
             config.factor_cobertura = Decimal(request.POST.get('factor_cobertura', '1.0000'))
             config.margen_global = Decimal(request.POST.get('margen_global', '0.00'))
+            metodo_global = (request.POST.get('metodo_ganancia_global', 'MARGIN') or 'MARGIN').strip().upper()
+            if metodo_global not in ('MARGIN', 'MARKUP'):
+                messages.error(request, 'Método de ganancia global inválido (use MARGIN o MARKUP).')
+                return redirect('inventory:configuracion')
+            config.metodo_ganancia_global = metodo_global
             config.descuento_global = Decimal(request.POST.get('descuento_global', '0.00'))
+
+            # Redondeo de precios (opcional, USD y Bs al múltiplo del factor)
+            config.redondeo_activo = 'redondeo_activo' in request.POST
+            try:
+                factor_red = Decimal(request.POST.get('factor_redondeo', '5.00'))
+            except Exception:
+                messages.error(request, 'Factor de redondeo inválido (debe ser numérico).')
+                return redirect('inventory:configuracion')
+            if factor_red <= 0:
+                messages.error(request, 'Factor de redondeo inválido (debe ser mayor a 0).')
+                return redirect('inventory:configuracion')
+            config.factor_redondeo = factor_red
             
             # Parametros de impresión
             config.print_offset_x = Decimal(request.POST.get('print_offset_x', '0.00'))

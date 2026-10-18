@@ -1166,6 +1166,23 @@ def resolver_colision(
 # TICKET #5: MÓDULO DE VENTAS Y EMISIÓN DE NOTAS DE ENTREGA
 # ═══════════════════════════════════════════════════════════════════════
 
+def redondear_a_multiplo(valor, factor):
+    """Redondea `valor` al múltiplo de `factor` más cercano (mitad hacia arriba).
+
+    Equivale al Excel: SI(RESIDUO(v;f) < f/2; MULTIPLO.INFERIOR; MULTIPLO.SUPERIOR)
+    con desempate hacia arriba (32.5 con factor 5 → 35; 32.4 → 30).
+    Si el factor es inválido (<= 0 o no numérico), devuelve el valor intacto.
+    """
+    from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+    try:
+        v = Decimal(str(valor))
+        f = Decimal(str(factor))
+    except (InvalidOperation, ValueError, TypeError):
+        return valor
+    if f <= 0:
+        return v
+    return ((v / f).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * f)
+
 @transaction.atomic
 def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='',
                     observaciones='', empresa_id=None,
@@ -1399,6 +1416,17 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         precio_ajustado = (precio_base * factor_aplicado).quantize(Decimal('0.0001'))
         precio_directo_bcv = (precio_base * tasa_aplicada).quantize(Decimal('0.01'))
         precio_ajustado_bcv = (precio_ajustado * tasa_aplicada).quantize(Decimal('0.01'))
+
+        # Redondeo global opcional (USD y Bs): se aplica sobre los snapshots para
+        # que líneas, subtotales, IVA, totales y PDFs queden consistentes.
+        # Encadenado: primero USD, luego Bs desde el USD ya redondeado, para
+        # que el tipo de cambio implícito (Bs/USD) siga siendo la tasa aplicada.
+        if getattr(config, 'redondeo_activo', False):
+            f_red = getattr(config, 'factor_redondeo', None) or Decimal('5')
+            precio_base = redondear_a_multiplo(precio_base, f_red)
+            precio_ajustado = redondear_a_multiplo(precio_ajustado, f_red)
+            precio_directo_bcv = redondear_a_multiplo(precio_base * tasa_aplicada, f_red)
+            precio_ajustado_bcv = redondear_a_multiplo(precio_ajustado * tasa_aplicada, f_red)
 
         # IVA snapshot — preferir el del item si la UI lo manda (1.1.2 O2);
         # caer al del Articulo si no viene (compat hacia atrás).
@@ -2060,17 +2088,24 @@ def registrar_compra_proveedor(
             subtotal_usd += detalle.subtotal_usd
             iva_total_usd += detalle.iva_usd
 
-            # Actualización de Costo Base + Recalculo Precio Venta
+            # Actualización de Costo Base + Recalculo Precio Venta.
+            # Cadena de resolución: margen individual > margen global;
+            # método individual > método global > MARGIN (correcto).
             articulo.costo = costo_factura
             margen = articulo.margen_ind
+            _cfg_precios = None
             if not margen or margen <= 0:
-                config = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
-                margen = config.margen_global if config.margen_global else Decimal('30.00')
+                _cfg_precios = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
+                margen = _cfg_precios.margen_global if _cfg_precios.margen_global else Decimal('30.00')
 
-            metodo = (articulo.metodo_ganancia or 'MARKUP').upper()
+            metodo = (articulo.metodo_ganancia or '').strip().upper()
+            if metodo not in ('MARKUP', 'MARGIN'):
+                if _cfg_precios is None:
+                    _cfg_precios = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
+                metodo = (_cfg_precios.metodo_ganancia_global or 'MARGIN').strip().upper()
             if metodo == 'MARKUP':
                 precio_recalculado = costo_factura * (Decimal('1') + (margen / Decimal('100')))
-            else:  # MARGIN
+            else:  # MARGIN (correcto): precio = costo / (1 - margen/100)
                 factor_margen = Decimal('1') - (margen / Decimal('100'))
                 if factor_margen <= 0:
                     raise ValueError("El margen comercial no puede ser igual o mayor al 100%.")

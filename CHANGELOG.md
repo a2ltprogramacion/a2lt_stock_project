@@ -8,6 +8,93 @@ vez público.
 
 ---
 
+## [1.3.0] — 2026-09-27
+
+Iteración de **identidad visual + pricing**. Migración total de iconos
+FontAwesome → Bootstrap Icons/SVGRepo, marca verde bosque/jade (adiós
+violeta), fondo oscuro `#0A0A0A`, método dual Margen/Markup a nivel
+global e individual, redondeo de precios configurable, layout de
+Configuración rebalanceado y favicon propio para el admin de Django.
+**Migraciones: `0017` (método de ganancia), `0018` (redondeo).**
+
+### Added (Features nuevas)
+
+- **Método de ganancia global (`metodo_ganancia_global`):**
+  `ConfiguracionEmpresa` ahora guarda `MARGIN` (Margen de Utilidad,
+  `Costo ÷ (1 − m)`, default y método correcto) o `MARKUP` (Markup /
+  Recargo, `Costo × (1 + m)`). Migración `0017`.
+- **Método individual por artículo en la UI:** el modal de Fichas /
+  Artículos expone selector de método + % individual con preview del
+  precio sugerido y botón "Aplicar al precio". Nuevos artículos heredan
+  los valores globales; `%` vacío o 0 usa el % global. Endpoint
+  `/articulos/` valida y persiste ambos campos.
+- **Cadena de resolución en compras (`services.py`):** margen
+  individual > global; método individual > global > `MARGIN`. Default
+  del modelo `Articulo.metodo_ganancia` cambiado `MARKUP` → `MARGIN`
+  (filas existentes conservan su valor guardado).
+- **Redondeo global de precios:** `redondeo_activo` (toggle, default
+  OFF) + `factor_redondeo` (default 5.00, > 0). Migración `0018`.
+  Helper `redondear_a_multiplo()` (`Decimal` + `ROUND_HALF_UP`):
+  múltiplo más cercano, mitad hacia arriba (32.5→35, 32.4→30 con
+  factor 5). Se aplica **encadenado** sobre los 4 snapshots de venta
+  (USD primero, Bs desde el USD redondeado) para que el tipo de cambio
+  implícito siga siendo la tasa; líneas, IVA, totales y PDFs cuadran.
+  Compras y costos quedan exactos. Catálogo, API de búsqueda y preview
+  Bs en Ventas muestran el redondeo cuando está activo.
+- **Favicon del admin Django:** `favicon-admin.svg` + override
+  `templates/admin/base_site.html`; `settings.py` agrega
+  `BASE_DIR / 'templates'` a `TEMPLATES['DIRS']`.
+- **Assets de marca en static:** `inventory/img/favicon.svg`,
+  `logo.svg` (logo principal en header y login) e
+  `icon-venta-sin-stock.svg` (icono multicolor de Permitir Ventas).
+
+### Changed (Features cambiadas)
+
+- **Iconos FontAwesome → Bootstrap Icons** (`base.html`, `login.html`,
+  `articulos.html`): sidebar con 14 iconos acordes (`speedometer2`,
+  `tags-fill`, `receipt-cutoff`, `clock-history`,
+  `truck-front-fill` para Carga de Compras, `archive-fill` para
+  Histórico de Compras, `arrow-counterclockwise`,
+  `file-earmark-minus-fill`, `box-seam-fill`,
+  `file-earmark-spreadsheet-fill`, `arrow-left-right`,
+  `people-fill`, `gear-fill`, `bar-chart-fill`); header, toggles y
+  logout migrados. Cero `fa-*` restantes en esas vistas.
+- **Configuración con pastillas de icono:** cada tarjeta lleva chip de
+  color + glifo semántico (`cash-stack`, `cloud-arrow-down-fill`,
+  `percent`, `printer-fill`, `inboxes-fill`, `megaphone-fill`,
+  `floppy-fill`, `clock-history`); Permitir Ventas conserva su SVG de
+  almacén. Tarjeta Rentabilidad con radios Margen/Markup + ejemplo en
+  vivo; tarjeta Redondeo con toggle + factor + ejemplo en vivo.
+- **Marca verde (adiós violeta):** escalas `indigo`/`corporate` del
+  config Tailwind remapeadas a verde bosque (`600: #2E6F40`) + tokens
+  `forest`/`jade` (`#00BB77` hovers); ~270 clases `indigo-*` existentes
+  pasaron a verde sin tocar cada template. Naranja/ámbar intactos.
+- **Tema oscuro `#0A0A0A`:** escala `slate` oscura neutralizada
+  (`950: #0A0A0A`, `900: #131313`, `850: #1c1c1c`, `800: #262626`;
+  modo claro intacto) + scrollbar. Login replica paleta y fondo.
+- **Layout Configuración rebalanceado:** columna 1 = Monetarios +
+  Redondeo + Impresión + Cuarentena; columna 2 = Rentabilidad + Ventas
+  sin stock + Social + Guardar; ambas `space-y-6` con igual alto.
+  Auditoría sigue a ancho completo.
+
+### Fixed (Bug fixes)
+
+- **Clases FA rotas en `articulos.html`:** tras quitar el CDN de
+  FontAwesome los iconos del modal quedaban invisibles; migrados a BI.
+- **`config` indefinido en `api_buscar_articulos`:** inicializado
+  `config = None` antes del `try` (rama `DoesNotExist`).
+- **`empresa_id` indefinido en rama GET de `articulos_view`:**
+  contexto del tenant obtenido vía `get_current_empresa()`.
+
+### Tests
+
+- Nuevos `TestMetodoGananciaGlobal` (4 casos: default `MARGIN`,
+  fallback global MARKUP→120.00 / MARGIN→125.00, precedencia
+  individual) y `TestRedondeoPrecios` (helper + venta ON/OFF con
+  snapshots 30/30/1080/1080 vs exactos).
+- Regresión 55 tests OK (ventas, compras, catálogo, margen,
+  redondeo). `manage.py check` limpio.
+
 ## [1.2.1] — 2026-07-26
 
 Iteración de **UX** sobre el módulo de Compras y el layout base. Resuelve 

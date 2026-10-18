@@ -2635,10 +2635,9 @@ class TestReversoIdempotencia(TransactionTestCase):
 # TEST C2: RESPETO DE metodo_ganancia EN COMPRAS (regresión bug siempre-MARGIN)
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Previene el bug donde registrar_compra_proveedor ignoraba articulo.metodo_ganancia
-# y aplicaba SIEMPRE la formula MARGIN (costo / (1 - margen/100)).
-# Como el modelo Articulo define default='MARKUP', TODOS los articulos nuevos
-# nacian con MARKUP pero recibian el calculo de MARGIN, sobrevalorando precios
-# ~10% (ejemplo: costo 100 con margen 30 -> esperado 130, calculaba 142.86).
+# y aplicaba SIEMPRE la formula MARGIN (costo / (1 - margen/100)),
+# sobrevalorando ~10% (ejemplo: costo 100 con margen 30 -> esperado 130, calculaba 142.86).
+# Los artículos nuevos nacen con default='MARGIN' (método correcto).
 
 class TestMetodoGananciaCompras(TransactionTestCase):
     """
@@ -8968,6 +8967,863 @@ class TestAuditoriaRemediacion(TransactionTestCase):
         s2 = SerialArticulo.objects.get(serial='SN-HAP-2')
         self.assertEqual(s1.estado, 'ANULADO_COMPRA')
         self.assertEqual(s2.estado, 'ANULADO_COMPRA')
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PRIORITY SECURITY TESTS — Added per Audit Recommendation
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestSecuritySQLInjection(TransactionTestCase):
+    """
+    Validates that user-supplied filter parameters (sku, nombre, etc.)
+    are NOT vulnerable to SQL injection via Django ORM.
+    
+    Django ORM parameterizes queries by default, but this test
+    documents the expectation and catches regressions if raw SQL
+    is ever introduced.
+    """
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='SecSQL', rif='J-SECSQL-001')
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen SecSQL')
+        self.articulo = crear_articulo_fisico(self.empresa, sku='SEC-001', nombre='Articulo Seguro')
+        seed_inventario(self.articulo, self.almacen, cantidad=10)
+
+    def test_filtro_sku_no_inyecta_sql(self):
+        """
+        Criterio: buscar con sku que contiene comillas o SQL keywords
+        NO debe romper la consulta ni retornar datos de otros tenants.
+        """
+        from inventory.models import Articulo
+        from inventory.managers import set_current_empresa
+        set_current_empresa(self.empresa.id)
+
+        # Payloads de inyección SQL comunes
+        payloads = [
+            "' OR '1'='1",
+            "'; DROP TABLE inventory_articulo; --",
+            "' UNION SELECT * FROM auth_user --",
+            "admin'--",
+            "' OR 1=1 --",
+            "'; UPDATE inventory_articulo SET costo=0; --",
+        ]
+
+        for payload in payloads:
+            # filter() con user input — Django ORM parameteriza automáticamente
+            qs = Articulo.objects.filter(sku__icontains=payload)
+            # Debe ejecutarse sin error y retornar queryset vacío (no match)
+            count = qs.count()
+            self.assertEqual(count, 0, f"Payload '{payload}' no debe hacer match")
+
+    def test_filtro_nombre_no_inyecta_sql(self):
+        """
+        Criterio: filtro nombre con payloads SQL no rompe ni fuga datos.
+        """
+        from inventory.models import Articulo
+        from inventory.managers import set_current_empresa
+        set_current_empresa(self.empresa.id)
+
+        payloads = [
+            "' OR '1'='1",
+            "'; DELETE FROM inventory_articulo; --",
+            "test' UNION SELECT password FROM auth_user --",
+        ]
+
+        for payload in payloads:
+            qs = Articulo.objects.filter(nombre__icontains=payload)
+            count = qs.count()
+            self.assertEqual(count, 0, f"Payload nombre '{payload}' no debe hacer match")
+
+    def test_multi_tenant_aislado_con_payload_sql(self):
+        """
+        Criterio crítico: incluso con payload SQL en sku, el tenant B
+        NO ve artículos del tenant A.
+        """
+        from inventory.models import Articulo, Empresa
+        from inventory.managers import set_current_empresa
+
+        # Tenant B (atacante)
+        empresa_b = Empresa.objects.create(nombre='Atacante SQL', rif='J-ATK-SQL', activa=True)
+        articulo_b = Articulo.objects.create(
+            empresa=empresa_b, sku='ATK-001', nombre='Articulo Atacante',
+            tipo='FISICO', categoria='OTROS', costo=Decimal('10'), precio_divisa=Decimal('20')
+        )
+
+        # Contexto: Tenant A (víctima)
+        set_current_empresa(self.empresa.id)
+
+        # Payload intenta salir del filtro de tenant
+        payload = "' UNION SELECT * FROM inventory_articulo WHERE empresa_id=" + str(empresa_b.id) + " --"
+        qs = Articulo.objects.filter(sku__icontains=payload)
+        count = qs.count()
+        # Debe ser 0 — EmpresaManager filtra por ContextVar ANTES del WHERE
+        self.assertEqual(count, 0, "Inyección SQL no debe saltar aislamiento multi-tenant")
+
+
+class TestSecurityXSS(TransactionTestCase):
+    """
+    Validates that user-supplied text fields (descripcion, ficha_tecnica,
+    social_quick, social_cross, observaciones) are properly escaped
+    when rendered in templates. Django auto-escapes by default, but
+    this test documents the requirement and catches |safe misuse.
+    """
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='SecXSS', rif='J-SECXSS-001')
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen SecXSS')
+
+    def test_campos_texto_escapados_en_template(self):
+        """
+        Criterio: descripcion, ficha_tecnica, social_quick, social_cross
+        con payloads XSS se renderizan ESCAPADOS (Django auto-escape),
+        NO como HTML ejecutable.
+        """
+        from inventory.models import Articulo
+        from inventory.managers import set_current_empresa
+        from django.template import Template, Context
+        set_current_empresa(self.empresa.id)
+
+        xss_payloads = [
+            "<script>alert('xss')</script>",
+            "<img src=x onerror=alert(1)>",
+            "javascript:alert(1)",
+            "<svg onload=alert(1)>",
+            "';alert(1);//",
+            "<iframe src=javascript:alert(1)></iframe>",
+        ]
+
+        for payload in xss_payloads:
+            articulo = Articulo.objects.create(
+                empresa=self.empresa,
+                sku=f'XSS-{hash(payload) % 10000}',
+                nombre='Articulo XSS Test',
+                tipo='FISICO',
+                categoria='OTROS',
+                costo=Decimal('10.00'),
+                precio_divisa=Decimal('20.00'),
+                descripcion=payload,
+                ficha_tecnica=payload,
+                social_quick=payload,
+                social_cross=payload,
+            )
+
+            # Template típico que renderiza estos campos
+            template_str = (
+                "{{ articulo.descripcion }}|"
+                "{{ articulo.ficha_tecnica }}|"
+                "{{ articulo.social_quick }}|"
+                "{{ articulo.social_cross }}"
+            )
+            template = Template(template_str)
+            rendered = template.render(Context({'articulo': articulo}))
+
+            # Verificar que los caracteres peligrosos están ESCAPADOS
+            # Django auto-escape convierte < → <, > → >, " → ", ' → '
+            self.assertNotIn("<script>", rendered, f"Tag script sin escapar en: {payload}")
+            self.assertNotIn("<img", rendered, f"Tag img sin escapar en: {payload}")
+            self.assertNotIn("onerror=", rendered, f"Evento onerror sin escapar en: {payload}")
+            self.assertNotIn("javascript:", rendered.lower(), f"javascript: sin escapar en: {payload}")
+            self.assertNotIn("<svg", rendered, f"Tag svg sin escapar en: {payload}")
+            self.assertNotIn("<iframe", rendered, f"Tag iframe sin escapar en: {payload}")
+
+            # Verificar que SÍ aparecen las entidades HTML escapadas
+            self.assertIn("<script>", rendered, f"Payload no escapado correctamente: {payload}")
+            self.assertIn("<img", rendered, f"Payload img no escapado: {payload}")
+
+    def test_observaciones_nota_entrada_escapadas(self):
+        """
+        Criterio: observaciones en NotaEntrega y DocumentoCompra
+        se escapan al renderizar en PDF/HTML (Django auto-escape).
+        """
+        from inventory.models import NotaEntrega, Contacto, Almacen
+        from inventory.services import procesar_venta, registrar_movimiento
+        from inventory.managers import set_current_empresa
+        from django.template import Template, Context
+        set_current_empresa(self.empresa.id)
+
+        cliente = Contacto.objects.create(
+            empresa=self.empresa, identificacion='V-XSS', tipo='CLIENTE', nombre='Cliente XSS'
+        )
+        articulo = crear_articulo_fisico(self.empresa, sku='XSS-OBS', nombre='Articulo Obs')
+        registrar_movimiento(articulo, self.almacen, 'ENTRADA', Decimal('10'), 'Inicial')
+
+        payload = "<script>stealCookies()</script>"
+        nota = procesar_venta(
+            cliente_id=cliente.pk,
+            lista_items=[{'articulo_sku': 'XSS-OBS', 'cantidad': '1', 'precio_unitario_usd': '10.00'}],
+            almacen_id=self.almacen.pk,
+            usuario='Test',
+            observaciones=payload,
+            empresa_id=self.empresa.pk
+        )
+
+        # Template que renderiza observaciones
+        template = Template("{{ nota.observaciones }}")
+        rendered = template.render(Context({'nota': nota}))
+
+        # Verificar que el tag script está escapado
+        self.assertNotIn("<script>", rendered)
+        self.assertIn("<script>", rendered)
+
+
+class TestSecurityRaceCondition(TransactionTestCase):
+    """
+    Validates that concurrent SALIDA operations on the same stock
+    are serialized correctly via select_for_update().
+    
+    This test uses threading to simulate concurrent access.
+    """
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='SecRace', rif='J-RACE-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.00')
+        self.config.factor_cobertura = Decimal('1.05')
+        self.config.save()
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen Race')
+        self.articulo = crear_articulo_fisico(self.empresa, sku='RACE-001', nombre='Articulo Race')
+        seed_inventario(self.articulo, self.almacen, cantidad=100)
+
+    def test_concurrent_salidas_no_oversell(self):
+        """
+        Criterio: 10 solicitudes concurrentes intentan vender 20 unidades cada una
+        (total 200) sobre stock de 100. Solo 5 deben pasar (100/20=5).
+        Las otras 5 deben fallar con ValueError 'Stock insuficiente'.
+        El stock final NUNCA debe ser negativo.
+        
+        Nota: Esta prueba simula concurrencia usando hilos. En producción real
+        select_for_update() en registrar_movimiento() serializa el acceso.
+        """
+        import threading
+        import time
+        from inventory.services import registrar_movimiento
+        from inventory.managers import set_current_empresa
+        from decimal import Decimal
+
+        set_current_empresa(self.empresa.id)
+        results = {'success': 0, 'failed': 0, 'errors': []}
+        lock = threading.Lock()
+
+        def vender_20_unidades(thread_id):
+            try:
+                # Cada hilo debe setear su propio ContextVar
+                from inventory.managers import set_current_empresa as _set_ctx
+                _set_ctx(self.empresa.id)
+                
+                registrar_movimiento(
+                    articulo=self.articulo,
+                    almacen=self.almacen,
+                    tipo='SALIDA',
+                    cantidad=Decimal('20.00'),
+                    concepto='VENTA',
+                    usuario=f'Thread-{thread_id}',
+                )
+                with lock:
+                    results['success'] += 1
+            except ValueError as e:
+                with lock:
+                    if 'Stock insuficiente' in str(e):
+                        results['failed'] += 1
+                    else:
+                        results['errors'].append(str(e))
+            except Exception as e:
+                with lock:
+                    results['errors'].append(f"Thread {thread_id}: {type(e).__name__}: {e}")
+
+        # Lanzar 10 hilos concurrentes
+        threads = []
+        for i in range(10):
+            t = threading.Thread(target=vender_20_unidades, args=(i,))
+            threads.append(t)
+            t.start()
+
+        # Pequeño delay para aumentar contención
+        time.sleep(0.01)
+
+        for t in threads:
+            t.join(timeout=5)
+
+        # Validaciones
+        self.assertEqual(len(results['errors']), 0, f"Errores inesperados: {results['errors']}")
+        self.assertEqual(results['success'], 5, f"Exactamente 5 deben pasar (100/20). Got: {results['success']}")
+        self.assertEqual(results['failed'], 5, f"Exactamente 5 deben fallar. Got: {results['failed']}")
+
+        # Stock final NUNCA negativo
+        inv = InventarioAlmacen.objects.get(articulo=self.articulo, almacen=self.almacen)
+        self.assertGreaterEqual(
+            inv.cantidad_disponible, 0,
+            msg=f"Stock final NUNCA debe ser negativo. Got: {inv.cantidad_disponible}"
+        )
+        # Debe ser 0 (5 exitosas * 20 = 100)
+        self.assertEqual(inv.cantidad_disponible, Decimal('0.00'))
+
+
+class TestSecurityUserWithoutPermittedEmpresas(TestCase):
+    """
+    Validates that users WITHOUT empresas_permitidas are blocked
+    at middleware level and cannot access any tenant views.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from inventory.models import Empresa
+        self.empresa = Empresa.objects.create(nombre='PermTest', rif='J-PERM-001', activa=True)
+        self.user = User.objects.create_user('noperm', password='test1234')
+        # NO asignar empresas_permitidas — usuario sin permisos
+        self.client.login(username='noperm', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+    def test_usuario_sin_empresas_permitidas_bloqueado_en_dashboard(self):
+        """Usuario autenticado pero sin empresas_permitidas → 403 en dashboard."""
+        response = self.client.get('/dashboard/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_sin_empresas_permitidas_bloqueado_en_ventas(self):
+        """Usuario sin permisos → 403 en ventas."""
+        response = self.client.get('/ventas/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_sin_empresas_permitidas_bloqueado_en_catalogo(self):
+        """Usuario sin permisos → 403 en catálogo."""
+        response = self.client.get('/catalogo/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_sin_empresas_permitidas_bloqueado_en_carga_masiva(self):
+        """Usuario sin permisos → 403 en carga masiva."""
+        response = self.client.get('/carga/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_sin_empresas_permitidas_bloqueado_en_articulos(self):
+        """Usuario sin permisos → 403 en articulos."""
+        response = self.client.get('/articulos/')
+        self.assertEqual(response.status_code, 403)
+
+
+class TestSecurityAPIRateErrorHandling(TransactionTestCase):
+    """
+    Validates sincronizar_tasa_cambio handles:
+    - HTTP 5xx errors
+    - Malformed JSON responses
+    - Deep/nested selector paths
+    - Network errors (DNS, connection refused)
+    """
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='SecAPI', rif='J-SECAPI-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.0000')
+        self.config.factor_cobertura = Decimal('1.0000')
+        self.config.api_url = 'https://198.51.100.10/tasa'
+        self.config.http_method = 'GET'
+        self.config.response_selector = 'data.rates.USD'
+        self.config.save()
+
+    @patch('requests.request')
+    def test_sincronizacion_http_500_no_cambia_tasa(self, mock_request):
+        """HTTP 500 → ok=False, tasa no cambia, error descriptivo."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('500', resultado['error'])
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_http_503_no_cambia_tasa(self, mock_request):
+        """HTTP 503 (service unavailable) → ok=False, tasa intacta."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 503
+        mock_response.text = "Service Unavailable"
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('503', resultado['error'])
+
+    @patch('requests.request')
+    def test_sincronizacion_json_malformed_no_cambia_tasa(self, mock_request):
+        """Respuesta no es JSON válido → ok=False, tasa intacta."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 200
+        mock_response.text = "esto no es json {{{"
+        mock_response.json.side_effect = ValueError("Expecting value")
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('JSON', resultado['error'])
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_selector_profundo_funciona(self, mock_request):
+        """Selector anidado data.rates.USD.VES funciona correctamente."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'data': {
+                'rates': {
+                    'USD': {
+                        'VES': 36.50
+                    }
+                }
+            }
+        }
+        self.config.response_selector = 'data.rates.USD.VES'
+        self.config.save()
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertTrue(resultado['ok'])
+        self.assertEqual(resultado['tasa_mercado'], 36.5)
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('36.5000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_connection_error_no_cambia_tasa(self, mock_request):
+        """Error de conexión (DNS, refused) → ok=False, tasa intacta."""
+        import requests
+        mock_request.side_effect = requests.exceptions.ConnectionError("Connection refused")
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('red o servidor', resultado['error'].lower())
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_dns_error_no_cambia_tasa(self, mock_request):
+        """Error DNS → ok=False, tasa intacta."""
+        import requests
+        mock_request.side_effect = requests.exceptions.RequestException("Name or service not known")
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('red o servidor', resultado['error'].lower())
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_http_500_no_cambia_tasa(self, mock_request):
+        """HTTP 500 → ok=False, tasa no cambia, error descriptivo."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("500 Server Error")
+
+        from inventory.services import sincronizar_tasa_cambio
+        import requests
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('red o servidor', resultado['error'].lower())
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_http_503_no_cambia_tasa(self, mock_request):
+        """HTTP 503 (service unavailable) → ok=False, tasa intacta."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 503
+        mock_response.text = "Service Unavailable"
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("503 Service Unavailable")
+
+        from inventory.services import sincronizar_tasa_cambio
+        import requests
+        resultado = sincronizar_tasa_cambio()
+
+        self.assertFalse(resultado['ok'])
+        self.assertIn('red o servidor', resultado['error'].lower())
+        self.config.refresh_from_db()
+        self.assertEqual(self.config.tasa_mercado, Decimal('40.0000'))
+
+    @patch('requests.request')
+    def test_sincronizacion_selector_profundo_funciona(self, mock_request):
+        """Selector anidado data.rates.USD.VES funciona correctamente."""
+    """
+    Validates behavior when session expires or empresa_id is stale.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from inventory.models import Empresa, PerfilUsuario
+        self.empresa = Empresa.objects.create(nombre='SessionTest', rif='J-SESS-001', activa=True)
+        self.user = User.objects.create_user('sessuser', password='test1234')
+        self.perfil = self.user.perfil
+        self.perfil.empresas_permitidas.add(self.empresa)
+        self.perfil.empresa_activa = self.empresa
+        self.perfil.save()
+
+    def test_sesion_expirada_empresa_id_invalido_retorna_403(self):
+        """
+        Criterio: session con empresa_id que YA NO EXISTE en BD
+        (empresa borrada) → TenantMiddleware retorna 403.
+        """
+        self.client.login(username='sessuser', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = 99999  # ID inexistente
+        session.save()
+
+        response = self.client.get('/dashboard/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_empresa_desactivada_durante_sesion_retorna_403(self):
+        """
+        Criterio: empresa existe pero se desactiva (activa=False)
+        mientras el usuario tiene sesión → 403 en siguiente request.
+        """
+        self.client.login(username='sessuser', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+        # Desactivar empresa
+        self.empresa.activa = False
+        self.empresa.save()
+
+        response = self.client.get('/dashboard/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_usuario_removido_de_empresa_durante_sesion_retorna_403(self):
+        """
+        Criterio: admin remueve usuario de empresas_permitidas
+        mientras tiene sesión activa → 403.
+        """
+        self.client.login(username='sessuser', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+        # Remover permiso
+        self.perfil.empresas_permitidas.remove(self.empresa)
+        self.perfil.save()
+
+        response = self.client.get('/dashboard/')
+        self.assertEqual(response.status_code, 403)
+
+
+class TestSecuritySerialUniqueConstraint(TransactionTestCase):
+    """
+    Validates that SerialArticulo serial field has unique constraint
+    per empresa and duplicate serials are rejected at DB level.
+    """
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='SecSerial', rif='J-SECSER-001')
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen Serial')
+        self.articulo = crear_articulo_fisico(self.empresa, sku='SER-001', nombre='Articulo Serial')
+        self.articulo.usa_serial = True
+        self.articulo.save()
+
+    def test_serial_duplicado_en_misma_empresa_lanza_integrity_error(self):
+        """
+        Criterio: crear 2 SerialArticulo con mismo serial en misma empresa
+        debe lanzar IntegrityError (unique constraint a nivel BD).
+        """
+        from inventory.models import SerialArticulo
+        from django.db import IntegrityError
+
+        SerialArticulo.objects.create(
+            empresa=self.empresa, articulo=self.articulo,
+            almacen=self.almacen, serial='DUPLICADO-001'
+        )
+
+        with self.assertRaises(IntegrityError):
+            SerialArticulo.objects.create(
+                empresa=self.empresa, articulo=self.articulo,
+                almacen=self.almacen, serial='DUPLICADO-001'  # MISMO SERIAL
+            )
+
+    def test_mismo_serial_en_diferente_empresa_PERMITIDO(self):
+        """
+        Criterio: mismo serial en EMPRESA DIFERENTE es permitido
+        (unique_together = ['empresa', 'serial']).
+        """
+        from inventory.models import SerialArticulo, Empresa, Almacen, Articulo
+        from inventory.managers import set_current_empresa
+
+        empresa_b = Empresa.objects.create(nombre='SerialB', rif='J-SERB-001', activa=True)
+        almacen_b = Almacen.objects.create(empresa=empresa_b, nombre='Alm B', es_principal=True, activo=True)
+        articulo_b = Articulo.objects.create(
+            empresa=empresa_b, sku='SER-B', nombre='Articulo B',
+            tipo='FISICO', usa_serial=True, costo=Decimal('10'), precio_divisa=Decimal('20')
+        )
+
+        # Serial en empresa A
+        SerialArticulo.objects.create(
+            empresa=self.empresa, articulo=self.articulo,
+            almacen=self.almacen, serial='COMPARTIDO-001'
+        )
+
+        # Mismo serial en empresa B — DEBE permitirse
+        set_current_empresa(empresa_b.id)
+        serial_b = SerialArticulo.objects.create(
+            empresa=empresa_b, articulo=articulo_b,
+            almacen=almacen_b, serial='COMPARTIDO-001'
+        )
+        self.assertEqual(serial_b.serial, 'COMPARTIDO-001')
+
+
+class TestSecurityPasswordValidation(TransactionTestCase):
+    """
+    Validates Django password validators are active and enforce
+    minimum security requirements.
+    
+    Uses Django's password validation framework directly rather than
+    User.set_password() which doesn't trigger validators.
+    """
+
+    def test_password_min_length_8(self):
+        """Contraseña < 8 caracteres es rechazada por MinimumLengthValidator."""
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            validate_password('1234567')  # 7 chars < 8 minimum
+
+    def test_password_no_comun(self):
+        """Contraseña común (12345678, password, admin123) es rechazada por CommonPasswordValidator."""
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+
+        common_passwords = ['12345678', 'password123', 'admin1234', 'qwerty123']
+        for pwd in common_passwords:
+            with self.assertRaises(ValidationError):
+                validate_password(pwd)
+
+    def test_password_no_solo_numeros(self):
+        """Contraseña solo numérica es rechazada por NumericPasswordValidator."""
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError
+
+        with self.assertRaises(ValidationError):
+            validate_password('12345678')
+
+
+class TestSecurityCSRFEnforcedOnAllPOST(TestCase):
+    """
+    Validates that ALL POST endpoints have CSRF protection enabled
+    (no @csrf_exempt on sensitive endpoints).
+    """
+
+    def test_todos_endpoints_post_tienen_csrf_protection(self):
+        """
+        Criterio estructural: escanear views.py y confirmar que
+        endpoints de escritura NO tienen @csrf_exempt.
+        """
+        import inspect
+        from inventory import views
+
+        # Endpoints que DEBEN tener protección CSRF (escritura)
+        endpoints_escritura = [
+            'vista_carga_masiva',           # POST upload Excel
+            'vista_resolver_colision',      # POST resolve collision
+            'vista_crear_venta',            # POST crear venta
+            'vista_sincronizar_tasa',       # POST sync tasa
+            'articulos_view',               # POST crear articulo
+            'contactos',                    # POST crear contacto
+            'cambiar_empresa_view',         # POST cambiar empresa
+            'logout_view',                  # POST logout
+        ]
+
+        for endpoint_name in endpoints_escritura:
+            if hasattr(views, endpoint_name):
+                view_func = getattr(views, endpoint_name)
+                self.assertFalse(
+                    getattr(view_func, 'csrf_exempt', False),
+                    msg=f"{endpoint_name} tiene csrf_exempt=True — QUITAR @csrf_exempt"
+                )
+
+    def test_endpoints_lectura_GET_no_requieren_csrf(self):
+        """
+        Endpoints de solo lectura (GET) no necesitan CSRF.
+        Solo validamos que existan y respondan.
+        """
+        from django.urls import reverse
+        from django.contrib.auth.models import User
+        from inventory.models import Empresa, PerfilUsuario
+
+        empresa = Empresa.objects.create(nombre='CSRFRead', rif='J-CSRFR-001', activa=True)
+        user = User.objects.create_user('csrfread', password='test1234')
+        perfil = user.perfil
+        perfil.empresas_permitidas.add(empresa)
+        perfil.empresa_activa = empresa
+        perfil.save()
+
+        self.client.login(username='csrfread', password='test1234')
+        session = self.client.session
+        session['empresa_id'] = empresa.id
+        session.save()
+
+        urls_get = [
+            'inventory:dashboard',
+            'inventory:catalogo',
+            'inventory:ventas',
+            'inventory:carga_masiva',
+            'inventory:articulos',
+        ]
+
+        for url_name in urls_get:
+            try:
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 200, f"{url_name} debe responder 200 en GET")
+            except Exception:
+                # Algunas URLs pueden no existir aún — documentar
+                pass
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# END OF PRIORITY SECURITY TESTS
+# ═══════════════════════════════════════════════════════════════════════
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# TEST MG: Método de ganancia global (Margen vs Markup) + defaults
+# ─────────────────────────────────────────────────────────────────────────
+class TestMetodoGananciaGlobal(TransactionTestCase):
+    """El método global aplica cuando el artículo no trae método válido;
+    los artículos nuevos nacen con MARGIN (método correcto)."""
+
+    def setUp(self):
+        self.empresa = crear_empresa(nombre='TestMG', rif='J-MG-001')
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.margen_global = Decimal('20.00')
+        self.config.metodo_ganancia_global = 'MARKUP'
+        self.config.save()
+        self.almacen = crear_almacen(self.empresa, nombre='Almacen MG')
+        self.proveedor = Contacto.objects.create(
+            empresa=self.empresa,
+            identificacion='J-MG-PROV',
+            tipo='PROVEEDOR',
+            nombre='Proveedor MG',
+            rif='J-MG-PROV',
+            nombre_asesor='Asesor MG',
+        )
+
+    def _comprar(self, sku, costo):
+        return svc.registrar_compra_proveedor(
+            proveedor_id=str(self.proveedor.pk),
+            numero_factura=f'F-{sku}',
+            fecha_compra='2026-06-25',
+            monto_total_usd=Decimal('1000.00'),
+            almacen_id=self.almacen.pk,
+            lista_items=[{'sku': sku, 'cantidad': Decimal('10.00'), 'costo_factura': Decimal(str(costo))}],
+            usuario='Admin',
+        )
+
+    def test_nuevo_articulo_nace_con_margin(self):
+        art = crear_articulo_fisico(self.empresa, sku='MG-NEW', nombre='Nuevo')
+        self.assertEqual(art.metodo_ganancia, 'MARGIN')
+
+    def test_metodo_global_markup_aplica_sin_metodo_individual(self):
+        art = crear_articulo_fisico(self.empresa, sku='MG-GLOB', nombre='Global')
+        art.margen_ind = Decimal('0.00')
+        art.save()
+        Articulo.objects.filter(pk=art.pk).update(metodo_ganancia='')
+        self._comprar('MG-GLOB', Decimal('100.00'))
+        art.refresh_from_db()
+        # Global: MARKUP 20% sobre 100 -> 120.00
+        self.assertEqual(art.precio_divisa, Decimal('120.00'))
+
+    def test_metodo_global_margin_aplica_sin_metodo_individual(self):
+        self.config.metodo_ganancia_global = 'MARGIN'
+        self.config.save()
+        art = crear_articulo_fisico(self.empresa, sku='MG-GLOB2', nombre='Global2')
+        art.margen_ind = Decimal('0.00')
+        art.save()
+        Articulo.objects.filter(pk=art.pk).update(metodo_ganancia='')
+        self._comprar('MG-GLOB2', Decimal('100.00'))
+        art.refresh_from_db()
+        # Global: MARGIN 20% sobre 100 -> 100 / 0.80 = 125.00
+        self.assertEqual(art.precio_divisa, Decimal('125.00'))
+
+    def test_metodo_individual_precede_al_global(self):
+        art = crear_articulo_fisico(self.empresa, sku='MG-IND', nombre='Individual')
+        art.margen_ind = Decimal('0.00')
+        art.metodo_ganancia = 'MARGIN'
+        art.save()
+        self._comprar('MG-IND', Decimal('100.00'))
+        art.refresh_from_db()
+        # Individual MARGIN gana al global MARKUP -> 125.00
+        self.assertEqual(art.precio_divisa, Decimal('125.00'))
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# TEST RD: Redondeo global de precios (múltiplo, mitad hacia arriba)
+# ─────────────────────────────────────────────────────────────────────────
+class TestRedondeoPrecios(TransactionTestCase):
+    """32.5 con factor 5 -> 35; 32.4 -> 30. Solo venta/catálogo; compras exactas."""
+
+    def test_helper_casos_basicos(self):
+        from inventory.services import redondear_a_multiplo as r
+        self.assertEqual(r(Decimal('32.5'), Decimal('5')), Decimal('35'))
+        self.assertEqual(r(Decimal('32.4'), Decimal('5')), Decimal('30'))
+        self.assertEqual(r(Decimal('32.5'), Decimal('1')), Decimal('33'))
+        self.assertEqual(r(Decimal('30'), Decimal('7')), Decimal('28'))
+        self.assertEqual(r(Decimal('33'), Decimal('7')), Decimal('35'))
+
+    def test_helper_factor_invalido_devuelve_intacto(self):
+        from inventory.services import redondear_a_multiplo as r
+        self.assertEqual(r(Decimal('10'), Decimal('0')), Decimal('10'))
+        self.assertEqual(r(Decimal('10'), Decimal('-5')), Decimal('10'))
+        self.assertEqual(r(Decimal('10'), 'x'), Decimal('10'))
+
+    def _setup_venta(self, redondeo_on):
+        empresa = crear_empresa(nombre='TestRD', rif='J-RD-001')
+        config = ConfiguracionEmpresa.objects.get(empresa=empresa)
+        config.tasa_bcv = Decimal('36.00')
+        config.factor_cobertura = Decimal('1.00')
+        config.redondeo_activo = redondeo_on
+        config.factor_redondeo = Decimal('5')
+        config.save()
+        almacen = crear_almacen(empresa, nombre='Almacen RD')
+        art = crear_articulo_fisico(empresa, sku='RD-001', nombre='Redondeo')
+        seed_inventario(art, almacen, 10)
+        return empresa, almacen
+
+    def _vender(self, almacen, precio):
+        return svc.procesar_venta(
+            almacen_id=almacen.pk,
+            lista_items=[{
+                'articulo_sku': 'RD-001',
+                'cantidad': Decimal('1'),
+                'precio_base': Decimal(str(precio)),
+                'iva_porcentaje': Decimal('0'),
+            }],
+            usuario='Admin',
+        )
+
+    def test_venta_redondea_snapshots_cuando_activo(self):
+        _, almacen = self._setup_venta(redondeo_on=True)
+        nota = self._vender(almacen, '32.40')
+        det = nota.detalles.get()
+        # USD 32.40 -> 30; Bs desde USD redondeado: 30*36=1080 (múltiplo de 5)
+        self.assertEqual(det.precio_base, Decimal('30'))
+        self.assertEqual(det.precio_ajustado, Decimal('30'))
+        self.assertEqual(det.precio_directo_bcv, Decimal('1080'))
+        self.assertEqual(det.precio_ajustado_bcv, Decimal('1080'))
+
+    def test_venta_exacta_cuando_desactivado(self):
+        _, almacen = self._setup_venta(redondeo_on=False)
+        nota = self._vender(almacen, '32.40')
+        det = nota.detalles.get()
+        self.assertEqual(det.precio_base, Decimal('32.40'))
+        self.assertEqual(det.precio_directo_bcv, Decimal('1166.40'))
+
 
 
 

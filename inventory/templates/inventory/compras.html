@@ -1,6 +1,6 @@
 {% extends 'inventory/base.html' %}
 {% block content %}
-<section id="tab-compras" class="tab-content space-y-6"><div class="flex justify-between items-center">
+<section id="tab-compras" class="tab-content space-y-6"><div class="flex justify-between items-center flex-wrap gap-3">
                     <div>
                         <h2 class="text-xl font-bold text-slate-900 dark:text-white">Recepción de Facturas de Compra</h2>
                         <p class="text-xs text-slate-500 dark:text-slate-400">Genera controles de entrada rápidos y
@@ -8,7 +8,7 @@
                     </div>
                     <a href="{% url 'inventory:listado_compras' %}"
                        class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs py-2 px-4 rounded-lg transition flex items-center gap-2 shadow-sm">
-                        <i class="fa-solid fa-clock-rotate-left text-amber-500"></i> Ver Histórico
+                        <i class="bi bi-clock-history text-amber-500" aria-hidden="true"></i> Ver Histórico
                     </a>
                 </div>
 
@@ -17,20 +17,20 @@
                     <div
                         class="xl:col-span-2 bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3 shadow-sm">
                         <div
-                            class="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+                            class="flex justify-between items-center flex-wrap gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
                             <h3
                                 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-truck-ramp-box text-indigo-500"></i> Agregar Artículos a la Compra
+                                <i class="bi bi-truck-front-fill text-indigo-500" aria-hidden="true"></i> Agregar Artículos a la Compra
                             </h3>
                             <span class="text-[10px] text-slate-400">Paso 1: Agrega items y cantidades</span>
                         </div>
 
                         <!-- AGREGAR ITEM FORM (Buscador Altamente Eficiente) -->
                         <div
-                            class="grid grid-cols-2 md:grid-cols-12 gap-2 items-end bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-850">
+                            class="grid grid-cols-2 md:grid-cols-[repeat(15,minmax(0,1fr))] gap-2 items-end bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-850">
 
                             <!-- Searchable input dropdown container -->
-                            <div class="md:col-span-5 relative" id="searchable-purchase-item-container">
+                            <div class="col-span-2 md:col-span-6 relative" id="searchable-purchase-item-container">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Buscar
                                     y Seleccionar Artículo</label>
@@ -39,9 +39,9 @@
                                         onfocus="showPurchaseItemDropdown()" type="text"
                                         placeholder="Escribe SKU o nombre del producto..."
                                         class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 pr-8 font-medium">
-                                    <button onclick="clearPurchaseSearch()"
-                                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
-                                        <i class="fa-solid fa-circle-xmark"></i>
+                                    <button onclick="clearPurchaseSearch()" aria-label="Limpiar búsqueda de artículo"
+                                        class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs p-1.5 rounded-md">
+                                        <i class="bi bi-x-circle-fill" aria-hidden="true"></i>
                                     </button>
                                 </div>
                                 <input type="hidden" id="purchase-item-selected-sku" value="">
@@ -53,7 +53,7 @@
                                 </div>
                             </div>
 
-                            <div class="md:col-span-2">
+                            <div class="md:col-span-3">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Almacén
                                     Destino</label>
@@ -76,15 +76,15 @@
                                 <input id="purchase-item-cost" type="number" min="0" step="0.01" value="0.00"
                                     class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
-                            <div class="md:col-span-2">
+                            <div class="md:col-span-1">
                                 <label
                                     class="text-[10px] text-slate-500 dark:text-slate-400 block mb-0.5 uppercase font-bold">Desc. Item (%)</label>
                                 <input id="purchase-item-discount" type="number" min="0" max="100" step="0.01" value="0.00"
                                     class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md py-1.5 px-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-center font-bold">
                             </div>
-                            <div class="md:col-span-12"><button onclick="addItemToPurchase()"
-                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-1.5 rounded-md transition flex items-center justify-center gap-1.5 shadow">
-                                    <i class="fa-solid fa-plus"></i> Añadir Artículo
+                            <div class="col-span-2 md:col-span-2"><button onclick="addItemToPurchase()"
+                                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-1.5 px-2 rounded-md transition flex items-center justify-center gap-1.5 shadow whitespace-nowrap">
+                                    <i class="bi bi-plus" aria-hidden="true"></i> Añadir Artículo
                                 </button></div>
                         </div>
 
@@ -112,7 +112,7 @@
                                         <td colspan="9"
                                             class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
                                             <i
-                                                class="fa-solid fa-truck-ramp-box text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                                                class="bi bi-truck-front-fill text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
                                             Aún no has agregado artículos a esta factura de compra.
                                         </td>
                                     </tr>
@@ -127,7 +127,7 @@
                         <div class="pb-2 border-b border-slate-100 dark:border-slate-800">
                             <h3
                                 class="font-bold text-slate-800 dark:text-slate-200 text-xs uppercase tracking-wider flex items-center gap-2">
-                                <i class="fa-solid fa-receipt text-indigo-500"></i> Resumen de Factura y Proveedor
+                                <i class="bi bi-clipboard2-check-fill text-indigo-500" aria-hidden="true"></i> Resumen de Factura y Proveedor
                             </h3>
                         </div>
 
@@ -141,9 +141,9 @@
                                         <input id="provider-search-input" oninput="filterProviderDropdown()" onfocus="showProviderDropdown()" type="text"
                                             placeholder="Buscar proveedor por nombre o RIF..."
                                             class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-2 text-xs text-slate-900 dark:text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold pr-8">
-                                        <button onclick="clearProviderSearch()"
-                                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs">
-                                            <i class="fa-solid fa-circle-xmark"></i>
+                                        <button onclick="clearProviderSearch()" aria-label="Limpiar búsqueda de proveedor"
+                                            class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xs p-1.5 rounded-md">
+                                        <i class="bi bi-x-circle-fill" aria-hidden="true"></i>
                                         </button>
                                         <div id="provider-dropdown"
                                             class="hidden absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg shadow-xl z-50 divide-y divide-slate-100 dark:divide-slate-800">
@@ -154,7 +154,7 @@
                                 <button onclick="openContactModal('PROVEEDOR')"
                                     class="mt-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/30 text-[10px] font-bold px-2.5 py-2 rounded-xl transition whitespace-nowrap"
                                     title="Registrar Nuevo Proveedor">
-                                    <i class="fa-solid fa-plus mr-1"></i> Nuevo
+                                    <i class="bi bi-plus mr-1" aria-hidden="true"></i> Nuevo
                                 </button>
                             </div>
 
@@ -164,8 +164,8 @@
                                     <span id="provider-card-id" class="font-mono text-[10px] text-slate-500 dark:text-slate-400"></span>
                                 </div>
                                 <div class="flex gap-4 text-[10px] text-slate-600 dark:text-slate-400">
-                                    <span><i class="fa-solid fa-phone mr-1"></i><span id="provider-card-phone">--</span></span>
-                                    <span><i class="fa-solid fa-location-dot mr-1"></i><span id="provider-card-address">--</span></span>
+                                    <span><i class="bi bi-telephone-fill mr-1" aria-hidden="true"></i><span id="provider-card-phone">--</span></span>
+                                    <span><i class="bi bi-geo-alt-fill mr-1" aria-hidden="true"></i><span id="provider-card-address">--</span></span>
                                 </div>
                             </div>
 
@@ -275,7 +275,7 @@
 
                             <button onclick="processPurchase()" id="confirm-purchase-btn"
                                 class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20">
-                                <i class="fa-solid fa-file-invoice"></i> Confirmar y Registrar Compra
+                                <i class="bi bi-file-earmark-check-fill" aria-hidden="true"></i> Confirmar y Registrar Compra
                             </button>
                         </div>
                     </div>
@@ -552,7 +552,7 @@
             tbody.innerHTML = `
                 <tr id="empty-purchase-row">
                     <td colspan="9" class="py-8 text-center text-slate-400 dark:text-slate-500 text-xs">
-                        <i class="fa-solid fa-truck-ramp-box text-2xl mb-2 block text-slate-300 dark:text-slate-700"></i>
+                        <i class="bi bi-truck-front-fill text-2xl mb-2 block text-slate-300 dark:text-slate-700" aria-hidden="true"></i>
                         Aún no has agregado artículos a esta factura de compra.
                     </td>
                 </tr>
@@ -585,8 +585,8 @@
                 </td>
                 <td class="py-2 px-2 text-right text-emerald-600 dark:text-emerald-400 font-bold">$${itemTotal.toFixed(2)}</td>
                 <td class="py-2 px-2 text-center">
-                    <button onclick="removePurchaseItem(${index})" class="text-rose-600 hover:text-rose-500 transition text-sm">
-                        <i class="fa-solid fa-trash"></i>
+                    <button onclick="removePurchaseItem(${index})" aria-label="Quitar artículo de la compra" class="text-rose-600 hover:text-rose-500 transition text-sm p-1 rounded-md">
+                        <i class="bi bi-trash-fill" aria-hidden="true"></i>
                     </button>
                 </td>
             `;
@@ -604,7 +604,7 @@
                 serialRow.innerHTML = `
                     <td colspan="9" class="py-2 px-3">
                         <div class="flex items-center gap-2">
-                            <i class="fa-solid fa-barcode text-amber-500 text-xs"></i>
+                            <i class="bi bi-upc-scan text-amber-500 text-xs" aria-hidden="true"></i>
                             <label class="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">Seriales</label>
                             <span id="serial-counter-${index}" class="text-[10px] font-bold px-2 py-0.5 rounded ${counterClass}">${parsedNow.length}/${item.qty}</span>
                             <input id="serial-input-${index}" type="text"
@@ -751,7 +751,7 @@
         const confirmBtn = document.getElementById('confirm-purchase-btn');
         const originalHtml = confirmBtn.innerHTML;
         confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Procesando...';
+        confirmBtn.innerHTML = '<i class="bi bi-arrow-repeat animate-spin inline-block" aria-hidden="true"></i> Procesando...';
 
         fetch('/compras/registrar/', {
             method: 'POST',
