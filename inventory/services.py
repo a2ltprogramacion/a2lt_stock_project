@@ -318,7 +318,7 @@ def procesar_salida_combo(
     de forma atómica en el inventario del almacén indicado.
 
     El flujo es:
-    1. Verifica que el combo tiene stock suficiente (calcular_stock_combo ≥ cantidad_combos).
+    1. Verifica que el combo tiene stock suficiente (calcular_stock_combo >= cantidad_combos).
     2. Para cada componente en la receta, calcula la cantidad a descontar:
            cantidad_a_descontar = cantidad_requerida_en_receta × cantidad_combos
     3. Llama a registrar_movimiento() para cada componente dentro del mismo bloque
@@ -614,7 +614,7 @@ def procesar_carga_masiva(
                     raise ValueError("valor negativo")
             except (InvalidOperation, ValueError):
                 raise ValueError(
-                    f"Costo inválido: '{costo_raw}'. Debe ser un número ≥ 0."
+                    f"Costo inválido: '{costo_raw}'. Debe ser un número >= 0."
                 )
 
             # ── Parseo numérico: Cantidad (opcional, default 0) ──────────────
@@ -627,7 +627,7 @@ def procesar_carga_masiva(
                         raise ValueError("valor negativo")
                 except (InvalidOperation, ValueError):
                     raise ValueError(
-                        f"Cantidad inválida: '{cantidad_raw}'. Debe ser un número ≥ 0 o estar vacío."
+                        f"Cantidad inválida: '{cantidad_raw}'. Debe ser un número >= 0 o estar vacío."
                     )
 
             # ── Parseo numérico: Precio_Divisa (opcional) ────────────────────
@@ -639,7 +639,7 @@ def procesar_carga_masiva(
                         raise ValueError("valor negativo")
                 except (InvalidOperation, ValueError):
                     raise ValueError(
-                        f"Precio_Divisa inválido: '{precio_raw}'. Debe ser un número ≥ 0 o estar vacío."
+                        f"Precio_Divisa inválido: '{precio_raw}'. Debe ser un número >= 0 o estar vacío."
                     )
 
             # ── Resolución de almacén (col F override) ───────────────────────
@@ -897,7 +897,7 @@ def procesar_carga_masiva_excel(file_io, empresa_id, usuario=''):
                         raise ValueError("negativo")
                 except (InvalidOperation, ValueError):
                     raise ValueError(
-                        f"Fila {fila_num} [{sku}]: Costo inválido '{costo_raw}'. Debe ser un número ≥ 0."
+                        f"Fila {fila_num} [{sku}]: Costo inválido '{costo_raw}'. Debe ser un número >= 0."
                     )
 
                 if cantidad_raw is None or str(cantidad_raw).strip() == '':
@@ -1572,7 +1572,10 @@ def sincronizar_tasa_cambio() -> dict:
     _empresa_id = get_current_empresa()
     if _empresa_id is None:
         return {'ok': False, 'error': 'No se pudo determinar la empresa activa para sincronizar tasas.'}
-    config = ConfiguracionEmpresa.global_objects.get(empresa_id=_empresa_id)
+    try:
+        config = ConfiguracionEmpresa.global_objects.get(empresa_id=_empresa_id)
+    except ConfiguracionEmpresa.DoesNotExist:
+        return {'ok': False, 'error': 'Configuración de empresa no encontrada.'}
 
     if not config.api_url:
         return {'ok': False, 'error': "La URL de la API no está configurada en el sistema."}
@@ -2519,7 +2522,7 @@ def procesar_devolucion_venta(
                 })
                 logger.warning(
                     "[NC VENTA] %s sobre %s: stock SIGUE NEGATIVO después de la "
-                    "devolución: %s @ %s = %s (devuelto: %s). "
+                    "devolución: %s @ %s = (devuelto: %s). "
                     "El producto físico no alcanza para cubrir el faltante original.",
                     nc.numero_control,
                     detalle.articulo.sku,
