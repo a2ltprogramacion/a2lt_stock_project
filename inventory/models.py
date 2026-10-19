@@ -23,7 +23,7 @@ dentro de un bloque @transaction.atomic (implementado en services.py).
 """
 from decimal import Decimal
 
-from django.db import models
+from django.db import models, transaction
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
@@ -2106,17 +2106,32 @@ class Moneda(models.Model):
         verbose_name_plural = 'Monedas'
         unique_together = [('empresa', 'codigo')]
         ordering = ['es_base', 'codigo']
+        constraints = [
+            # DATA-09: como máximo UNA moneda base por empresa, garantizado por
+            # la BD (realce sobre la race condition de save()).
+            models.UniqueConstraint(
+                fields=['empresa'],
+                condition=models.Q(es_base=True),
+                name='una_moneda_base_por_empresa',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.codigo} ({self.simbolo})"
 
     def save(self, *args, **kwargs):
-        # Garantizar que solo haya UNA moneda es_base=True por tenant.
-        if self.es_base:
-            qs = Moneda.objects.filter(
-                empresa=self.empresa, es_base=True
-            ).exclude(pk=self.pk)
-            qs.update(es_base=False)
+        # DATA-09: el "desmarque" de la base anterior se conserva para mantener
+        # la UX (promover una moneda no exige bajar la anterior a mano), pero se
+        # hace dentro de una transacción y SIN filtro de tenant (global_objects):
+        # el manager por defecto devuelve .none() fuera de una request y el
+        # update no se aplicaría, violando el UniqueConstraint.
+        if self.es_base and self.empresa_id:
+            with transaction.atomic():
+                Moneda.global_objects.filter(
+                    empresa_id=self.empresa_id, es_base=True
+                ).exclude(pk=self.pk).update(es_base=False)
+                super().save(*args, **kwargs)
+            return
         super().save(*args, **kwargs)
 
 
