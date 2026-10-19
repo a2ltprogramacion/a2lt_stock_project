@@ -23,9 +23,15 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. Seguridad: SECRET_KEY con fallback explicito
+# 1. Seguridad: SECRET_KEY obligatoria desde variable de entorno
 # ─────────────────────────────────────────────────────────────────────────────
-SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-insecure-key-change-in-prod')
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        'SECRET_KEY no definida en variables de entorno. '
+        'Generar con: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. DEBUG desde env (default False). Para desarrollo local usar DEBUG=True.
