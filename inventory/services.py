@@ -2522,13 +2522,14 @@ def procesar_devolucion_venta(
                 })
                 logger.warning(
                     "[NC VENTA] %s sobre %s: stock SIGUE NEGATIVO después de la "
-                    "devolución: %s @ %s = (devuelto: %s). "
+                    "devolución: %s @ %s = %s (devuelto: %s). "
                     "El producto físico no alcanza para cubrir el faltante original.",
                     nc.numero_control,
                     detalle.articulo.sku,
                     detalle.almacen.nombre,
                     saldo_post,
                     cantidad_devolver,
+                    detalle.cantidad,
                 )
 
             # 7. Liberar seriales FIFO (estado VENDIDO → DISPONIBLE).
