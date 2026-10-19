@@ -327,6 +327,62 @@ class ConfiguracionEmpresa(models.Model):
 
 
 
+class Correlativo(models.Model):
+    """
+    Contador atómico de correlativos por empresa y tipo de documento (EST-03).
+
+    SQLite no implementa ``SELECT ... FOR UPDATE``
+    (``has_select_for_update=False``): Django ignora la cláusula sin error, por
+    lo que el lock de fila NO protege en el backend real. La corrección se
+    garantiza con:
+        1. ``UniqueConstraint(fields=['empresa','tipo_documento'])`` aquí, y los
+           constraints de unicidad del número en cada documento, más
+        2. el bucle de reintento ante ``IntegrityError`` de
+           ``inventory.correlativos.guardar_con_reintento``.
+
+    Esta tabla es de infraestructura: su manager por defecto es un
+    ``models.Manager()`` SIN filtro de tenant. Si usara ``EmpresaManager``
+    devolvería ``.none()`` fuera de una request (trampa conocida), por lo que
+    se evita deliberadamente.
+    """
+    TIPO_NOTA_ENTREGA = 'NOTA_ENTREGA'
+    TIPO_FACTURA_COMPRA = 'FACTURA_COMPRA'
+    TIPO_NOTA_CREDITO = 'NOTA_CREDITO'
+    TIPO_CHOICES = [
+        (TIPO_NOTA_ENTREGA, 'Nota de Entrega'),
+        (TIPO_FACTURA_COMPRA, 'Factura de Compra'),
+        (TIPO_NOTA_CREDITO, 'Nota de Crédito'),
+    ]
+
+    empresa = models.ForeignKey(
+        'Empresa', on_delete=models.CASCADE, related_name='correlativos',
+        verbose_name='Empresa'
+    )
+    tipo_documento = models.CharField(
+        max_length=20, choices=TIPO_CHOICES, verbose_name='Tipo de documento'
+    )
+    ultimo_numero = models.PositiveIntegerField(
+        default=0, verbose_name='Último número emitido'
+    )
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    # Manager SIN filtro de tenant (ver docstring de la clase).
+    objects = models.Manager()
+
+    class Meta:
+        verbose_name = 'Correlativo'
+        verbose_name_plural = '14. Correlativos'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'tipo_documento'],
+                name='unique_correlativo_por_empresa_tipo',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.get_tipo_documento_display()} de {self.empresa_id}: {self.ultimo_numero}'
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1B. PERFIL DE USUARIO Y CONTROL DE ACCESO (RBAC)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -952,6 +1008,14 @@ class DocumentoCompra(models.Model):
                 condition=models.Q(numero_interno__gt=''),
                 name='unique_numero_interno_compra_per_empresa'
             ),
+            # EST-03: `numero` tiene default=0, así que varias filas "vacías"
+            # (numero=0) chocarían entre sí si no se condiciona a numero>0.
+            # El condition hace la unicidad efectiva sólo para correlativos reales.
+            models.UniqueConstraint(
+                fields=['empresa', 'numero'],
+                condition=models.Q(numero__gt=0),
+                name='unique_numero_compra_per_empresa'
+            ),
         ]
 
     def __str__(self):
@@ -960,35 +1024,29 @@ class DocumentoCompra(models.Model):
     def save(self, *args, **kwargs):
         """
         Auto-genera:
-          - numero: correlativo entero por empresa (respetando correlativo_inicial_factura_compra)
+          - numero: correlativo entero por empresa (EST-03: vía
+            inventory.correlativos, con unique constraint + reintento).
           - numero_interno: formato {prefijo}-{numero:08d} (ej: FC-00000008)
         Sólo si no vienen ya poblados (permite override para casos especiales).
         """
+        # Persistencia interna del servicio de correlativos: evita recursión.
+        if kwargs.pop('_correlativo_gestionado', False):
+            return super().save(*args, **kwargs)
+
         if not self.numero:
-            from django.db.models import Max
-            from .models import DocumentoCompra
-            max_num = DocumentoCompra.global_objects.filter(
-                empresa=self.empresa
-            ).aggregate(max_num=Max('numero'))['max_num']
-            try:
-                inicial = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).correlativo_inicial_factura_compra
-            except ConfiguracionEmpresa.DoesNotExist:
-                inicial = 1
-            if max_num:
-                self.numero = max_num + 1
-            else:
-                self.numero = max(inicial, 1)
+            from .correlativos import TIPO_FACTURA_COMPRA, guardar_con_reintento
+            return guardar_con_reintento(
+                self, TIPO_FACTURA_COMPRA,
+                obtener_prefijo=self._prefijo_correlativo,
+            )
         if not self.numero_interno:
-            try:
-                prefijo = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).prefijo_factura_compra
-            except ConfiguracionEmpresa.DoesNotExist:
-                prefijo = 'FC'
-            self.numero_interno = f'{prefijo}-{self.numero:08d}'
+            self.numero_interno = f'{self._prefijo_correlativo()}-{self.numero:08d}'
         super().save(*args, **kwargs)
+
+    def _prefijo_correlativo(self):
+        """Prefijo configurado para el correlativo (tenant-safe)."""
+        from .correlativos import TIPO_FACTURA_COMPRA, leer_prefijo
+        return leer_prefijo(self.empresa_id, TIPO_FACTURA_COMPRA)
 
     @property
     def subtotal_usd(self):
@@ -1458,35 +1516,29 @@ class NotaEntrega(models.Model):
     def save(self, *args, **kwargs):
         """
         Auto-genera:
-          - numero: correlativo entero por empresa (respetando correlativo_inicial_nota)
+          - numero: correlativo entero por empresa (EST-03: vía
+            inventory.correlativos, con unique constraint + reintento).
           - numero_nota: formato {prefijo}-{numero:08d} (ej: NE-00000008)
         Sólo si no vienen ya poblados (permite override para casos especiales).
         """
+        # Persistencia interna del servicio de correlativos: evita recursión.
+        if kwargs.pop('_correlativo_gestionado', False):
+            return super().save(*args, **kwargs)
+
         if not self.numero:
-            from django.db.models import Max
-            max_num = NotaEntrega.global_objects.filter(
-                empresa=self.empresa
-            ).aggregate(max_num=Max('numero'))['max_num']
-            # Arrancar desde correlativo_inicial_nota configurado, o 1 si no hay config
-            try:
-                inicial = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).correlativo_inicial_nota
-            except ConfiguracionEmpresa.DoesNotExist:
-                inicial = 1
-            if max_num:
-                self.numero = max_num + 1
-            else:
-                self.numero = max(inicial, 1)
+            from .correlativos import TIPO_NOTA_ENTREGA, guardar_con_reintento
+            return guardar_con_reintento(
+                self, TIPO_NOTA_ENTREGA,
+                obtener_prefijo=self._prefijo_correlativo,
+            )
         if not self.numero_nota:
-            try:
-                prefijo = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).prefijo_nota_entrega
-            except ConfiguracionEmpresa.DoesNotExist:
-                prefijo = 'NE'
-            self.numero_nota = f'{prefijo}-{self.numero:08d}'
+            self.numero_nota = f'{self._prefijo_correlativo()}-{self.numero:08d}'
         super().save(*args, **kwargs)
+
+    def _prefijo_correlativo(self):
+        """Prefijo configurado para el correlativo de notas (tenant-safe)."""
+        from .correlativos import TIPO_NOTA_ENTREGA, leer_prefijo
+        return leer_prefijo(self.empresa_id, TIPO_NOTA_ENTREGA)
 
     @property
     def subtotal_usd(self):
@@ -1841,6 +1893,19 @@ class NotaCredito(models.Model):
                 ),
                 name='nota_credito_un_origen_exacto',
             ),
+            # EST-03: `numero`/`numero_control` admiten valores "vacíos"
+            # (default=0 y ''). Sin `condition`, todas las filas vacías
+            # colisionarían entre sí al no haber correlativo asignado todavía.
+            models.UniqueConstraint(
+                fields=['empresa', 'numero'],
+                condition=models.Q(numero__gt=0),
+                name='unique_numero_nc_per_empresa',
+            ),
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_control'],
+                condition=~models.Q(numero_control=''),
+                name='unique_numero_control_nc_per_empresa',
+            ),
         ]
 
     def __str__(self):
@@ -1849,43 +1914,40 @@ class NotaCredito(models.Model):
     def save(self, *args, **kwargs):
         """
         Genera automáticamente `numero` y `numero_control` en save() si no están.
-        Misma mecánica que NotaEntrega y DocumentoCompra:
-        - numero = Max('numero')+1 dentro de la empresa (inicia en
+        EST-03: delega en inventory.correlativos (unique constraint + reintento)
+        en lugar de calcular el Max inline.
+        - numero = siguiente correlativo por empresa (inicia en
           ConfiguracionEmpresa.correlativo_inicial_nota_credito).
         - numero_control = f"{prefijo}-{numero:08d}".
         - prefijo se lee de ConfiguracionEmpresa si está vacío.
         """
+        # Persistencia interna del servicio de correlativos: evita recursión.
+        if kwargs.pop('_correlativo_gestionado', False):
+            return super().save(*args, **kwargs)
+
         if not self.numero or self.numero == 0:
-            self.numero = NotaCredito._next_correlativo(self.empresa_id)
+            from .correlativos import TIPO_NOTA_CREDITO, guardar_con_reintento
+            return guardar_con_reintento(
+                self, TIPO_NOTA_CREDITO,
+                obtener_prefijo=self._prefijo_correlativo,
+            )
         # Prefijo: si no viene, leerlo de la config del tenant.
         if not self.prefijo:
-            try:
-                from .models import ConfiguracionEmpresa
-                config = ConfiguracionEmpresa.global_objects.get(
-                    empresa_id=self.empresa_id
-                )
-                self.prefijo = config.prefijo_nota_credito or 'NC'
-            except Exception:
-                self.prefijo = 'NC'
+            self.prefijo = self._prefijo_correlativo()
         if not self.numero_control:
             self.numero_control = f"{self.prefijo}-{self.numero:08d}"
         super().save(*args, **kwargs)
 
+    def _prefijo_correlativo(self):
+        """Prefijo configurado para el correlativo de NC (tenant-safe)."""
+        from .correlativos import TIPO_NOTA_CREDITO, leer_prefijo
+        return leer_prefijo(self.empresa_id, TIPO_NOTA_CREDITO)
+
     @staticmethod
     def _next_correlativo(empresa_id):
-        """Siguiente correlativo por empresa. Usa correlativo_inicial si no hay previas."""
-        from django.db.models import Max
-        try:
-            from .models import ConfiguracionEmpresa
-            config = ConfiguracionEmpresa.objects.get(empresa_id=empresa_id)
-            base = max(1, int(config.correlativo_inicial_nota_credito or 1))
-        except Exception:
-            base = 1
-        max_actual = NotaCredito.global_objects.filter(empresa_id=empresa_id).aggregate(
-            m=Max('numero')
-        )['m'] or 0
-        siguiente = max(int(max_actual) + 1, base)
-        return siguiente
+        """Deprecado: delega en el servicio de correlativos (EST-03)."""
+        from .correlativos import TIPO_NOTA_CREDITO, siguiente_numero
+        return siguiente_numero(empresa_id, TIPO_NOTA_CREDITO)
 
 
 class DetalleNotaCredito(models.Model):
