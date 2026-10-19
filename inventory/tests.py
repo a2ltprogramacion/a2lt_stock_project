@@ -3179,10 +3179,10 @@ class TestVistaCrearVentaCSRF(TestCase):
         with open(ventas_path, encoding='utf-8') as f:
             html = f.read()
 
-        # csrf_token disponible (getCookie global, A6)
+        # csrf_token disponible (SEC-02: getCsrfToken global lee el <meta csrf-token>)
         self.assertIn(
-            "getCookie('csrftoken')", html,
-            msg="ventas.html debe invocar getCookie('csrftoken') para obtener el CSRF token"
+            "getCsrfToken()", html,
+            msg="ventas.html debe invocar getCsrfToken() para obtener el CSRF token"
         )
         # csrf_header en el fetch POST
         # el regex busca: 'X-CSRFToken': csrftoken  o  'X-CSRFToken': getCookie('csrftoken')
@@ -4675,11 +4675,11 @@ class TestRegistrarAsientoManualKardex(TransactionTestCase):
         )
         # CSRF
         self.assertIn(
-            "X-CSRFToken': getCookie('csrftoken')",
+            "X-CSRFToken': getCsrfToken()",
             html,
             msg=(
-                "movimientos.html debe enviar X-CSRFToken (getCookie global "
-                "desde A6)."
+                "movimientos.html debe enviar X-CSRFToken (SEC-02: getCsrfToken "
+                "global lee el <meta csrf-token>)."
             )
         )
 
@@ -8140,8 +8140,8 @@ class TestNotasCreditoUI(TransactionTestCase):
         # CSRF header enviado en fetch crear:
         self.assertRegex(
             html,
-            r"X-CSRFToken.*getCookie",
-            msg='notas_credito.html debe enviar X-CSRFToken via getCookie en submitNC'
+            r"X-CSRFToken.*getCsrfToken",
+            msg='notas_credito.html debe enviar X-CSRFToken via getCsrfToken en submitNC'
         )
 
     def test_template_detalle_nc_muestra_origen_y_estado(self):

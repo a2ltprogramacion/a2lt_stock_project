@@ -5,6 +5,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- SEC-02: token CSRF expuesto al JS (cookie HttpOnly no es legible). -->
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <script>
+        // SEC-02: obtiene el token CSRF desde el DOM (la cookie es HttpOnly).
+        // Se define en <head> (no al final del body) para que este disponible
+        // ANTES de los scripts de contenido que lo invocan durante su carga de
+        // nivel superior (ventas.html / compras.html: const csrftoken).
+        function getCsrfToken() {
+            const meta = document.querySelector('meta[name="csrf-token"]');
+            return meta ? meta.getAttribute('content') : '';
+        }
+    </script>
     <title>A2LT Stock - Sistema de Control y Social Selling</title>
     <link rel="icon" type="image/svg+xml" href="{% static 'inventory/img/favicon.svg' %}">
     <!-- Tailwind CSS CDN -->

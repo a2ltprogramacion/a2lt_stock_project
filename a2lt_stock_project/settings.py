@@ -243,7 +243,9 @@ LOGGING = {
 # 10. CSP / Cookies
 # ─────────────────────────────────────────────────────────────────────────────
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = False  # False para que JS (getCookie) pueda leerlo via A6
+# SEC-02: la cookie CSRF no debe ser legible por JS (mitiga robo de token vía XSS).
+# El token se expone al frontend mediante <meta name="csrf-token"> en base.html.
+CSRF_COOKIE_HTTPONLY = True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
