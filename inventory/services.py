@@ -302,6 +302,71 @@ def calcular_stock_combo(combo: Articulo, almacen: Almacen) -> int:
     return min(stocks_posibles) if stocks_posibles else 0
 
 
+def calcular_stock_combo_desde_inventario(receta, almacen_ids, inventario_index) -> int:
+    """
+    Calcula el stock máximo de un combo a partir de datos YA cargados.
+
+    Réplica en lote la semántica de :func:`calcular_stock_combo`, pero sin
+    ejecutar queries: no recibe modelos con manager sino estructuras en
+    memoria. Se usa en el dashboard para eliminar el N+1.
+
+    Fórmula (idéntica a ``calcular_stock_combo``)::
+
+        Stock_Combo(almacén) = min( floor(S(componente) / cantidad_requerida) )
+
+    y el valor devuelto es el máximo entre los almacenes evaluados.
+
+    Reglas de borde (idénticas a ``calcular_stock_combo``):
+
+    * Receta vacía → 0.
+    * Cualquier ``cantidad_requerida <= 0`` → 0 (receta inválida).
+    * Si a un almacén le falta CUALQUIER componente en el índice → ese
+      almacén aporta 0 (no bloquea a los demás).
+    * Sin almacenes → 0.
+
+    Args:
+        receta: iterable de items con ``componente_id`` y
+            ``cantidad_requerida`` (ej. ``RecetaCombo``).
+        almacen_ids: iterable de ids de almacenes a evaluar.
+        inventario_index: dict ``(articulo_id, almacen_id) ->
+            cantidad_disponible`` con el inventario precargado.
+
+    Returns:
+        int: máximo de combos armables entre los almacenes (mínimo 0).
+    """
+    items = list(receta)
+
+    if not items:
+        return 0
+
+    for item in items:
+        if item.cantidad_requerida <= 0:
+            return 0
+
+    stock_max = 0
+
+    for almacen_id in almacen_ids:
+        stocks_posibles = []
+        for item in items:
+            stock_componente = inventario_index.get(
+                (item.componente_id, almacen_id)
+            )
+            if stock_componente is None:
+                # Componente sin inventario en este almacén → combo = 0 aquí.
+                stocks_posibles = []
+                break
+            stocks_posibles.append(
+                int(stock_componente // item.cantidad_requerida)
+            )
+
+        if stocks_posibles:
+            stock_almacen = min(stocks_posibles)
+            if stock_almacen > stock_max:
+                stock_max = stock_almacen
+
+    return stock_max
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCIÓN: Procesar Salida de Combo (Desagregación Atómica)
 # ─────────────────────────────────────────────────────────────────────────────

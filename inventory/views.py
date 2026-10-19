@@ -201,27 +201,54 @@ def dashboard(request):
     alertas_count = alertas_qs.count()
 
     # METRICA 6 (Disponibilidad de Combos Virtuales — cálculo en tiempo real)
-    # Para cada combo, calcular Stock_Combo en su primer almacén activo.
-    from .models import Almacen
+    # DATA-02: se precargan recetas e inventario para eliminar el N+1
+    # (antes: 1 query de receta + 1 por componente, por cada almacén y combo).
+    from django.db.models import Prefetch
+    from .models import Almacen, RecetaCombo
     from . import services as _svc
-    combos_data = []
-    combos_qs = Articulo.objects.filter(tipo='COMBO', activo=True)
-    almacenes_qs = Almacen.objects.filter(activo=True)
-    for combo in combos_qs[:10]:  # limitar a 10 mas visibles
-        # Tomar el primer almacen activo (si hay varios, el combo por simplicidad)
-        stock_max = 0
-        for alm in almacenes_qs:
-            try:
-                s = _svc.calcular_stock_combo(combo, alm)
-            except Exception:
-                s = 0
-            if s and s > stock_max:
-                stock_max = s
-        combos_data.append({
+
+    combos_list = list(
+        Articulo.objects.filter(tipo='COMBO', activo=True).prefetch_related(
+            Prefetch(
+                'receta_combo',
+                queryset=RecetaCombo.objects.select_related('componente'),
+            )
+        )[:10]  # limitar a 10 mas visibles
+    )
+    almacen_ids = list(
+        Almacen.objects.filter(activo=True).values_list('id', flat=True)
+    )
+
+    componentes_ids = {
+        item.componente_id
+        for combo in combos_list
+        for item in combo.receta_combo.all()
+    }
+
+    inventario_index = {}
+    if componentes_ids and almacen_ids:
+        inventario_index = {
+            (articulo_id, almacen_id): cantidad
+            for articulo_id, almacen_id, cantidad in (
+                InventarioAlmacen.objects.filter(
+                    almacen_id__in=almacen_ids,
+                    articulo_id__in=componentes_ids,
+                ).values_list(
+                    'articulo_id', 'almacen_id', 'cantidad_disponible'
+                )
+            )
+        }
+
+    combos_data = [
+        {
             'sku': combo.sku,
             'nombre': combo.nombre,
-            'stock': stock_max,
-        })
+            'stock': _svc.calcular_stock_combo_desde_inventario(
+                combo.receta_combo.all(), almacen_ids, inventario_index
+            ),
+        }
+        for combo in combos_list
+    ]
 
     # Última sincronización real (timestamp de la última AuditoriaTasa)
     from .models import AuditoriaTasa
