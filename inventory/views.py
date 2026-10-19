@@ -22,6 +22,7 @@ from django.views.decorators.http import require_http_methods, require_POST, req
 from django.db import models as db_models
 
 from . import services as svc
+from .calculos import calcular_lineas, calcular_totales_documento
 from .models import Almacen
 
 logger = logging.getLogger(__name__)
@@ -806,47 +807,25 @@ def vista_detalle_nota(request, nota_id):
     detalles = nota.detalles.select_related('articulo').all()
     config = ConfiguracionEmpresa.objects.get(empresa=nota.empresa)
 
-    # Pre-calcular totales de línea para el template.
-    # Se aplica descuento_global del documento al subtotal y al IVA.
-    detalles_con_totales = []
-    total_usd = Decimal('0')
-    total_bs = Decimal('0')
-    total_iva_usd = Decimal('0')
-    total_iva_bs = Decimal('0')
-    for d in detalles:
-        line_usd = d.cantidad * d.precio_base
-        line_bs = d.cantidad * d.precio_ajustado_bcv
-        total_usd += line_usd
-        total_bs += line_bs
-        total_iva_usd += d.iva_usd
-        total_iva_bs += d.iva_bs
-        d.line_usd = line_usd
-        d.line_bs = line_bs
-        detalles_con_totales.append(d)
-
-    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
-    descuento_global = nota.descuento_global or Decimal('0')
-    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
-    subtotal_usd_neto = (total_usd * factor_desc).quantize(Decimal('0.01'))
-    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
-    monto_descuento_usd = (total_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
-    # Total en Bs: cada detalle ya trae precio_ajustado_bcv (con factor + tasa_bcv),
-    # por lo tanto total_bs es el subtotal en Bs sin IVA ni descuento_global.
-    # El descuento_global se aplica proporcionalmente al subtotal_bs (sin IVA)
-    # y al IVA en Bs que ya viene computado sobre cada detalle.
-    total_iva_bs_neto = (total_iva_bs * factor_desc).quantize(Decimal('0.01'))
-    total_bs_neto = ((total_bs * factor_desc) + total_iva_bs_neto).quantize(Decimal('0.01'))
+    # Pre-calcular totales de línea para el template y totales del documento.
+    # DATA-01: el cálculo vive en inventory.calculos (fuente única de verdad).
+    detalles_con_totales = calcular_lineas(
+        detalles, campo_usd='precio_base', campo_bs='precio_ajustado_bcv',
+    )
+    totales = calcular_totales_documento(
+        detalles_con_totales, nota.descuento_global,
+    )
 
     context = {
         'nota': nota,
         'detalles': detalles_con_totales,
         'config': config,
-        'total_usd': subtotal_usd_neto,
-        'total_bs': total_bs_neto,
-        'total_iva_usd': total_iva_usd_neto,
-        'total_iva_bs': total_iva_bs_neto,
-        'monto_descuento_usd': monto_descuento_usd,
-        'descuento_global': descuento_global,
+        'total_usd': totales['subtotal_usd_neto'],
+        'total_bs': totales['total_bs_neto'],
+        'total_iva_usd': totales['total_iva_usd_neto'],
+        'total_iva_bs': totales['total_iva_bs_neto'],
+        'monto_descuento_usd': totales['monto_descuento_usd'],
+        'descuento_global': totales['descuento_global'],
         'print_url': f'/ventas/{nota_id}/pdf/',
     }
     return render(request, 'inventory/nota_detalle.html', context)
@@ -937,25 +916,21 @@ def generar_pdf_nota(request, nota_id):
     story.append(t)
     story.append(Spacer(1, 6*mm))
 
-    subtotal_usd = sum(d.cantidad * d.precio_base for d in detalles)
-    total_iva_usd = sum(d.iva_usd for d in detalles)
-    # Total Bs basado en precio_ajustado_bcv (incluye factor_cobertura),
-    # coherente con vista_detalle_nota y vista_imprimir_nota.
-    subtotal_bs = sum(d.cantidad * d.precio_ajustado_bcv for d in detalles)
-    total_iva_bs = sum(d.iva_bs for d in detalles)
-    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
-    descuento_global = nota.descuento_global or Decimal('0')
-    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
-    subtotal_usd_neto = (subtotal_usd * factor_desc).quantize(Decimal('0.01'))
-    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
-    monto_descuento_usd = (subtotal_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
-    total_bs = ((subtotal_bs + total_iva_bs) * factor_desc).quantize(Decimal('0.01'))
+    # DATA-01: totales desde la fuente única (pantalla y PDF deben coincidir).
+    totales = calcular_totales_documento(detalles, nota.descuento_global)
+    subtotal_usd = totales['subtotal_usd_bruto']
+    subtotal_usd_neto = totales['subtotal_usd_neto']
+    total_iva_usd_neto = totales['total_iva_usd_neto']
+    total_iva_bs_neto = totales['total_iva_bs_neto']
+    monto_descuento_usd = totales['monto_descuento_usd']
+    descuento_global = totales['descuento_global']
+    total_bs = totales['total_bs_neto']
 
     story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
     if monto_descuento_usd > 0:
         story.append(Paragraph(f"Descuento ({descuento_global:.2f}%): -${monto_descuento_usd:.2f}", right_style))
     story.append(Paragraph(f"Total IVA USD: ${total_iva_usd_neto:.2f}", right_style))
-    story.append(Paragraph(f"Total IVA Bs: {total_iva_bs:.2f} Bs", right_style))
+    story.append(Paragraph(f"Total IVA Bs: {total_iva_bs_neto:.2f} Bs", right_style))
     story.append(Spacer(1, 2*mm))
     story.append(HRFlowable(width="40%", thickness=0.5, color=colors.black))
     story.append(Spacer(1, 2*mm))
@@ -986,46 +961,25 @@ def vista_detalle_compra(request, compra_id):
     detalles = documento.detalles.select_related('articulo', 'almacen').all()
     config = ConfiguracionEmpresa.objects.get(empresa=documento.empresa)
 
-    # Pre-calcular totales de línea para el template.
-    # Se aplica descuento_global del documento al subtotal y al IVA.
-    detalles_con_totales = []
-    total_usd = Decimal('0')
-    total_bs = Decimal('0')
-    total_iva_usd = Decimal('0')
-    total_iva_bs = Decimal('0')
-    for d in detalles:
-        line_usd = d.cantidad * d.costo_base
-        line_bs = d.cantidad * d.costo_ajustado_bcv
-        total_usd += line_usd
-        total_bs += line_bs
-        total_iva_usd += d.iva_usd
-        total_iva_bs += d.iva_bs
-        d.line_usd = line_usd
-        d.line_bs = line_bs
-        detalles_con_totales.append(d)
-
-    # Aplicar descuento_global (%) al subtotal y al IVA en USD.
-    descuento_global = documento.descuento_global or Decimal('0')
-    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
-    subtotal_usd_neto = (total_usd * factor_desc).quantize(Decimal('0.01'))
-    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
-    monto_descuento_usd = (total_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
-    # Total en Bs: cada detalle ya trae costo_ajustado_bcv (con factor + tasa_bcv),
-    # por lo tanto total_bs es el subtotal en Bs sin IVA ni descuento_global.
-    # El descuento_global se aplica proporcionalmente al subtotal_bs y al IVA en Bs.
-    total_iva_bs_neto = (total_iva_bs * factor_desc).quantize(Decimal('0.01'))
-    total_bs_neto = ((total_bs * factor_desc) + total_iva_bs_neto).quantize(Decimal('0.01'))
+    # Pre-calcular totales de línea para el template y totales del documento.
+    # DATA-01: el cálculo vive en inventory.calculos (fuente única de verdad).
+    detalles_con_totales = calcular_lineas(
+        detalles, campo_usd='costo_base', campo_bs='costo_ajustado_bcv',
+    )
+    totales = calcular_totales_documento(
+        detalles_con_totales, documento.descuento_global,
+    )
 
     context = {
         'documento': documento,
         'detalles': detalles_con_totales,
         'config': config,
-        'total_usd': subtotal_usd_neto,
-        'total_bs': total_bs_neto,
-        'total_iva_usd': total_iva_usd_neto,
-        'total_iva_bs': total_iva_bs_neto,
-        'monto_descuento_usd': monto_descuento_usd,
-        'descuento_global': descuento_global,
+        'total_usd': totales['subtotal_usd_neto'],
+        'total_bs': totales['total_bs_neto'],
+        'total_iva_usd': totales['total_iva_usd_neto'],
+        'total_iva_bs': totales['total_iva_bs_neto'],
+        'monto_descuento_usd': totales['monto_descuento_usd'],
+        'descuento_global': totales['descuento_global'],
         'print_url': f'/compras/{compra_id}/pdf/',
     }
     return render(request, 'inventory/compra_detalle.html', context)
@@ -1117,19 +1071,17 @@ def generar_pdf_compra(request, compra_id):
     story.append(t)
     story.append(Spacer(1, 6*mm))
 
-    subtotal_usd = sum(d.cantidad * d.costo_base for d in detalles)
-    total_bs = sum(d.cantidad * d.costo_ajustado_bcv for d in detalles)
-    total_iva_usd = sum(d.iva_usd for d in detalles)
-    total_iva_bs = sum(d.iva_bs for d in detalles)
-
-    # Aplicar descuento_global (%) al subtotal y al IVA en USD y Bs.
-    descuento_global = documento.descuento_global or Decimal('0')
-    factor_desc = Decimal('1') - (descuento_global / Decimal('100'))
-    subtotal_usd_neto = (subtotal_usd * factor_desc).quantize(Decimal('0.01'))
-    total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
-    monto_descuento_usd = (subtotal_usd - subtotal_usd_neto).quantize(Decimal('0.01'))
-    total_iva_bs_neto = (total_iva_bs * factor_desc).quantize(Decimal('0.01'))
-    total_bs_neto = ((total_bs * factor_desc) + total_iva_bs_neto).quantize(Decimal('0.01'))
+    # DATA-01: totales desde la fuente única (pantalla y PDF deben coincidir).
+    totales = calcular_totales_documento(
+        detalles, documento.descuento_global,
+    )
+    subtotal_usd = totales['subtotal_usd_bruto']
+    subtotal_usd_neto = totales['subtotal_usd_neto']
+    total_iva_usd_neto = totales['total_iva_usd_neto']
+    total_iva_bs_neto = totales['total_iva_bs_neto']
+    monto_descuento_usd = totales['monto_descuento_usd']
+    descuento_global = totales['descuento_global']
+    total_bs_neto = totales['total_bs_neto']
 
     story.append(Paragraph(f"Subtotal USD: ${subtotal_usd:.2f}", right_style))
     if monto_descuento_usd > 0:
@@ -1800,7 +1752,12 @@ def vista_listado_notas_entrega(request):
     from .models import NotaEntrega, Almacen, Contacto
     from .managers import get_current_empresa
 
-    notas = NotaEntrega.objects.select_related('cliente', 'almacen', 'empresa').all()
+    notas = (
+        NotaEntrega.objects
+        .select_related('cliente', 'almacen', 'empresa')
+        .prefetch_related('detalles')
+        .all()
+    )
 
     empresa_id = get_current_empresa()
     if empresa_id:
@@ -1851,20 +1808,19 @@ def vista_listado_notas_entrega(request):
     if fecha_hasta:
         notas = notas.filter(fecha__date__lte=fecha_hasta)
 
-    # Pre-calcular totales por nota para mostrar en la tabla (optimización: select_related ya hecho).
+    # Pre-calcular totales por nota para mostrar en la tabla.
+    # DATA-01: el cálculo financiero vive en inventory.calculos (fuente única
+    # de verdad). Así el listado refleja el descuento individual de cada línea
+    # (``d.subtotal_usd``) igual que la pantalla de detalle y el PDF.
+    # ``prefetch_related('detalles')`` evita N+1 al recorrer todas las notas.
     filas = []
     for n in notas:
-        detalles = n.detalles.all()
-        total_usd = sum((d.cantidad * d.precio_base) for d in detalles)
-        desc_global = n.descuento_global or Decimal('0')
-        factor_desc = Decimal('1') - (desc_global / Decimal('100'))
-        subtotal_usd_neto = (total_usd * factor_desc).quantize(Decimal('0.01'))
-        total_iva_usd = sum(d.iva_usd for d in detalles)
-        total_iva_usd_neto = (total_iva_usd * factor_desc).quantize(Decimal('0.01'))
-        n.total_usd_listado = subtotal_usd_neto
-        n.total_iva_usd_listado = total_iva_usd_neto
-        n.total_doc_usd_listado = (subtotal_usd_neto + total_iva_usd_neto).quantize(Decimal('0.01'))
-        n.items_count_listado = detalles.count()
+        detalles = list(n.detalles.all())
+        totales = calcular_totales_documento(detalles, n.descuento_global)
+        n.total_usd_listado = totales['subtotal_usd_neto']
+        n.total_iva_usd_listado = totales['total_iva_usd_neto']
+        n.total_doc_usd_listado = totales['total_usd_neto']
+        n.items_count_listado = len(detalles)
         filas.append(n)
     total_count_real = len(filas)
 

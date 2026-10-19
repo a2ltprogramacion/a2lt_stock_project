@@ -39,6 +39,7 @@ from decimal import Decimal
 
 from django.db import transaction
 
+from .calculos import calcular_factor_descuento
 from .models import (
     Articulo,
     Almacen,
@@ -2156,7 +2157,7 @@ def registrar_compra_proveedor(
 
         # Totales finales del documento
         # Aplicar descuento global proporcionalmente a cada ítem, luego calcular IVA
-        factor_global = Decimal('1') - (descuento_global / Decimal('100'))
+        factor_global = calcular_factor_descuento(descuento_global)
         subtotal_after_discount = Decimal('0')
         iva_total_usd = Decimal('0')
         
