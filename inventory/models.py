@@ -28,7 +28,7 @@ from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from .managers import EmpresaManager, EmpresaQuerySet
+from .managers import EmpresaManager, EmpresaQuerySet, get_current_empresa
 
 
 # Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
