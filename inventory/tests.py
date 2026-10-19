@@ -1567,6 +1567,7 @@ class TestImpresionParametrizada(TestCase):
         self.detalle = DetalleNotaEntrega.objects.create(
             nota_entrega=self.nota,
             articulo=self.articulo,
+            almacen=self.almacen,  # DATA-03: almacén de línea obligatorio
             cantidad=Decimal('2.00'),
             precio_base=Decimal('15.00'),
             precio_ajustado_bcv=Decimal('600.00')

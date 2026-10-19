@@ -1599,10 +1599,11 @@ class DetalleNotaEntrega(models.Model):
         Almacen,
         on_delete=models.PROTECT,
         related_name='detalles_nota_entrega',
-        null=True,
-        blank=True,
         verbose_name='Almacén de Origen',
-        help_text='Almacén desde donde se ejecuta la rebaja real de stock.',
+        help_text=(
+            'Obligatorio: almacén desde donde se ejecuta la rebaja real de '
+            'stock. Garantiza la trazabilidad de Kárdex de cada línea.'
+        ),
     )
     cantidad = models.DecimalField(
         max_digits=12,
