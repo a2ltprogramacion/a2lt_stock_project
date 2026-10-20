@@ -2278,9 +2278,18 @@ class Moneda(models.Model):
 
 class TasaCambio(models.Model):
     """
-    Historico inmutable de tasas de cambio por par de monedas y fecha.
-    Cada snapshot de AuditoriaTasa o sincronizacion guarda un registro
-    aqui para conservar trazabilidad historica.
+    Tasa de cambio VIGENTE por (empresa, par de monedas, dia).
+
+    Semantica ratificada (DATA-10, spec P1, ratificado 2026-10-20): existe
+    UNA sola tasa vigente por (empresa, moneda_origen, moneda_destino,
+    fecha), garantizada por la BD mediante el constraint
+    ``unique_tasa_par_fecha``. Corregir la tasa de un dia es un UPDATE del
+    registro del dia; la trazabilidad de cada actualizacion intradia vive
+    en ``AuditoriaTasa`` (donde ya escribe la sincronizacion), no aqui.
+
+    El ``ordering`` conserva ``-creada_en`` solo como desempate defensivo:
+    es vestigial mientras el constraint garantice una fila unica por dia,
+    pero protege el orden si el constraint llegara a relajarse.
     """
     Fuente = [
         ('BCV', 'Banco Central de Venezuela (oficial)'),
@@ -2314,6 +2323,16 @@ class TasaCambio(models.Model):
     class Meta:
         verbose_name = 'Tasa de Cambio'
         verbose_name_plural = 'Tasas de Cambio'
+        constraints = [
+            # DATA-10 (spec P1, ratificado 2026-10-20): una tasa VIGENTE por
+            # (empresa, par, dia). Corregir la tasa de un dia = UPDATE de la
+            # fila del dia; la trazabilidad de cada actualizacion intradia
+            # vive en AuditoriaTasa. El indice de consulta se conserva abajo.
+            models.UniqueConstraint(
+                fields=['empresa', 'moneda_origen', 'moneda_destino', 'fecha'],
+                name='unique_tasa_par_fecha',
+            ),
+        ]
         indexes = [
             models.Index(fields=['empresa', 'moneda_origen', 'moneda_destino', '-fecha']),
         ]
