@@ -503,10 +503,38 @@ class Almacen(models.Model):
         verbose_name = 'Almacén'
         verbose_name_plural = '03. Almacenes'
         ordering = ['-es_principal', 'nombre']
+        constraints = [
+            # EST-11: como máximo UN almacén principal por empresa,
+            # garantizado por la BD (realce sobre la race condition del
+            # flip de save(), y cierre del hueco del admin que podía
+            # promover un segundo principal).
+            models.UniqueConstraint(
+                fields=['empresa'],
+                condition=models.Q(es_principal=True),
+                name='un_almacen_principal_por_empresa',
+            ),
+        ]
 
     def __str__(self):
         sufijo = ' ★' if self.es_principal else ''
         return f'{self.nombre}{sufijo}'
+
+    def save(self, *args, **kwargs):
+        # EST-11: a lo sumo un almacén principal por empresa. El constraint
+        # de BD cierra la carrera; este flip atómico conserva la UX de
+        # "promover" (mismo patrón aprobado para Moneda.es_base en DATA-09):
+        # al marcar un almacén como principal, el anterior de la MISMA
+        # empresa se degrada en la misma transacción, en lugar de estallar
+        # con un IntegrityError. Usa global_objects porque puede ejecutarse
+        # sin contexto de tenant (signals, scripts, migraciones).
+        if self.es_principal and self.empresa_id:
+            with transaction.atomic():
+                Almacen.global_objects.filter(
+                    empresa_id=self.empresa_id, es_principal=True,
+                ).exclude(pk=self.pk).update(es_principal=False)
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
