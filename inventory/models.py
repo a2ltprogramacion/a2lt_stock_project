@@ -263,6 +263,27 @@ class ConfiguracionEmpresa(models.Model):
         verbose_name = 'Configuración de la Empresa'
         verbose_name_plural = '02. Configuraciones de la Empresa'
 
+        # DATA-08: rangos de los montos monetarios a nivel de BD. save()
+        # (DATA-05/07) ya coerciona las tasas, pero bulk_create() y SQL
+        # crudo saltan esa capa: el esquema es la última línea de defensa.
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tasa_bcv__gte=0),
+                name='tasa_bcv_no_negativa',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(factor_cobertura__gt=0),
+                name='factor_cobertura_positivo',
+            ),
+            # Semirango superior ABIERTO: con método MARGIN y margen=100,
+            # ``costo / (1 - margen/100)`` dividiría por cero.
+            models.CheckConstraint(
+                condition=models.Q(margen_global__gte=0)
+                & models.Q(margen_global__lt=100),
+                name='margen_rango_valido',
+            ),
+        ]
+
     def __str__(self):
         return f'Configuración: {self.empresa.nombre}'
 
@@ -1732,6 +1753,28 @@ class DetalleNotaEntrega(models.Model):
     class Meta:
         verbose_name = 'Detalle de Nota de Entrega'
         verbose_name_plural = '12. Detalles de Notas de Entrega'
+
+        # DATA-08: rangos de los montos por línea a nivel de BD. Los
+        # snapshots de IVA/descuento no son nullable (default 0.00), así
+        # que el CHECK no necesita la cláusula isnull de DATA-04.
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cantidad__gt=0),
+                name='cantidad_positiva',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    iva_porcentaje__gte=0, iva_porcentaje__lte=100
+                ),
+                name='iva_rango',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    descuento_aplicado__gte=0, descuento_aplicado__lte=100
+                ),
+                name='descuento_rango',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.nota_entrega} | {self.articulo.nombre} × {self.cantidad}'
