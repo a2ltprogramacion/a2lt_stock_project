@@ -816,7 +816,9 @@ class RecetaCombo(models.Model):
 class Contacto(models.Model):
     """
     Directorio unificado de clientes y proveedores (ADR-05).
-    Los campos exclusivos de proveedores son opcionales (null/blank).
+    Los campos exclusivos de proveedores siguen siendo opcionales en el
+    esquema (CLIENTE no los usa), pero para PROVEEDOR son obligatorios vía
+    clean() y CheckConstraint de BD (DATA-04).
     La pk es la identificación fiscal/personal para evitar duplicados.
     """
 
@@ -895,9 +897,47 @@ class Contacto(models.Model):
         verbose_name = 'Contacto'
         verbose_name_plural = '04. Contactos (Clientes y Proveedores)'
         ordering = ['tipo', 'nombre']
+        constraints = [
+            # DATA-04: un PROVEEDOR debe tener rif y asesor SIEMPRE, incluso
+            # por vías que saltan el formulario (admin, shell, scripts,
+            # bulk_create). El IS NULL explícito es CRÍTICO en SQLite: un
+            # CHECK que evalúa a NULL pasa; con (rif IS NULL OR rif = '')
+            # el resultado es FALSE, no NULL. Para CLIENTE la condición
+            # colapsa a TRUE explícito (ADR-05).
+            models.CheckConstraint(
+                condition=~models.Q(
+                    models.Q(tipo='PROVEEDOR')
+                    & (models.Q(rif__isnull=True) | models.Q(rif=''))
+                ),
+                name='proveedor_requiere_rif',
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(
+                    models.Q(tipo='PROVEEDOR')
+                    & (
+                        models.Q(nombre_asesor__isnull=True)
+                        | models.Q(nombre_asesor='')
+                    )
+                ),
+                name='proveedor_requiere_asesor',
+            ),
+        ]
 
     def __str__(self):
         return f'[{self.get_tipo_display()}] {self.nombre} ({self.identificacion})'
+
+    def clean(self):
+        super().clean()
+        if self.tipo == 'PROVEEDOR':
+            errores = {}
+            if not (self.rif or '').strip():
+                errores['rif'] = 'El RIF es obligatorio para proveedores.'
+            if not (self.nombre_asesor or '').strip():
+                errores['nombre_asesor'] = (
+                    'El nombre del asesor es obligatorio para proveedores.'
+                )
+            if errores:
+                raise ValidationError(errores)
 
 
 class ClienteManager(EmpresaManager):

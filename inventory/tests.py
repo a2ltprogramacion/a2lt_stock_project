@@ -2467,7 +2467,7 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
         from inventory.managers import set_current_empresa
         set_current_empresa(self.empresa.pk)
         Contacto.objects.create(empresa=self.empresa, identificacion='V-CLI-001', tipo='CLIENTE', nombre='Cliente A')
-        Contacto.objects.create(empresa=self.empresa, identificacion='J-PROV-001', tipo='PROVEEDOR', nombre='Proveedor A')
+        Contacto.objects.create(empresa=self.empresa, identificacion='J-PROV-001', tipo='PROVEEDOR', nombre='Proveedor A', rif='J-PROV-001', nombre_asesor='Asesor A')
         clientes_qs = Cliente.objects.filter(identificacion='V-CLI-001')
         proveedores_qs = Proveedor.objects.filter(identificacion='J-PROV-001')
         self.assertEqual(clientes_qs.count(), 1)
@@ -2486,7 +2486,7 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
     
     def test_proveedor_proxy_save_autoset_tipo(self):
         from inventory.models import Proveedor
-        p = Proveedor(empresa=self.empresa, identificacion='J-AUTO', nombre='Auto Proveedor')
+        p = Proveedor(empresa=self.empresa, identificacion='J-AUTO', nombre='Auto Proveedor', rif='J-AUTO', nombre_asesor='Asesor Auto')
         p.save()
         p.refresh_from_db()
         self.assertEqual(p.tipo, 'PROVEEDOR')
@@ -2515,7 +2515,7 @@ class TestProxyModelsYObservaciones(TransactionTestCase):
         from inventory.services import registrar_compra_proveedor, registrar_movimiento
         from inventory.managers import set_current_empresa
         set_current_empresa(self.empresa.pk)
-        proveedor = Contacto.objects.create(empresa=self.empresa, identificacion='J-OBS', tipo='PROVEEDOR', nombre='Proveedor Obs', rif='J-OBS')
+        proveedor = Contacto.objects.create(empresa=self.empresa, identificacion='J-OBS', tipo='PROVEEDOR', nombre='Proveedor Obs', rif='J-OBS', nombre_asesor='Asesor Obs')
         resultado = registrar_compra_proveedor(
             proveedor_id=proveedor.pk,
             numero_factura='F-OBS-001',
@@ -5341,7 +5341,7 @@ class TestReportesFase4(TestCase):
         )
         self.proveedor = Contacto.objects.create(
             empresa=self.empresa, nombre='Proveedor Test', tipo='PROVEEDOR',
-            identificacion='J-PROV-1'
+            identificacion='J-PROV-1', rif='J-PROV-1', nombre_asesor='Asesor Reportes'
         )
 
         # Artí­culo fí­sico con stock
@@ -6989,7 +6989,8 @@ class TestTipoDocumentoCompra3Opciones(TransactionTestCase):
         self.alm = crear_almacen(self.empresa, 'Almacen TipoDoc')
         self.proveedor = Contacto.objects.create(
             empresa=self.empresa, identificacion='PROV-O1',
-            nombre='Proveedor O1', tipo='PROVEEDOR'
+            nombre='Proveedor O1', tipo='PROVEEDOR',
+            rif='PROV-O1', nombre_asesor='Asesor O1'
         )
 
     def test_tipo_documento_opcion_nota_entrega_proveedor_acepta_doc_opcional(self):
@@ -7135,7 +7136,8 @@ class TestIvaIndividualPorLinea(TransactionTestCase):
         self.alm = crear_almacen(self.empresa, 'Almacen Iva Line')
         self.proveedor = Contacto.objects.create(
             empresa=self.empresa, identificacion='PROV-IVA',
-            nombre='Proveedor IVA', tipo='PROVEEDOR'
+            nombre='Proveedor IVA', tipo='PROVEEDOR',
+            rif='PROV-IVA', nombre_asesor='Asesor IVA'
         )
 
     def test_procesar_venta_respeta_iva_porcentaje_por_item(self):
@@ -7362,7 +7364,8 @@ class TestNotasCreditoBackend(TransactionTestCase):
         )
         self.proveedor = Contacto.objects.create(
             empresa=self.empresa, identificacion=self._prv_id,
-            nombre='Proveedor NC', tipo='PROVEEDOR'
+            nombre='Proveedor NC', tipo='PROVEEDOR',
+            rif=self._prv_id, nombre_asesor='Asesor NC'
         )
 
         self.art = crear_articulo_fisico(self.empresa, sku=f'NC-{self._uniq}', nombre='Art NC')
@@ -7864,7 +7867,8 @@ class TestNotasCreditoUI(TransactionTestCase):
         # Proveedor
         self.proveedor = Contacto.objects.create(
             empresa=self.empresa,
-            identificacion=f'P-{self._uniq}', nombre='Provee NCUI', tipo='PROVEEDOR'
+            identificacion=f'P-{self._uniq}', nombre='Provee NCUI', tipo='PROVEEDOR',
+            rif=f'P-{self._uniq}', nombre_asesor='Asesor NCUI'
         )
 
     # ── 1) Rutas reversibles ────────────────────────────────────────────
@@ -8780,7 +8784,8 @@ class TestAuditoriaRemediacion(TransactionTestCase):
 
         prov = Contacto.objects.create(
             empresa=self.empresa, identificacion='J-PROV-AUD',
-            tipo='PROVEEDOR', nombre='Prov Aud'
+            tipo='PROVEEDOR', nombre='Prov Aud',
+            rif='J-PROV-AUD', nombre_asesor='Asesor Aud'
         )
         res_compra = svc.registrar_compra_proveedor(
             proveedor_id=str(prov.pk),
@@ -8860,7 +8865,8 @@ class TestAuditoriaRemediacion(TransactionTestCase):
         """El PDF de compra debe generarse sin errores y responder 200 con Content-Type application/pdf."""
         prov = Contacto.objects.create(
             empresa=self.empresa, identificacion='J-PROV-PDF',
-            tipo='PROVEEDOR', nombre='Prov PDF'
+            tipo='PROVEEDOR', nombre='Prov PDF',
+            rif='J-PROV-PDF', nombre_asesor='Asesor PDF'
         )
         res = svc.registrar_compra_proveedor(
             proveedor_id=str(prov.pk),
@@ -8942,7 +8948,8 @@ class TestAuditoriaRemediacion(TransactionTestCase):
 
         prov = Contacto.objects.create(
             empresa=self.empresa, identificacion='J-PROV-HAPPY',
-            tipo='PROVEEDOR', nombre='Prov Happy'
+            tipo='PROVEEDOR', nombre='Prov Happy',
+            rif='J-PROV-HAPPY', nombre_asesor='Asesor Happy'
         )
         res_compra = svc.registrar_compra_proveedor(
             proveedor_id=str(prov.pk),

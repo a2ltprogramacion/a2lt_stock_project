@@ -1,3 +1,4 @@
+# DATA-04: los PROVEEDORES exigen rif y nombre_asesor (CheckConstraint de BD).
 """
 Tests for BUG-04: Missing import of get_current_empresa in models.py
 
@@ -58,6 +59,8 @@ class TestBug04ImportGetCurrentEmpresa(TestCase):
                 identificacion='J-PROV-001',
                 nombre='Proveedor Test',
                 tipo='PROVEEDOR',
+                rif='J-PROV-001',
+                nombre_asesor='Asesor',
             )
             almacen = Almacen.objects.create(empresa=empresa, nombre='Test Almacén', es_principal=True)
             doc_compra = DocumentoCompra.objects.create(
@@ -151,7 +154,8 @@ class TestBug04ImportGetCurrentEmpresa(TestCase):
             tipo='FISICO', categoria='OTROS', costo=Decimal('10.00'), precio_divisa=Decimal('15.00')
         )
         proveedor1 = Contacto.objects.create(
-            empresa=empresa1, identificacion='J-PROV-001', nombre='Prov 1', tipo='PROVEEDOR'
+            empresa=empresa1, identificacion='J-PROV-001', nombre='Prov 1', tipo='PROVEEDOR',
+            rif='J-PROV-001', nombre_asesor='Asesor'
         )
         doc1 = DocumentoCompra.objects.create(
             empresa=empresa1, proveedor=proveedor1, tipo_documento='FACTURA_COMPRA',
@@ -170,7 +174,8 @@ class TestBug04ImportGetCurrentEmpresa(TestCase):
             tipo='FISICO', categoria='OTROS', costo=Decimal('20.00'), precio_divisa=Decimal('30.00')
         )
         proveedor2 = Contacto.objects.create(
-            empresa=empresa2, identificacion='J-PROV-002', nombre='Prov 2', tipo='PROVEEDOR'
+            empresa=empresa2, identificacion='J-PROV-002', nombre='Prov 2', tipo='PROVEEDOR',
+            rif='J-PROV-002', nombre_asesor='Asesor'
         )
         doc2 = DocumentoCompra.objects.create(
             empresa=empresa2, proveedor=proveedor2, tipo_documento='FACTURA_COMPRA',

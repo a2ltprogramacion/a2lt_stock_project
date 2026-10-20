@@ -40,6 +40,7 @@ class TestCorrelativosEST03(TestCase):
     """Suite EST-03: contador de correlativos atómico por (empresa, tipo)."""
 
     def setUp(self):
+        # DATA-04: los PROVEEDORES exigen rif y nombre_asesor (CheckConstraint de BD).
         sufijo = abs(hash(self._testMethodName)) % (10 ** 8)
         self.empresa = Empresa.objects.create(
             nombre=f'EST03 {self._testMethodName[:30]}',
@@ -53,6 +54,8 @@ class TestCorrelativosEST03(TestCase):
             identificacion=f'J-PROV-{sufijo:08d}',
             nombre='Proveedor EST03',
             tipo='PROVEEDOR',
+            rif=f'J-PROV-{sufijo:08d}',
+            nombre_asesor='Asesor EST03',
         )
 
     # -- Helpers ---------------------------------------------------------
