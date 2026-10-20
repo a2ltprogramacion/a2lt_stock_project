@@ -28,6 +28,8 @@ Thumbs.db
 # ─── Variables de Entorno ────────────────────────────────────────────────────
 .env
 .env.*
+# SEC-02 (TASK-SEC02-06): la plantilla publica SI se commitea (.env.* la ignoraria).
+!.env.example
 
 # ─── Archivos de Cobertura / Tests ──────────────────────────────────────────
 .coverage

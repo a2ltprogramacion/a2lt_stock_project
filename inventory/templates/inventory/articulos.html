@@ -11,7 +11,7 @@
         </div>
         <button onclick="openProductForm('')"
             class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow">
-            <i class="fa-solid fa-circle-plus"></i> Nuevo Artículo / Combo
+            <i class="bi bi-plus-circle"></i> Nuevo Artículo / Combo
         </button>
     </div>
 
@@ -73,7 +73,7 @@
         <div class="p-6 space-y-4">
             <div class="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-2">
                 <h3 class="font-bold text-md text-slate-850 dark:text-slate-100 flex items-center gap-2" id="product-modal-title">
-                    <i class="fa-solid fa-circle-plus text-indigo-500"></i> Crear Artículo
+                    <i class="bi bi-plus-circle text-indigo-500"></i> Crear Artículo
                 </h3>
                 <button onclick="closeProductModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 text-xl leading-none">&times;</button>
             </div>
@@ -108,13 +108,39 @@
                 </div>
                 <div>
                     <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Costo (USD)</label>
-                    <input id="form-p-costo" type="number" step="0.0001" value="0.00"
+                    <input id="form-p-costo" type="number" step="0.0001" value="0.00" oninput="previewPrecioSugerido()"
                         class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold focus:outline-none focus:border-indigo-500">
                 </div>
                 <div>
                     <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Precio Divisa (USD)</label>
                     <input id="form-p-precio" type="number" step="0.0001" value="0.00"
                         class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono font-bold focus:outline-none focus:border-indigo-500">
+                </div>
+                <!-- RENTABILIDAD INDIVIDUAL: método + porcentaje + preview -->
+                <div class="md:col-span-2 border border-slate-200 dark:border-slate-800 rounded-xl p-3 bg-slate-50 dark:bg-slate-950 space-y-3">
+                    <span class="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block tracking-wider">Rentabilidad del Artículo (Margen vs Markup)</span>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Método de Ganancia</label>
+                            <select id="form-p-metodo" onchange="previewPrecioSugerido()"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200">
+                                <option value="MARGIN">Margen de Utilidad ÷ (correcto)</option>
+                                <option value="MARKUP">Markup / Recargo ×</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Margen / Markup Individual (%)</label>
+                            <input id="form-p-margen" type="number" step="0.01" placeholder="Vacío = global"
+                                oninput="previewPrecioSugerido()"
+                                class="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-200 font-mono focus:outline-none focus:border-indigo-500">
+                            <p class="text-[9px] text-slate-400 dark:text-slate-500 mt-1">Vacío o 0 usa el % global ({{ cfg_margen_global }}%).</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <p id="form-p-preview" class="text-[11px] font-mono text-slate-600 dark:text-slate-300"></p>
+                        <button type="button" onclick="aplicarPrecioSugerido()"
+                            class="text-[10px] font-bold px-2 py-1 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-600 hover:text-white transition">Aplicar al precio</button>
+                    </div>
                 </div>
                 <div class="md:col-span-2">
                     <label class="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold block mb-1">Descripción Breve</label>
@@ -139,16 +165,16 @@
                             <div class="flex flex-wrap gap-1 mb-1.5" role="toolbar" aria-label="Insertar variable de precio">
                                 <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_USD]')"
                                     class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition"
-                                    title="Precio en divisas (USD base)"><i class="fa-solid fa-dollar-sign"></i> USD</button>
+                                    title="Precio en divisas (USD base)"><i class="bi bi-currency-dollar"></i> USD</button>
                                 <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_BCV]')"
                                     class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/50 transition"
-                                    title="Precio ajustado con factor de cobertura (USD)"><i class="fa-solid fa-shield-halved"></i> BCV</button>
+                                    title="Precio ajustado con factor de cobertura (USD)"><i class="bi bi-shield-check"></i> BCV</button>
                                 <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_BS_BASE]')"
                                     class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 rounded-md hover:bg-sky-100 dark:hover:bg-sky-900/50 transition"
-                                    title="Precio en Bs. a tasa BCV (sin factor de cobertura)"><i class="fa-solid fa-bolt"></i> Bs.Base</button>
+                                    title="Precio en Bs. a tasa BCV (sin factor de cobertura)"><i class="bi bi-lightning-charge-fill"></i> Bs.Base</button>
                                 <button type="button" onclick="injectToken('form-p-cross', '$[PRECIO_BS]')"
                                     class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition"
-                                    title="Precio en Bs. con factor de cobertura aplicado"><i class="fa-solid fa-shield-halved"></i> Bs.Ajust.</button>
+                                    title="Precio en Bs. con factor de cobertura aplicado"><i class="bi bi-shield-check"></i> Bs.Ajust.</button>
                             </div>
                             <textarea id="form-p-cross" rows="3"
                                 placeholder="🔧 Producto (SKU) ➡️ $[PRECIO_USD] (Divisas) | $[PRECIO_BCV] (BCV)&#10;✔️ Característica clave."
@@ -162,21 +188,21 @@
                         <div class="flex flex-wrap gap-1 mb-1.5" role="toolbar" aria-label="Insertar variable de precio">
                             <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_USD]')"
                                 class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition"
-                                title="Precio en divisas (USD base)"><i class="fa-solid fa-dollar-sign"></i> USD</button>
+                                title="Precio en divisas (USD base)"><i class="bi bi-currency-dollar"></i> USD</button>
                             <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_BCV]')"
                                 class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-md hover:bg-amber-100 dark:hover:bg-amber-900/50 transition"
-                                title="Precio ajustado con factor de cobertura (USD)"><i class="fa-solid fa-shield-halved"></i> BCV</button>
+                                title="Precio ajustado con factor de cobertura (USD)"><i class="bi bi-shield-check"></i> BCV</button>
                             <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_BS_BASE]')"
                                 class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 rounded-md hover:bg-sky-100 dark:hover:bg-sky-900/50 transition"
-                                title="Precio en Bs. a tasa BCV (sin factor de cobertura)"><i class="fa-solid fa-bolt"></i> Bs.Base</button>
+                                title="Precio en Bs. a tasa BCV (sin factor de cobertura)"><i class="bi bi-lightning-charge-fill"></i> Bs.Base</button>
                             <button type="button" onclick="injectToken('form-p-quick', '$[PRECIO_BS]')"
                                 class="token-btn inline-flex items-center gap-1 px-2 py-1 text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-md hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition"
-                                title="Precio en Bs. con factor de cobertura aplicado"><i class="fa-solid fa-shield-halved"></i> Bs.Ajust.</button>
+                                title="Precio en Bs. con factor de cobertura aplicado"><i class="bi bi-shield-check"></i> Bs.Ajust.</button>
                         </div>
                         <textarea id="form-p-quick" rows="4"
                             placeholder="Hola 👋&#10;Disponible Producto (SKU)&#10;Precio: $[PRECIO_USD] Divisas / $[PRECIO_BCV] BCV"
                             class="w-full bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none resize-none"></textarea>
-                        <p class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 leading-normal"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Usa los botones superiores para insertar variables: <strong>$[PRECIO_USD]</strong> (divisas), <strong>$[PRECIO_BCV]</strong> (USD con factor), <strong>$[PRECIO_BS_BASE]</strong> (Bs. a tasa BCV) y <strong>$[PRECIO_BS]</strong> (Bs. con cobertura). Se reemplazan dinámicamente al mostrar/copiar el mensaje.</p>
+                        <p class="text-[9px] text-indigo-600 dark:text-indigo-400 mt-1 leading-normal"><i class="bi bi-exclamation-triangle-fill mr-1"></i> Usa los botones superiores para insertar variables: <strong>$[PRECIO_USD]</strong> (divisas), <strong>$[PRECIO_BCV]</strong> (USD con factor), <strong>$[PRECIO_BS_BASE]</strong> (Bs. a tasa BCV) y <strong>$[PRECIO_BS]</strong> (Bs. con cobertura). Se reemplazan dinámicamente al mostrar/copiar el mensaje.</p>
                     </div>
                 </div>
             </div>
@@ -200,11 +226,48 @@
 <script>
 // ── Modal Producto ──
 let allArticulos = JSON.parse(document.getElementById('articulos-data').textContent);
+// Defaults globales (inyectados por la vista) para artículos nuevos.
+const GLOBAL_METODO = "{{ cfg_metodo_global|default:'MARGIN' }}";
+const GLOBAL_MARGEN = "{{ cfg_margen_global|default:'30.00' }}";
+
+function metodoEfectivo() {
+    return document.getElementById('form-p-metodo').value || 'MARGIN';
+}
+
+function margenEfectivo() {
+    const raw = document.getElementById('form-p-margen').value;
+    const v = parseFloat(raw);
+    if (raw === '' || isNaN(v) || v <= 0) return parseFloat(GLOBAL_MARGEN) || 0;
+    return v;
+}
+
+function previewPrecioSugerido() {
+    const costo = parseFloat(document.getElementById('form-p-costo').value) || 0;
+    const m = margenEfectivo();
+    const metodo = metodoEfectivo();
+    let precio = 0, formula = '';
+    if (metodo === 'MARKUP') {
+        precio = costo * (1 + m / 100);
+        formula = ` (${costo.toFixed(2)} × ${(1 + m / 100).toFixed(4)})`;
+    } else {
+        const f = 1 - m / 100;
+        precio = f > 0 ? costo / f : 0;
+        formula = ` (${costo.toFixed(2)} ÷ ${f.toFixed(4)})`;
+    }
+    const tagMetodo = metodo === 'MARKUP' ? 'Markup' : 'Margen';
+    document.getElementById('form-p-preview').textContent =
+        `Sugerido [${tagMetodo} ${m.toFixed(2)}%]: $${precio.toFixed(2)}${formula}`;
+    return precio;
+}
+
+function aplicarPrecioSugerido() {
+    document.getElementById('form-p-precio').value = previewPrecioSugerido().toFixed(4);
+}
 
 function openProductForm(sku) {
     document.getElementById('modal-product').classList.remove('hidden');
     if (sku) {
-        document.getElementById('product-modal-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-500"></i> Editar Artículo: ${sku}`;
+        document.getElementById('product-modal-title').innerHTML = `<i class="bi bi-pencil-square text-indigo-500"></i> Editar Artículo: ${sku}`;
         const a = allArticulos.find(p => p.sku === sku);
         if (a) {
             document.getElementById('form-p-sku').value = a.sku;
@@ -214,13 +277,16 @@ function openProductForm(sku) {
             document.getElementById('form-p-tipo').value = a.tipo;
             document.getElementById('form-p-costo').value = a.costo;
             document.getElementById('form-p-precio').value = a.precio_divisa;
+            document.getElementById('form-p-metodo').value = a.metodo_ganancia || GLOBAL_METODO;
+            document.getElementById('form-p-margen').value = (a.margen_ind !== null && a.margen_ind !== undefined) ? a.margen_ind : '';
             document.getElementById('form-p-desc').value = a.descripcion || '';
             document.getElementById('form-p-ficha').value = a.ficha_tecnica || '';
             document.getElementById('form-p-cross').value = a.social_cross || '';
             document.getElementById('form-p-quick').value = a.social_quick || '';
+            previewPrecioSugerido();
         }
     } else {
-        document.getElementById('product-modal-title').innerHTML = `<i class="fa-solid fa-circle-plus text-indigo-500"></i> Crear Artículo`;
+        document.getElementById('product-modal-title').innerHTML = `<i class="bi bi-plus-circle text-indigo-500"></i> Crear Artículo`;
         clearProductForm();
     }
 }
@@ -237,10 +303,13 @@ function clearProductForm() {
     document.getElementById('form-p-tipo').value = 'FISICO';
     document.getElementById('form-p-costo').value = '0.00';
     document.getElementById('form-p-precio').value = '0.00';
+    document.getElementById('form-p-metodo').value = GLOBAL_METODO;
+    document.getElementById('form-p-margen').value = '';
     document.getElementById('form-p-desc').value = '';
     document.getElementById('form-p-ficha').value = '';
     document.getElementById('form-p-cross').value = '';
     document.getElementById('form-p-quick').value = '';
+    previewPrecioSugerido();
 }
 
 function toggleFormComboRecipe() {}
@@ -261,6 +330,8 @@ function saveProduct() {
         tipo: document.getElementById('form-p-tipo').value,
         costo: document.getElementById('form-p-costo').value,
         precio_divisa: document.getElementById('form-p-precio').value,
+        metodo_ganancia: document.getElementById('form-p-metodo').value,
+        margen_ind: document.getElementById('form-p-margen').value,
         descripcion: document.getElementById('form-p-desc').value,
         ficha_tecnica: document.getElementById('form-p-ficha').value,
         social_cross: document.getElementById('form-p-cross').value,
@@ -271,7 +342,7 @@ function saveProduct() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-CSRFToken': getCookie('csrftoken')
+            'X-CSRFToken': getCsrfToken()
         },
         body: JSON.stringify(data),
     })

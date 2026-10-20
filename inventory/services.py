@@ -39,6 +39,7 @@ from decimal import Decimal
 
 from django.db import transaction
 
+from .calculos import calcular_factor_descuento
 from .models import (
     Articulo,
     Almacen,
@@ -301,6 +302,71 @@ def calcular_stock_combo(combo: Articulo, almacen: Almacen) -> int:
     return min(stocks_posibles) if stocks_posibles else 0
 
 
+def calcular_stock_combo_desde_inventario(receta, almacen_ids, inventario_index) -> int:
+    """
+    Calcula el stock máximo de un combo a partir de datos YA cargados.
+
+    Réplica en lote la semántica de :func:`calcular_stock_combo`, pero sin
+    ejecutar queries: no recibe modelos con manager sino estructuras en
+    memoria. Se usa en el dashboard para eliminar el N+1.
+
+    Fórmula (idéntica a ``calcular_stock_combo``)::
+
+        Stock_Combo(almacén) = min( floor(S(componente) / cantidad_requerida) )
+
+    y el valor devuelto es el máximo entre los almacenes evaluados.
+
+    Reglas de borde (idénticas a ``calcular_stock_combo``):
+
+    * Receta vacía → 0.
+    * Cualquier ``cantidad_requerida <= 0`` → 0 (receta inválida).
+    * Si a un almacén le falta CUALQUIER componente en el índice → ese
+      almacén aporta 0 (no bloquea a los demás).
+    * Sin almacenes → 0.
+
+    Args:
+        receta: iterable de items con ``componente_id`` y
+            ``cantidad_requerida`` (ej. ``RecetaCombo``).
+        almacen_ids: iterable de ids de almacenes a evaluar.
+        inventario_index: dict ``(articulo_id, almacen_id) ->
+            cantidad_disponible`` con el inventario precargado.
+
+    Returns:
+        int: máximo de combos armables entre los almacenes (mínimo 0).
+    """
+    items = list(receta)
+
+    if not items:
+        return 0
+
+    for item in items:
+        if item.cantidad_requerida <= 0:
+            return 0
+
+    stock_max = 0
+
+    for almacen_id in almacen_ids:
+        stocks_posibles = []
+        for item in items:
+            stock_componente = inventario_index.get(
+                (item.componente_id, almacen_id)
+            )
+            if stock_componente is None:
+                # Componente sin inventario en este almacén → combo = 0 aquí.
+                stocks_posibles = []
+                break
+            stocks_posibles.append(
+                int(stock_componente // item.cantidad_requerida)
+            )
+
+        if stocks_posibles:
+            stock_almacen = min(stocks_posibles)
+            if stock_almacen > stock_max:
+                stock_max = stock_almacen
+
+    return stock_max
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCIÓN: Procesar Salida de Combo (Desagregación Atómica)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -318,7 +384,7 @@ def procesar_salida_combo(
     de forma atómica en el inventario del almacén indicado.
 
     El flujo es:
-    1. Verifica que el combo tiene stock suficiente (calcular_stock_combo ≥ cantidad_combos).
+    1. Verifica que el combo tiene stock suficiente (calcular_stock_combo >= cantidad_combos).
     2. Para cada componente en la receta, calcula la cantidad a descontar:
            cantidad_a_descontar = cantidad_requerida_en_receta × cantidad_combos
     3. Llama a registrar_movimiento() para cada componente dentro del mismo bloque
@@ -614,7 +680,7 @@ def procesar_carga_masiva(
                     raise ValueError("valor negativo")
             except (InvalidOperation, ValueError):
                 raise ValueError(
-                    f"Costo inválido: '{costo_raw}'. Debe ser un número ≥ 0."
+                    f"Costo inválido: '{costo_raw}'. Debe ser un número >= 0."
                 )
 
             # ── Parseo numérico: Cantidad (opcional, default 0) ──────────────
@@ -627,7 +693,7 @@ def procesar_carga_masiva(
                         raise ValueError("valor negativo")
                 except (InvalidOperation, ValueError):
                     raise ValueError(
-                        f"Cantidad inválida: '{cantidad_raw}'. Debe ser un número ≥ 0 o estar vacío."
+                        f"Cantidad inválida: '{cantidad_raw}'. Debe ser un número >= 0 o estar vacío."
                     )
 
             # ── Parseo numérico: Precio_Divisa (opcional) ────────────────────
@@ -639,7 +705,7 @@ def procesar_carga_masiva(
                         raise ValueError("valor negativo")
                 except (InvalidOperation, ValueError):
                     raise ValueError(
-                        f"Precio_Divisa inválido: '{precio_raw}'. Debe ser un número ≥ 0 o estar vacío."
+                        f"Precio_Divisa inválido: '{precio_raw}'. Debe ser un número >= 0 o estar vacío."
                     )
 
             # ── Resolución de almacén (col F override) ───────────────────────
@@ -897,7 +963,7 @@ def procesar_carga_masiva_excel(file_io, empresa_id, usuario=''):
                         raise ValueError("negativo")
                 except (InvalidOperation, ValueError):
                     raise ValueError(
-                        f"Fila {fila_num} [{sku}]: Costo inválido '{costo_raw}'. Debe ser un número ≥ 0."
+                        f"Fila {fila_num} [{sku}]: Costo inválido '{costo_raw}'. Debe ser un número >= 0."
                     )
 
                 if cantidad_raw is None or str(cantidad_raw).strip() == '':
@@ -1166,6 +1232,23 @@ def resolver_colision(
 # TICKET #5: MÓDULO DE VENTAS Y EMISIÓN DE NOTAS DE ENTREGA
 # ═══════════════════════════════════════════════════════════════════════
 
+def redondear_a_multiplo(valor, factor):
+    """Redondea `valor` al múltiplo de `factor` más cercano (mitad hacia arriba).
+
+    Equivale al Excel: SI(RESIDUO(v;f) < f/2; MULTIPLO.INFERIOR; MULTIPLO.SUPERIOR)
+    con desempate hacia arriba (32.5 con factor 5 → 35; 32.4 → 30).
+    Si el factor es inválido (<= 0 o no numérico), devuelve el valor intacto.
+    """
+    from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+    try:
+        v = Decimal(str(valor))
+        f = Decimal(str(factor))
+    except (InvalidOperation, ValueError, TypeError):
+        return valor
+    if f <= 0:
+        return v
+    return ((v / f).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * f)
+
 @transaction.atomic
 def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='',
                     observaciones='', empresa_id=None,
@@ -1400,6 +1483,17 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='
         precio_directo_bcv = (precio_base * tasa_aplicada).quantize(Decimal('0.01'))
         precio_ajustado_bcv = (precio_ajustado * tasa_aplicada).quantize(Decimal('0.01'))
 
+        # Redondeo global opcional (USD y Bs): se aplica sobre los snapshots para
+        # que líneas, subtotales, IVA, totales y PDFs queden consistentes.
+        # Encadenado: primero USD, luego Bs desde el USD ya redondeado, para
+        # que el tipo de cambio implícito (Bs/USD) siga siendo la tasa aplicada.
+        if getattr(config, 'redondeo_activo', False):
+            f_red = getattr(config, 'factor_redondeo', None) or Decimal('5')
+            precio_base = redondear_a_multiplo(precio_base, f_red)
+            precio_ajustado = redondear_a_multiplo(precio_ajustado, f_red)
+            precio_directo_bcv = redondear_a_multiplo(precio_base * tasa_aplicada, f_red)
+            precio_ajustado_bcv = redondear_a_multiplo(precio_ajustado * tasa_aplicada, f_red)
+
         # IVA snapshot — preferir el del item si la UI lo manda (1.1.2 O2);
         # caer al del Articulo si no viene (compat hacia atrás).
         if iva_porcentaje_item is not None:
@@ -1544,7 +1638,10 @@ def sincronizar_tasa_cambio() -> dict:
     _empresa_id = get_current_empresa()
     if _empresa_id is None:
         return {'ok': False, 'error': 'No se pudo determinar la empresa activa para sincronizar tasas.'}
-    config = ConfiguracionEmpresa.global_objects.get(empresa_id=_empresa_id)
+    try:
+        config = ConfiguracionEmpresa.global_objects.get(empresa_id=_empresa_id)
+    except ConfiguracionEmpresa.DoesNotExist:
+        return {'ok': False, 'error': 'Configuración de empresa no encontrada.'}
 
     if not config.api_url:
         return {'ok': False, 'error': "La URL de la API no está configurada en el sistema."}
@@ -2060,17 +2157,24 @@ def registrar_compra_proveedor(
             subtotal_usd += detalle.subtotal_usd
             iva_total_usd += detalle.iva_usd
 
-            # Actualización de Costo Base + Recalculo Precio Venta
+            # Actualización de Costo Base + Recalculo Precio Venta.
+            # Cadena de resolución: margen individual > margen global;
+            # método individual > método global > MARGIN (correcto).
             articulo.costo = costo_factura
             margen = articulo.margen_ind
+            _cfg_precios = None
             if not margen or margen <= 0:
-                config = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
-                margen = config.margen_global if config.margen_global else Decimal('30.00')
+                _cfg_precios = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
+                margen = _cfg_precios.margen_global if _cfg_precios.margen_global else Decimal('30.00')
 
-            metodo = (articulo.metodo_ganancia or 'MARKUP').upper()
+            metodo = (articulo.metodo_ganancia or '').strip().upper()
+            if metodo not in ('MARKUP', 'MARGIN'):
+                if _cfg_precios is None:
+                    _cfg_precios = ConfiguracionEmpresa.objects.get(empresa=articulo.empresa)
+                metodo = (_cfg_precios.metodo_ganancia_global or 'MARGIN').strip().upper()
             if metodo == 'MARKUP':
                 precio_recalculado = costo_factura * (Decimal('1') + (margen / Decimal('100')))
-            else:  # MARGIN
+            else:  # MARGIN (correcto): precio = costo / (1 - margen/100)
                 factor_margen = Decimal('1') - (margen / Decimal('100'))
                 if factor_margen <= 0:
                     raise ValueError("El margen comercial no puede ser igual o mayor al 100%.")
@@ -2118,7 +2222,7 @@ def registrar_compra_proveedor(
 
         # Totales finales del documento
         # Aplicar descuento global proporcionalmente a cada ítem, luego calcular IVA
-        factor_global = Decimal('1') - (descuento_global / Decimal('100'))
+        factor_global = calcular_factor_descuento(descuento_global)
         subtotal_after_discount = Decimal('0')
         iva_total_usd = Decimal('0')
         
@@ -2491,6 +2595,7 @@ def procesar_devolucion_venta(
                     detalle.almacen.nombre,
                     saldo_post,
                     cantidad_devolver,
+                    detalle.cantidad,
                 )
 
             # 7. Liberar seriales FIFO (estado VENDIDO → DISPONIBLE).

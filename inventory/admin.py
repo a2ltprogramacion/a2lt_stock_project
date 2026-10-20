@@ -98,7 +98,8 @@ class ConfiguracionEmpresaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
         ('Parámetros Financieros Globales', {
             'fields': (
                 'tasa_bcv', 'tasa_mercado', 'factor_cobertura',
-                'margen_global', 'descuento_global',
+                'margen_global', 'metodo_ganancia_global', 'descuento_global',
+                'redondeo_activo', 'factor_redondeo',
             ),
         }),
         ('Motor de API de Tasas', {

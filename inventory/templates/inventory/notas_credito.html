@@ -231,7 +231,7 @@
 
         try {
             const qs = '?tipo=' + encodeURIComponent(tipo) + '&q=' + encodeURIComponent(q);
-            const resp = await fetch(ENDPOINT_API + qs, { headers: { 'X-CSRFToken': getCookie('csrftoken') }});
+            const resp = await fetch(ENDPOINT_API + qs, { headers: { 'X-CSRFToken': getCsrfToken() }});
             const data = await resp.json();
             if (!data.ok) { showError(data.error); return; }
 
@@ -332,17 +332,6 @@
         document.getElementById('nc-submit').disabled = itemsSeleccion.size === 0;
     }
 
-    function getCookie(name) {
-        let v = null;
-        if (document.cookie) {
-            for (const c of document.cookie.split(';')) {
-                const t = c.trim();
-                if (t.startsWith(name + '=')) { v = decodeURIComponent(t.substring(name.length+1)); break; }
-            }
-        }
-        return v;
-    }
-
     function escapeHtml(s) {
         return String(s||'').replace(/[&<>"']/g, m => ({
             '&':'&','<':'<','>':'>','"':'"',"'":'''
@@ -382,7 +371,7 @@
         try {
             const resp = await fetch(ENDPOINT_CREAR, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
                 body: JSON.stringify(payload),
             });
             const data = await resp.json();

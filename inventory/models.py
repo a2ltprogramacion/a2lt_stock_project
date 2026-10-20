@@ -23,12 +23,12 @@ dentro de un bloque @transaction.atomic (implementado en services.py).
 """
 from decimal import Decimal
 
-from django.db import models
+from django.db import models, transaction
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from .managers import EmpresaManager, EmpresaQuerySet
+from .managers import EmpresaManager, EmpresaQuerySet, get_current_empresa
 
 
 # Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
@@ -108,13 +108,36 @@ class ConfiguracionEmpresa(models.Model):
         max_digits=5,
         decimal_places=2,
         default=30.00,
-        verbose_name='Margen de Ganancia Global (%)',
+        verbose_name='Margen / Markup Global (%)',
+        help_text='Porcentaje aplicado con el Método de Ganancia Global.',
+    )
+    metodo_ganancia_global = models.CharField(
+        max_length=10,
+        choices=[
+            ('MARGIN', 'Margen de Utilidad (correcto: Costo ÷ (1 − Margen))'),
+            ('MARKUP', 'Markup / Recargo (Costo × (1 + Markup))'),
+        ],
+        default='MARGIN',
+        verbose_name='Método de Ganancia Global',
+        help_text='MARGIN: precio = costo / (1 − m/100). MARKUP: precio = costo × (1 + m/100).',
     )
     descuento_global = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=5.00,
         verbose_name='Descuento Global (%)',
+    )
+    redondeo_activo = models.BooleanField(
+        default=False,
+        verbose_name='Redondeo de Precios',
+        help_text='Si está activo, los precios de venta (USD y Bs) se redondean al múltiplo del factor.',
+    )
+    factor_redondeo = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=5.00,
+        verbose_name='Factor de Redondeo',
+        help_text='Múltiplo al que se redondea (5, 4, 7, 2, 9, 1…). Debe ser mayor a 0.',
     )
     prefijo_nota_entrega = models.CharField(
         max_length=20,
@@ -240,68 +263,174 @@ class ConfiguracionEmpresa(models.Model):
         verbose_name = 'Configuración de la Empresa'
         verbose_name_plural = '02. Configuraciones de la Empresa'
 
+        # DATA-08: rangos de los montos monetarios a nivel de BD. save()
+        # (DATA-05/07) ya coerciona las tasas, pero bulk_create() y SQL
+        # crudo saltan esa capa: el esquema es la última línea de defensa.
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(tasa_bcv__gte=0),
+                name='tasa_bcv_no_negativa',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(factor_cobertura__gt=0),
+                name='factor_cobertura_positivo',
+            ),
+            # Semirango superior ABIERTO: con método MARGIN y margen=100,
+            # ``costo / (1 - margen/100)`` dividiría por cero.
+            models.CheckConstraint(
+                condition=models.Q(margen_global__gte=0)
+                & models.Q(margen_global__lt=100),
+                name='margen_rango_valido',
+            ),
+        ]
+
     def __str__(self):
         return f'Configuración: {self.empresa.nombre}'
 
     def save(self, *args, **kwargs):
-        from decimal import Decimal
-        
-        # Primero asegurar que todo sea Decimal para cálculos limpios
-        self.tasa_bcv = Decimal(str(self.tasa_bcv)) if self.tasa_bcv else Decimal('0.0000')
-        self.tasa_mercado = Decimal(str(self.tasa_mercado)) if self.tasa_mercado else Decimal('0.0000')
-        self.factor_cobertura = Decimal(str(self.factor_cobertura)) if self.factor_cobertura else Decimal('1.0000')
+        """
+        Persiste las tasas garantizando la invariante del modelo (DATA-05):
 
-        if self.pk:
-            try:
-                orig = ConfiguracionEmpresa.global_objects.get(pk=self.pk)
-                orig_tasa_bcv = Decimal(str(orig.tasa_bcv))
-                orig_tasa_mercado = Decimal(str(orig.tasa_mercado))
-                orig_factor_cobertura = Decimal(str(orig.factor_cobertura))
-            except ConfiguracionEmpresa.DoesNotExist:
-                orig = None
-                orig_tasa_bcv = Decimal('0.0000')
-                orig_tasa_mercado = Decimal('0.0000')
-                orig_factor_cobertura = Decimal('1.0000')
-        else:
-            orig = None
-            orig_tasa_bcv = Decimal('0.0000')
-            orig_tasa_mercado = Decimal('0.0000')
-            orig_factor_cobertura = Decimal('1.0000')
+            Con ``tasa_bcv > 0``:  ``tasa_mercado == tasa_bcv * factor_cobertura``
+            (ambos cuantizados a 4 decimales, ROUND_HALF_UP).
 
+        Roles de cada campo:
+            * ``tasa_bcv`` es la FUENTE (tasa oficial del BCV).
+            * ``factor_cobertura`` es la POLÍTICA COMERCIAL.
+            * ``tasa_mercado`` es DERIVADO cuando cambian BCV o factor.
+
+        Prioridad EXPLÍCITA cuando varios campos cambian en el mismo save():
+            1. Cambió el BCV               -> ``mercado = bcv * factor``:
+               la fuente manda; el mercado entrante se descarta y la
+               política (factor) se respeta.
+            2. Cambió solo el mercado      -> ``factor = mercado / bcv``.
+            3. Cambió solo el factor       -> ``mercado = bcv * factor``.
+            4. Sin cambios detectables pero estado inconsistente ->
+               el mercado manda (``factor = mercado / bcv``); si el mercado
+               es 0 -> ``mercado = bcv * factor``.
+
+        Con ``tasa_bcv == 0`` no hay división posible: el estado degrada a
+        ``factor = 1.0000`` y ``mercado = 0.0000``.
+
+        ``update_fields`` (DATA-05): los campos derivados que este método
+        recalcula se añaden SIEMPRE al conjunto, porque un
+        ``save(update_fields=['tasa_bcv'])`` que persista solo el BCV dejaría
+        la BD inconsistente con la invariante.
+        """
+        from decimal import Decimal, ROUND_HALF_UP
+
+        CUATRO = Decimal('0.0001')
+
+        def _d(valor, default):
+            return Decimal(str(valor)) if valor else Decimal(default)
+
+        # 1. Todo a Decimal para cálculos limpios.
+        self.tasa_bcv = _d(self.tasa_bcv, '0.0000')
+        self.tasa_mercado = _d(self.tasa_mercado, '0.0000')
+        self.factor_cobertura = _d(self.factor_cobertura, '1.0000')
+
+        # 2. Estado previo en BD (filter().first() en vez de try/except).
+        orig = ConfiguracionEmpresa.global_objects.filter(pk=self.pk).first() if self.pk else None
+        orig_bcv = Decimal(str(orig.tasa_bcv)) if orig else Decimal('0.0000')
+        orig_mercado = Decimal(str(orig.tasa_mercado)) if orig else Decimal('0.0000')
+        orig_factor = Decimal(str(orig.factor_cobertura)) if orig else Decimal('1.0000')
+
+        # 3. Derivación con prioridad plana y explícita.
         if self.tasa_bcv > 0:
-            cambio_mercado = (self.tasa_mercado != orig_tasa_mercado)
-            cambio_factor = (self.factor_cobertura != orig_factor_cobertura)
-            cambio_bcv = (self.tasa_bcv != orig_tasa_bcv)
-
-            if cambio_mercado and not cambio_factor:
-                # Modificó solo mercado -> recalcula factor
+            cambio_bcv = self.tasa_bcv != orig_bcv
+            cambio_mercado = self.tasa_mercado != orig_mercado
+            cambio_factor = self.factor_cobertura != orig_factor
+            if cambio_bcv:
+                # La fuente (BCV) manda; el factor es política y se respeta.
+                self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
+            elif cambio_mercado and not cambio_factor:
                 self.factor_cobertura = self.tasa_mercado / self.tasa_bcv
             elif cambio_factor and not cambio_mercado:
-                # Modificó solo factor -> recalcula mercado
                 self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
-            elif cambio_bcv:
-                # Modificó BCV -> se mantiene el factor, se recalcula mercado
+            elif self.tasa_mercado > 0 and self.tasa_mercado != (self.tasa_bcv * self.factor_cobertura):
+                # Estado inconsistente sin cambios detectables: el mercado manda.
+                self.factor_cobertura = self.tasa_mercado / self.tasa_bcv
+            elif self.factor_cobertura > 0 and self.tasa_mercado == 0:
                 self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
-            else:
-                # Si cambió mercado y factor al mismo tiempo o viene inconsistente
-                if self.tasa_mercado > 0 and self.tasa_mercado != (self.tasa_bcv * self.factor_cobertura):
-                    self.factor_cobertura = self.tasa_mercado / self.tasa_bcv
-                elif self.factor_cobertura > 0 and self.tasa_mercado == 0:
-                    self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
         else:
-            # Prevent ZeroDivisionError and maintain logical state
-            self.factor_cobertura = Decimal("1.0000")
-            self.tasa_mercado = Decimal("0.0000")
+            # Sin tasa oficial no hay división: estado degradado seguro.
+            self.factor_cobertura = Decimal('1.0000')
+            self.tasa_mercado = Decimal('0.0000')
 
-        # Ensure values are rounded properly
-        self.tasa_bcv = round(self.tasa_bcv, 4)
-        self.tasa_mercado = round(self.tasa_mercado, 4)
-        self.factor_cobertura = round(self.factor_cobertura, 4)
+        # 4. Cuantización a 4 decimales con redondeo comercial HALF_UP
+        #    (DATA-07: round() usaría banker's rounding / ROUND_HALF_EVEN).
+        self.tasa_bcv = self.tasa_bcv.quantize(CUATRO, rounding=ROUND_HALF_UP)
+        self.tasa_mercado = self.tasa_mercado.quantize(CUATRO, rounding=ROUND_HALF_UP)
+        self.factor_cobertura = self.factor_cobertura.quantize(CUATRO, rounding=ROUND_HALF_UP)
+
+        # 5. Los derivados recalculados deben persistir aunque el caller
+        #    haya pedido update_fields parciales (DATA-05).
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            kwargs['update_fields'] = list({
+                *update_fields, 'tasa_bcv', 'tasa_mercado', 'factor_cobertura',
+            })
 
         super().save(*args, **kwargs)
 
 
 
+
+
+class Correlativo(models.Model):
+    """
+    Contador atómico de correlativos por empresa y tipo de documento (EST-03).
+
+    SQLite no implementa ``SELECT ... FOR UPDATE``
+    (``has_select_for_update=False``): Django ignora la cláusula sin error, por
+    lo que el lock de fila NO protege en el backend real. La corrección se
+    garantiza con:
+        1. ``UniqueConstraint(fields=['empresa','tipo_documento'])`` aquí, y los
+           constraints de unicidad del número en cada documento, más
+        2. el bucle de reintento ante ``IntegrityError`` de
+           ``inventory.correlativos.guardar_con_reintento``.
+
+    Esta tabla es de infraestructura: su manager por defecto es un
+    ``models.Manager()`` SIN filtro de tenant. Si usara ``EmpresaManager``
+    devolvería ``.none()`` fuera de una request (trampa conocida), por lo que
+    se evita deliberadamente.
+    """
+    TIPO_NOTA_ENTREGA = 'NOTA_ENTREGA'
+    TIPO_FACTURA_COMPRA = 'FACTURA_COMPRA'
+    TIPO_NOTA_CREDITO = 'NOTA_CREDITO'
+    TIPO_CHOICES = [
+        (TIPO_NOTA_ENTREGA, 'Nota de Entrega'),
+        (TIPO_FACTURA_COMPRA, 'Factura de Compra'),
+        (TIPO_NOTA_CREDITO, 'Nota de Crédito'),
+    ]
+
+    empresa = models.ForeignKey(
+        'Empresa', on_delete=models.CASCADE, related_name='correlativos',
+        verbose_name='Empresa'
+    )
+    tipo_documento = models.CharField(
+        max_length=20, choices=TIPO_CHOICES, verbose_name='Tipo de documento'
+    )
+    ultimo_numero = models.PositiveIntegerField(
+        default=0, verbose_name='Último número emitido'
+    )
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    # Manager SIN filtro de tenant (ver docstring de la clase).
+    objects = models.Manager()
+
+    class Meta:
+        verbose_name = 'Correlativo'
+        verbose_name_plural = '14. Correlativos'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['empresa', 'tipo_documento'],
+                name='unique_correlativo_por_empresa_tipo',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.get_tipo_documento_display()} de {self.empresa_id}: {self.ultimo_numero}'
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -374,10 +503,38 @@ class Almacen(models.Model):
         verbose_name = 'Almacén'
         verbose_name_plural = '03. Almacenes'
         ordering = ['-es_principal', 'nombre']
+        constraints = [
+            # EST-11: como máximo UN almacén principal por empresa,
+            # garantizado por la BD (realce sobre la race condition del
+            # flip de save(), y cierre del hueco del admin que podía
+            # promover un segundo principal).
+            models.UniqueConstraint(
+                fields=['empresa'],
+                condition=models.Q(es_principal=True),
+                name='un_almacen_principal_por_empresa',
+            ),
+        ]
 
     def __str__(self):
         sufijo = ' ★' if self.es_principal else ''
         return f'{self.nombre}{sufijo}'
+
+    def save(self, *args, **kwargs):
+        # EST-11: a lo sumo un almacén principal por empresa. El constraint
+        # de BD cierra la carrera; este flip atómico conserva la UX de
+        # "promover" (mismo patrón aprobado para Moneda.es_base en DATA-09):
+        # al marcar un almacén como principal, el anterior de la MISMA
+        # empresa se degrada en la misma transacción, en lugar de estallar
+        # con un IntegrityError. Usa global_objects porque puede ejecutarse
+        # sin contexto de tenant (signals, scripts, migraciones).
+        if self.es_principal and self.empresa_id:
+            with transaction.atomic():
+                Almacen.global_objects.filter(
+                    empresa_id=self.empresa_id, es_principal=True,
+                ).exclude(pk=self.pk).update(es_principal=False)
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -402,8 +559,8 @@ class Articulo(models.Model):
         ('OTROS', 'Otros'),
     ]
     METODO_GANANCIA_CHOICES = [
-        ('MARKUP', 'Markup (sobre el costo)'),
-        ('MARGIN', 'Margen Real (sobre el precio de venta)'),
+        ('MARGIN', 'Margen de Utilidad (correcto: Costo ÷ (1 − Margen))'),
+        ('MARKUP', 'Markup / Recargo (Costo × (1 + Markup))'),
     ]
 
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='articulos')
@@ -458,8 +615,9 @@ class Articulo(models.Model):
     metodo_ganancia = models.CharField(
         max_length=10,
         choices=METODO_GANANCIA_CHOICES,
-        default='MARKUP',
-        verbose_name='Método de Cálculo de Ganancia',
+        default='MARGIN',
+        verbose_name='Método de Ganancia Individual',
+        help_text='MARGIN: precio = costo / (1 − m/100). MARKUP: precio = costo × (1 + m/100).',
     )
     margen_ind = models.DecimalField(
         max_digits=5,
@@ -707,7 +865,9 @@ class RecetaCombo(models.Model):
 class Contacto(models.Model):
     """
     Directorio unificado de clientes y proveedores (ADR-05).
-    Los campos exclusivos de proveedores son opcionales (null/blank).
+    Los campos exclusivos de proveedores siguen siendo opcionales en el
+    esquema (CLIENTE no los usa), pero para PROVEEDOR son obligatorios vía
+    clean() y CheckConstraint de BD (DATA-04).
     La pk es la identificación fiscal/personal para evitar duplicados.
     """
 
@@ -786,9 +946,47 @@ class Contacto(models.Model):
         verbose_name = 'Contacto'
         verbose_name_plural = '04. Contactos (Clientes y Proveedores)'
         ordering = ['tipo', 'nombre']
+        constraints = [
+            # DATA-04: un PROVEEDOR debe tener rif y asesor SIEMPRE, incluso
+            # por vías que saltan el formulario (admin, shell, scripts,
+            # bulk_create). El IS NULL explícito es CRÍTICO en SQLite: un
+            # CHECK que evalúa a NULL pasa; con (rif IS NULL OR rif = '')
+            # el resultado es FALSE, no NULL. Para CLIENTE la condición
+            # colapsa a TRUE explícito (ADR-05).
+            models.CheckConstraint(
+                condition=~models.Q(
+                    models.Q(tipo='PROVEEDOR')
+                    & (models.Q(rif__isnull=True) | models.Q(rif=''))
+                ),
+                name='proveedor_requiere_rif',
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(
+                    models.Q(tipo='PROVEEDOR')
+                    & (
+                        models.Q(nombre_asesor__isnull=True)
+                        | models.Q(nombre_asesor='')
+                    )
+                ),
+                name='proveedor_requiere_asesor',
+            ),
+        ]
 
     def __str__(self):
         return f'[{self.get_tipo_display()}] {self.nombre} ({self.identificacion})'
+
+    def clean(self):
+        super().clean()
+        if self.tipo == 'PROVEEDOR':
+            errores = {}
+            if not (self.rif or '').strip():
+                errores['rif'] = 'El RIF es obligatorio para proveedores.'
+            if not (self.nombre_asesor or '').strip():
+                errores['nombre_asesor'] = (
+                    'El nombre del asesor es obligatorio para proveedores.'
+                )
+            if errores:
+                raise ValidationError(errores)
 
 
 class ClienteManager(EmpresaManager):
@@ -928,6 +1126,14 @@ class DocumentoCompra(models.Model):
                 condition=models.Q(numero_interno__gt=''),
                 name='unique_numero_interno_compra_per_empresa'
             ),
+            # EST-03: `numero` tiene default=0, así que varias filas "vacías"
+            # (numero=0) chocarían entre sí si no se condiciona a numero>0.
+            # El condition hace la unicidad efectiva sólo para correlativos reales.
+            models.UniqueConstraint(
+                fields=['empresa', 'numero'],
+                condition=models.Q(numero__gt=0),
+                name='unique_numero_compra_per_empresa'
+            ),
         ]
 
     def __str__(self):
@@ -936,35 +1142,29 @@ class DocumentoCompra(models.Model):
     def save(self, *args, **kwargs):
         """
         Auto-genera:
-          - numero: correlativo entero por empresa (respetando correlativo_inicial_factura_compra)
+          - numero: correlativo entero por empresa (EST-03: vía
+            inventory.correlativos, con unique constraint + reintento).
           - numero_interno: formato {prefijo}-{numero:08d} (ej: FC-00000008)
         Sólo si no vienen ya poblados (permite override para casos especiales).
         """
+        # Persistencia interna del servicio de correlativos: evita recursión.
+        if kwargs.pop('_correlativo_gestionado', False):
+            return super().save(*args, **kwargs)
+
         if not self.numero:
-            from django.db.models import Max
-            from .models import DocumentoCompra
-            max_num = DocumentoCompra.global_objects.filter(
-                empresa=self.empresa
-            ).aggregate(max_num=Max('numero'))['max_num']
-            try:
-                inicial = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).correlativo_inicial_factura_compra
-            except ConfiguracionEmpresa.DoesNotExist:
-                inicial = 1
-            if max_num:
-                self.numero = max_num + 1
-            else:
-                self.numero = max(inicial, 1)
+            from .correlativos import TIPO_FACTURA_COMPRA, guardar_con_reintento
+            return guardar_con_reintento(
+                self, TIPO_FACTURA_COMPRA,
+                obtener_prefijo=self._prefijo_correlativo,
+            )
         if not self.numero_interno:
-            try:
-                prefijo = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).prefijo_factura_compra
-            except ConfiguracionEmpresa.DoesNotExist:
-                prefijo = 'FC'
-            self.numero_interno = f'{prefijo}-{self.numero:08d}'
+            self.numero_interno = f'{self._prefijo_correlativo()}-{self.numero:08d}'
         super().save(*args, **kwargs)
+
+    def _prefijo_correlativo(self):
+        """Prefijo configurado para el correlativo (tenant-safe)."""
+        from .correlativos import TIPO_FACTURA_COMPRA, leer_prefijo
+        return leer_prefijo(self.empresa_id, TIPO_FACTURA_COMPRA)
 
     @property
     def subtotal_usd(self):
@@ -1434,35 +1634,29 @@ class NotaEntrega(models.Model):
     def save(self, *args, **kwargs):
         """
         Auto-genera:
-          - numero: correlativo entero por empresa (respetando correlativo_inicial_nota)
+          - numero: correlativo entero por empresa (EST-03: vía
+            inventory.correlativos, con unique constraint + reintento).
           - numero_nota: formato {prefijo}-{numero:08d} (ej: NE-00000008)
         Sólo si no vienen ya poblados (permite override para casos especiales).
         """
+        # Persistencia interna del servicio de correlativos: evita recursión.
+        if kwargs.pop('_correlativo_gestionado', False):
+            return super().save(*args, **kwargs)
+
         if not self.numero:
-            from django.db.models import Max
-            max_num = NotaEntrega.global_objects.filter(
-                empresa=self.empresa
-            ).aggregate(max_num=Max('numero'))['max_num']
-            # Arrancar desde correlativo_inicial_nota configurado, o 1 si no hay config
-            try:
-                inicial = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).correlativo_inicial_nota
-            except ConfiguracionEmpresa.DoesNotExist:
-                inicial = 1
-            if max_num:
-                self.numero = max_num + 1
-            else:
-                self.numero = max(inicial, 1)
+            from .correlativos import TIPO_NOTA_ENTREGA, guardar_con_reintento
+            return guardar_con_reintento(
+                self, TIPO_NOTA_ENTREGA,
+                obtener_prefijo=self._prefijo_correlativo,
+            )
         if not self.numero_nota:
-            try:
-                prefijo = ConfiguracionEmpresa.objects.get(
-                    empresa_id=self.empresa_id
-                ).prefijo_nota_entrega
-            except ConfiguracionEmpresa.DoesNotExist:
-                prefijo = 'NE'
-            self.numero_nota = f'{prefijo}-{self.numero:08d}'
+            self.numero_nota = f'{self._prefijo_correlativo()}-{self.numero:08d}'
         super().save(*args, **kwargs)
+
+    def _prefijo_correlativo(self):
+        """Prefijo configurado para el correlativo de notas (tenant-safe)."""
+        from .correlativos import TIPO_NOTA_ENTREGA, leer_prefijo
+        return leer_prefijo(self.empresa_id, TIPO_NOTA_ENTREGA)
 
     @property
     def subtotal_usd(self):
@@ -1523,10 +1717,11 @@ class DetalleNotaEntrega(models.Model):
         Almacen,
         on_delete=models.PROTECT,
         related_name='detalles_nota_entrega',
-        null=True,
-        blank=True,
         verbose_name='Almacén de Origen',
-        help_text='Almacén desde donde se ejecuta la rebaja real de stock.',
+        help_text=(
+            'Obligatorio: almacén desde donde se ejecuta la rebaja real de '
+            'stock. Garantiza la trazabilidad de Kárdex de cada línea.'
+        ),
     )
     cantidad = models.DecimalField(
         max_digits=12,
@@ -1586,6 +1781,28 @@ class DetalleNotaEntrega(models.Model):
     class Meta:
         verbose_name = 'Detalle de Nota de Entrega'
         verbose_name_plural = '12. Detalles de Notas de Entrega'
+
+        # DATA-08: rangos de los montos por línea a nivel de BD. Los
+        # snapshots de IVA/descuento no son nullable (default 0.00), así
+        # que el CHECK no necesita la cláusula isnull de DATA-04.
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cantidad__gt=0),
+                name='cantidad_positiva',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    iva_porcentaje__gte=0, iva_porcentaje__lte=100
+                ),
+                name='iva_rango',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    descuento_aplicado__gte=0, descuento_aplicado__lte=100
+                ),
+                name='descuento_rango',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.nota_entrega} | {self.articulo.nombre} × {self.cantidad}'
@@ -1817,6 +2034,19 @@ class NotaCredito(models.Model):
                 ),
                 name='nota_credito_un_origen_exacto',
             ),
+            # EST-03: `numero`/`numero_control` admiten valores "vacíos"
+            # (default=0 y ''). Sin `condition`, todas las filas vacías
+            # colisionarían entre sí al no haber correlativo asignado todavía.
+            models.UniqueConstraint(
+                fields=['empresa', 'numero'],
+                condition=models.Q(numero__gt=0),
+                name='unique_numero_nc_per_empresa',
+            ),
+            models.UniqueConstraint(
+                fields=['empresa', 'numero_control'],
+                condition=~models.Q(numero_control=''),
+                name='unique_numero_control_nc_per_empresa',
+            ),
         ]
 
     def __str__(self):
@@ -1825,43 +2055,40 @@ class NotaCredito(models.Model):
     def save(self, *args, **kwargs):
         """
         Genera automáticamente `numero` y `numero_control` en save() si no están.
-        Misma mecánica que NotaEntrega y DocumentoCompra:
-        - numero = Max('numero')+1 dentro de la empresa (inicia en
+        EST-03: delega en inventory.correlativos (unique constraint + reintento)
+        en lugar de calcular el Max inline.
+        - numero = siguiente correlativo por empresa (inicia en
           ConfiguracionEmpresa.correlativo_inicial_nota_credito).
         - numero_control = f"{prefijo}-{numero:08d}".
         - prefijo se lee de ConfiguracionEmpresa si está vacío.
         """
+        # Persistencia interna del servicio de correlativos: evita recursión.
+        if kwargs.pop('_correlativo_gestionado', False):
+            return super().save(*args, **kwargs)
+
         if not self.numero or self.numero == 0:
-            self.numero = NotaCredito._next_correlativo(self.empresa_id)
+            from .correlativos import TIPO_NOTA_CREDITO, guardar_con_reintento
+            return guardar_con_reintento(
+                self, TIPO_NOTA_CREDITO,
+                obtener_prefijo=self._prefijo_correlativo,
+            )
         # Prefijo: si no viene, leerlo de la config del tenant.
         if not self.prefijo:
-            try:
-                from .models import ConfiguracionEmpresa
-                config = ConfiguracionEmpresa.global_objects.get(
-                    empresa_id=self.empresa_id
-                )
-                self.prefijo = config.prefijo_nota_credito or 'NC'
-            except Exception:
-                self.prefijo = 'NC'
+            self.prefijo = self._prefijo_correlativo()
         if not self.numero_control:
             self.numero_control = f"{self.prefijo}-{self.numero:08d}"
         super().save(*args, **kwargs)
 
+    def _prefijo_correlativo(self):
+        """Prefijo configurado para el correlativo de NC (tenant-safe)."""
+        from .correlativos import TIPO_NOTA_CREDITO, leer_prefijo
+        return leer_prefijo(self.empresa_id, TIPO_NOTA_CREDITO)
+
     @staticmethod
     def _next_correlativo(empresa_id):
-        """Siguiente correlativo por empresa. Usa correlativo_inicial si no hay previas."""
-        from django.db.models import Max
-        try:
-            from .models import ConfiguracionEmpresa
-            config = ConfiguracionEmpresa.objects.get(empresa_id=empresa_id)
-            base = max(1, int(config.correlativo_inicial_nota_credito or 1))
-        except Exception:
-            base = 1
-        max_actual = NotaCredito.global_objects.filter(empresa_id=empresa_id).aggregate(
-            m=Max('numero')
-        )['m'] or 0
-        siguiente = max(int(max_actual) + 1, base)
-        return siguiente
+        """Deprecado: delega en el servicio de correlativos (EST-03)."""
+        from .correlativos import TIPO_NOTA_CREDITO, siguiente_numero
+        return siguiente_numero(empresa_id, TIPO_NOTA_CREDITO)
 
 
 class DetalleNotaCredito(models.Model):
@@ -2020,25 +2247,49 @@ class Moneda(models.Model):
         verbose_name_plural = 'Monedas'
         unique_together = [('empresa', 'codigo')]
         ordering = ['es_base', 'codigo']
+        constraints = [
+            # DATA-09: como máximo UNA moneda base por empresa, garantizado por
+            # la BD (realce sobre la race condition de save()).
+            models.UniqueConstraint(
+                fields=['empresa'],
+                condition=models.Q(es_base=True),
+                name='una_moneda_base_por_empresa',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.codigo} ({self.simbolo})"
 
     def save(self, *args, **kwargs):
-        # Garantizar que solo haya UNA moneda es_base=True por tenant.
-        if self.es_base:
-            qs = Moneda.objects.filter(
-                empresa=self.empresa, es_base=True
-            ).exclude(pk=self.pk)
-            qs.update(es_base=False)
+        # DATA-09: el "desmarque" de la base anterior se conserva para mantener
+        # la UX (promover una moneda no exige bajar la anterior a mano), pero se
+        # hace dentro de una transacción y SIN filtro de tenant (global_objects):
+        # el manager por defecto devuelve .none() fuera de una request y el
+        # update no se aplicaría, violando el UniqueConstraint.
+        if self.es_base and self.empresa_id:
+            with transaction.atomic():
+                Moneda.global_objects.filter(
+                    empresa_id=self.empresa_id, es_base=True
+                ).exclude(pk=self.pk).update(es_base=False)
+                super().save(*args, **kwargs)
+            return
         super().save(*args, **kwargs)
 
 
 class TasaCambio(models.Model):
     """
-    Historico inmutable de tasas de cambio por par de monedas y fecha.
-    Cada snapshot de AuditoriaTasa o sincronizacion guarda un registro
-    aqui para conservar trazabilidad historica.
+    Tasa de cambio VIGENTE por (empresa, par de monedas, dia).
+
+    Semantica ratificada (DATA-10, spec P1, ratificado 2026-10-20): existe
+    UNA sola tasa vigente por (empresa, moneda_origen, moneda_destino,
+    fecha), garantizada por la BD mediante el constraint
+    ``unique_tasa_par_fecha``. Corregir la tasa de un dia es un UPDATE del
+    registro del dia; la trazabilidad de cada actualizacion intradia vive
+    en ``AuditoriaTasa`` (donde ya escribe la sincronizacion), no aqui.
+
+    El ``ordering`` conserva ``-creada_en`` solo como desempate defensivo:
+    es vestigial mientras el constraint garantice una fila unica por dia,
+    pero protege el orden si el constraint llegara a relajarse.
     """
     Fuente = [
         ('BCV', 'Banco Central de Venezuela (oficial)'),
@@ -2072,6 +2323,16 @@ class TasaCambio(models.Model):
     class Meta:
         verbose_name = 'Tasa de Cambio'
         verbose_name_plural = 'Tasas de Cambio'
+        constraints = [
+            # DATA-10 (spec P1, ratificado 2026-10-20): una tasa VIGENTE por
+            # (empresa, par, dia). Corregir la tasa de un dia = UPDATE de la
+            # fila del dia; la trazabilidad de cada actualizacion intradia
+            # vive en AuditoriaTasa. El indice de consulta se conserva abajo.
+            models.UniqueConstraint(
+                fields=['empresa', 'moneda_origen', 'moneda_destino', 'fecha'],
+                name='unique_tasa_par_fecha',
+            ),
+        ]
         indexes = [
             models.Index(fields=['empresa', 'moneda_origen', 'moneda_destino', '-fecha']),
         ]
