@@ -267,59 +267,88 @@ class ConfiguracionEmpresa(models.Model):
         return f'Configuración: {self.empresa.nombre}'
 
     def save(self, *args, **kwargs):
-        from decimal import Decimal
-        
-        # Primero asegurar que todo sea Decimal para cálculos limpios
-        self.tasa_bcv = Decimal(str(self.tasa_bcv)) if self.tasa_bcv else Decimal('0.0000')
-        self.tasa_mercado = Decimal(str(self.tasa_mercado)) if self.tasa_mercado else Decimal('0.0000')
-        self.factor_cobertura = Decimal(str(self.factor_cobertura)) if self.factor_cobertura else Decimal('1.0000')
+        """
+        Persiste las tasas garantizando la invariante del modelo (DATA-05):
 
-        if self.pk:
-            try:
-                orig = ConfiguracionEmpresa.global_objects.get(pk=self.pk)
-                orig_tasa_bcv = Decimal(str(orig.tasa_bcv))
-                orig_tasa_mercado = Decimal(str(orig.tasa_mercado))
-                orig_factor_cobertura = Decimal(str(orig.factor_cobertura))
-            except ConfiguracionEmpresa.DoesNotExist:
-                orig = None
-                orig_tasa_bcv = Decimal('0.0000')
-                orig_tasa_mercado = Decimal('0.0000')
-                orig_factor_cobertura = Decimal('1.0000')
-        else:
-            orig = None
-            orig_tasa_bcv = Decimal('0.0000')
-            orig_tasa_mercado = Decimal('0.0000')
-            orig_factor_cobertura = Decimal('1.0000')
+            Con ``tasa_bcv > 0``:  ``tasa_mercado == tasa_bcv * factor_cobertura``
+            (ambos cuantizados a 4 decimales, ROUND_HALF_UP).
 
+        Roles de cada campo:
+            * ``tasa_bcv`` es la FUENTE (tasa oficial del BCV).
+            * ``factor_cobertura`` es la POLÍTICA COMERCIAL.
+            * ``tasa_mercado`` es DERIVADO cuando cambian BCV o factor.
+
+        Prioridad EXPLÍCITA cuando varios campos cambian en el mismo save():
+            1. Cambió el BCV               -> ``mercado = bcv * factor``:
+               la fuente manda; el mercado entrante se descarta y la
+               política (factor) se respeta.
+            2. Cambió solo el mercado      -> ``factor = mercado / bcv``.
+            3. Cambió solo el factor       -> ``mercado = bcv * factor``.
+            4. Sin cambios detectables pero estado inconsistente ->
+               el mercado manda (``factor = mercado / bcv``); si el mercado
+               es 0 -> ``mercado = bcv * factor``.
+
+        Con ``tasa_bcv == 0`` no hay división posible: el estado degrada a
+        ``factor = 1.0000`` y ``mercado = 0.0000``.
+
+        ``update_fields`` (DATA-05): los campos derivados que este método
+        recalcula se añaden SIEMPRE al conjunto, porque un
+        ``save(update_fields=['tasa_bcv'])`` que persista solo el BCV dejaría
+        la BD inconsistente con la invariante.
+        """
+        from decimal import Decimal, ROUND_HALF_UP
+
+        CUATRO = Decimal('0.0001')
+
+        def _d(valor, default):
+            return Decimal(str(valor)) if valor else Decimal(default)
+
+        # 1. Todo a Decimal para cálculos limpios.
+        self.tasa_bcv = _d(self.tasa_bcv, '0.0000')
+        self.tasa_mercado = _d(self.tasa_mercado, '0.0000')
+        self.factor_cobertura = _d(self.factor_cobertura, '1.0000')
+
+        # 2. Estado previo en BD (filter().first() en vez de try/except).
+        orig = ConfiguracionEmpresa.global_objects.filter(pk=self.pk).first() if self.pk else None
+        orig_bcv = Decimal(str(orig.tasa_bcv)) if orig else Decimal('0.0000')
+        orig_mercado = Decimal(str(orig.tasa_mercado)) if orig else Decimal('0.0000')
+        orig_factor = Decimal(str(orig.factor_cobertura)) if orig else Decimal('1.0000')
+
+        # 3. Derivación con prioridad plana y explícita.
         if self.tasa_bcv > 0:
-            cambio_mercado = (self.tasa_mercado != orig_tasa_mercado)
-            cambio_factor = (self.factor_cobertura != orig_factor_cobertura)
-            cambio_bcv = (self.tasa_bcv != orig_tasa_bcv)
-
-            if cambio_mercado and not cambio_factor:
-                # Modificó solo mercado -> recalcula factor
+            cambio_bcv = self.tasa_bcv != orig_bcv
+            cambio_mercado = self.tasa_mercado != orig_mercado
+            cambio_factor = self.factor_cobertura != orig_factor
+            if cambio_bcv:
+                # La fuente (BCV) manda; el factor es política y se respeta.
+                self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
+            elif cambio_mercado and not cambio_factor:
                 self.factor_cobertura = self.tasa_mercado / self.tasa_bcv
             elif cambio_factor and not cambio_mercado:
-                # Modificó solo factor -> recalcula mercado
                 self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
-            elif cambio_bcv:
-                # Modificó BCV -> se mantiene el factor, se recalcula mercado
+            elif self.tasa_mercado > 0 and self.tasa_mercado != (self.tasa_bcv * self.factor_cobertura):
+                # Estado inconsistente sin cambios detectables: el mercado manda.
+                self.factor_cobertura = self.tasa_mercado / self.tasa_bcv
+            elif self.factor_cobertura > 0 and self.tasa_mercado == 0:
                 self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
-            else:
-                # Si cambió mercado y factor al mismo tiempo o viene inconsistente
-                if self.tasa_mercado > 0 and self.tasa_mercado != (self.tasa_bcv * self.factor_cobertura):
-                    self.factor_cobertura = self.tasa_mercado / self.tasa_bcv
-                elif self.factor_cobertura > 0 and self.tasa_mercado == 0:
-                    self.tasa_mercado = self.tasa_bcv * self.factor_cobertura
         else:
-            # Prevent ZeroDivisionError and maintain logical state
-            self.factor_cobertura = Decimal("1.0000")
-            self.tasa_mercado = Decimal("0.0000")
+            # Sin tasa oficial no hay división: estado degradado seguro.
+            self.factor_cobertura = Decimal('1.0000')
+            self.tasa_mercado = Decimal('0.0000')
 
-        # Ensure values are rounded properly
-        self.tasa_bcv = round(self.tasa_bcv, 4)
-        self.tasa_mercado = round(self.tasa_mercado, 4)
-        self.factor_cobertura = round(self.factor_cobertura, 4)
+        # 4. Cuantización a 4 decimales con redondeo comercial HALF_UP
+        #    (DATA-07: round() usaría banker's rounding / ROUND_HALF_EVEN).
+        self.tasa_bcv = self.tasa_bcv.quantize(CUATRO, rounding=ROUND_HALF_UP)
+        self.tasa_mercado = self.tasa_mercado.quantize(CUATRO, rounding=ROUND_HALF_UP)
+        self.factor_cobertura = self.factor_cobertura.quantize(CUATRO, rounding=ROUND_HALF_UP)
+
+        # 5. Los derivados recalculados deben persistir aunque el caller
+        #    haya pedido update_fields parciales (DATA-05).
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            kwargs['update_fields'] = list({
+                *update_fields, 'tasa_bcv', 'tasa_mercado', 'factor_cobertura',
+            })
 
         super().save(*args, **kwargs)
 
