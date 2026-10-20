@@ -8,6 +8,35 @@ vez público.
 
 ---
 
+## 2026-10-20 — Remediación de auditoría (rondas P0, P1 y P2 de integridad de datos)
+
+### Seguridad
+- **SEC-01**: `SECRET_KEY` sin fallback inseguro — `ImproperlyConfigured` si falta (`37f470c`).
+- **SEC-02**: CSRF token por DOM (`<meta name="csrf-token">` + `getCsrfToken()`) con `CSRF_COOKIE_HTTPONLY=True`; 7 plantillas migradas (`cc5a7c6`).
+
+### Bugs
+- **BUG-04**: `NameError` en `DetalleCompraQuerySet.para_empresa` por import faltante (`9a65224`).
+
+### Integridad de datos / modelo
+- **DATA-01**: cálculo único de totales/IVA/descuento en `inventory/calculos.py`; 5 vistas refactorizadas; PDF de nota alineado con pantalla (`1659d56`).
+- **DATA-02**: dashboard sin N+1 en stock de combos — 19 queries constantes (antes 43-95) (`75592c9`).
+- **DATA-03**: `DetalleNotaEntrega.almacen` obligatorio (NOT NULL) con backfill desde cabecera (`465d27a`).
+- **DATA-04**: RIF y asesor obligatorios para PROVEEDOR (clean + 2 CheckConstraint) con backfill de 5 proveedores sembrados incompletos (`9d7fa26`).
+- **DATA-05+07**: `ConfiguracionEmpresa.save()` plano con prioridad explícita y rounding comercial HALF_UP; `update_fields` persiste derivados (`3694d96`).
+- **DATA-08**: 6 CheckConstraints de rangos monetarios (tasas, factor, margen [0,100), cantidad>0, IVA y descuento [0,100]) (`cf9e618`).
+- **DATA-09**: una sola moneda base por empresa (UniqueConstraint parcial + flip atómico) (`6f8a61d`).
+- **EST-03**: correlativos atómicos (modelo `Correlativo`, constraint + reintento con backoff) (`d70f346`).
+- **EST-11**: un solo almacén principal por empresa (UniqueConstraint parcial + flip atómico) con limpieza de la empresa 34 (conservado id=56, decisión de producto) (`33dfda2`).
+
+### Infraestructura
+- Suite: 358 → **450 tests OK (6 skipped)**. Migraciones: 18 → **25** (nº 0019-0025, todas con backfill idempotente ANTES del constraint cuando la BD real tenía ofensores).
+
+### No aplicado / pendiente
+- **DATA-10** (constraint en `TasaCambio`): bloqueado por decisión de diseño (histórico vs. una tasa por día).
+- Pendiente: SEC-02b (CSP/SRI), SEC-03..07, DATA-06, EST-01/02/04/06.
+
+---
+
 ## [1.3.0] — 2026-09-27
 
 Iteración de **identidad visual + pricing**. Migración total de iconos
