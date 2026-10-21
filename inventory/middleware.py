@@ -1,5 +1,5 @@
-from django.http import HttpResponseForbidden
-from django.shortcuts import redirect
+from django.conf import settings
+from django.shortcuts import render, redirect
 from django.urls import reverse
 from django.contrib import messages
 from .managers import set_current_empresa, reset_current_empresa
@@ -66,9 +66,10 @@ class TenantMiddleware:
             La URL de login se resuelve via settings.LOGIN_URL (por
             defecto desde el name 'login' que corresponde a la raiz
             '' del app).
-          - HttpResponseForbidden (403) en caso contrario (vector de
-            seguridad real: usuario autenticado intentando acceder a
-            tenant no permitido, empresa inactiva, etc.).
+          - render de la pagina 403 (status 403, HTML con branding,
+            SEC-06) en caso contrario (vector de seguridad real:
+            usuario autenticado intentando acceder a tenant no
+            permitido, empresa inactiva, etc.).
 
         Validaciones en orden:
         1. usuario autenticado.              [redirect a login]
@@ -110,15 +111,19 @@ class TenantMiddleware:
         # 2. perfil
         perfil = getattr(user, 'perfil', None)
         if perfil is None:
-            return HttpResponseForbidden(
-                'Acceso Denegado: usuario sin perfil asignado.'
+            return render(
+                request, 'inventory/403.html',
+                {'mensaje': 'Acceso Denegado: usuario sin perfil asignado.'},
+                status=403
             )
 
         # 3. empresa_id en sesion
         empresa_id = request.session.get('empresa_id')
         if not empresa_id:
-            return HttpResponseForbidden(
-                'Acceso Denegado: no se encontro empresa asociada en la sesion.'
+            return render(
+                request, 'inventory/403.html',
+                {'mensaje': 'Acceso Denegado: no se encontro empresa asociada en la sesion.'},
+                status=403
             )
 
         # 4. empresa existe y activa
@@ -126,12 +131,16 @@ class TenantMiddleware:
         try:
             empresa = Empresa.objects.get(pk=empresa_id)
         except Empresa.DoesNotExist:
-            return HttpResponseForbidden(
-                'Acceso Denegado: la empresa asociada no existe.'
+            return render(
+                request, 'inventory/403.html',
+                {'mensaje': 'Acceso Denegado: la empresa asociada no existe.'},
+                status=403
             )
         if not empresa.activa:
-            return HttpResponseForbidden(
-                'Cuenta de comercio suspendida o inactiva.'
+            return render(
+                request, 'inventory/403.html',
+                {'mensaje': 'Cuenta de comercio suspendida o inactiva.'},
+                status=403
             )
 
         # 5. multi-tenant: empresa en empresas_permitidas del perfil
@@ -139,9 +148,34 @@ class TenantMiddleware:
         # (es el modelo raiz). Filtrar por pk directo es seguro.
         tiene_permiso = perfil.empresas_permitidas.filter(pk=empresa.id).exists()
         if not tiene_permiso:
-            return HttpResponseForbidden(
-                'Acceso Denegado: no tiene permiso para operar esta empresa.'
+            return render(
+                request, 'inventory/403.html',
+                {'mensaje': 'Acceso Denegado: no tiene permiso para operar esta empresa.'},
+                status=403
             )
 
         # OK: el ContextVar se setea fuera de _authorize
         return None
+
+
+class CspMiddleware:
+    """
+    SEC-02b: aplica la politica Content-Security-Policy (settings.CSP_POLICY)
+    a TODAS las respuestas que no traigan ya una cabecera CSP propia
+    (has_header: no sobrescribe politicas fijadas por vistas concretas).
+
+    Debe registrarse ANTES de TenantMiddleware en settings.MIDDLEWARE:
+    el TenantMiddleware retorna sus 403 con early return (sin invocar
+    self.get_response), asi que ninguna clase por DEBAJO de el en la
+    cadena llegaria a procesar esas respuestas. Por encima, esta clase
+    cubre tambien los 403 del tenant (ver test_sec02b_csp_header_en_403_del_middleware).
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if not response.has_header('Content-Security-Policy'):
+            response['Content-Security-Policy'] = settings.CSP_POLICY
+        return response
