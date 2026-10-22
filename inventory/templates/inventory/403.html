@@ -1,0 +1,32 @@
+{% extends 'inventory/base.html' %}
+
+{% block content %}
+{# SEC-06: pagina 403 con branding. El titulo es literal verificado #}
+{# por inventory/test_cases/test_security_csp_403.py (no modificar sin #}
+{# actualizar el test). El mensaje llega desde el sitio que dispara el #}
+{# 403 (middleware del tenant / vistas) y NO se altera aqui.          #}
+<div class="max-w-2xl mx-auto flex flex-col items-center justify-center text-center py-16">
+
+    <!-- Icono de bloqueo -->
+    <div class="w-28 h-28 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shadow-lg mb-8">
+        <i class="bi bi-shield-lock-fill text-rose-500 text-5xl"></i>
+    </div>
+
+    <!-- Titulo literal SEC-06 -->
+    <h2 class="text-4xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 mb-3">
+        403 — Acceso Denegado
+    </h2>
+
+    <!-- Mensaje literal del sitio que disparo el 403 -->
+    <p class="text-base text-slate-600 dark:text-slate-400 mb-10 max-w-lg">
+        {{ mensaje|default:"No tienes permiso para acceder a esta sección." }}
+    </p>
+
+    <!-- CTA: volver al inicio (login raiz '/'; login_view redirige al
+         dashboard si la sesion/tenant esta sana) -->
+    <a href="{% url 'inventory:login' %}"
+       class="bg-corporate-600 hover:bg-corporate-700 text-white font-bold py-3 px-8 rounded-xl border border-corporate-500/50 shadow-md transition-colors duration-300">
+        <i class="bi bi-house-door-fill mr-2"></i>Volver al inicio
+    </a>
+</div>
+{% endblock %}

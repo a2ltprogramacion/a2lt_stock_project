@@ -296,3 +296,46 @@ python manage.py createsuperuser
     el bloque "Detalle del Documento" a la izquierda (1/3 del 
     ancho) y la tabla de Ítems a la derecha (2/3). En pantallas 
     chicas apilan al 100%.
+
+## Despliegue con y sin reverse proxy
+
+`SECURE_PROXY_SSL_HEADER` en `settings.py` (bloque `if not DEBUG:`) 
+hace que Django confíe en la cabecera `X-Forwarded-Proto` para decidir 
+si una request llegó por HTTPS. **Este setting asume un reverse proxy 
+confiable (Apache/Nginx) delante de Django**: es el único que debe 
+fijar/sobrescribir esa cabecera.
+
+- **(a) Con proxy confiable:** el proxy DEBE fijar 
+  `X-Forwarded-Proto` y nunca reenviar la cabecera que trae el 
+  cliente: `proxy_set_header X-Forwarded-Proto $scheme;` (nginx) o 
+  `RequestHeader set X-Forwarded-Proto "https"` (Apache). `settings.py` 
+  se deja tal cual.
+- **(b) Sin proxy (LAN directa sobre HTTP):** eliminar la línea 
+  `SECURE_PROXY_SSL_HEADER` de `settings.py` y no definir 
+  `SECURE_SSL_REDIRECT` (Django no debe confiar en cabeceras que 
+  envía el cliente sin validar).
+- **(c) Vector de ataque si se ignora:** con el setting presente sin 
+  proxy, cualquiera en la LAN inyecta `X-Forwarded-Proto: https` → 
+  `request.is_secure()` retorna True sobre HTTP plano → bypass del 
+  origin-check de CSRF y cookies `Secure` viajando sin cifrar. Ver 
+  SEC-03 en `docs/AUDIT_REPORT.md`.
+
+## Notificaciones de errores 500
+
+Los errores 500 se notifican por correo a `ADMINS` (vía el handler 
+`mail_admins` / `AdminEmailHandler` del `LOGGING`). En desarrollo el 
+default `EMAIL_BACKEND` es `console`: el "email" sale por stdout, sin 
+SMTP. Para producción, activar SMTP real en `.env`:
+
+```env
+ADMIN_EMAIL=ops@tu-dominio.com
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.tu-dominio.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=smtp-usuario
+EMAIL_HOST_PASSWORD=smtp-clave
+EMAIL_USE_TLS=True
+```
+
+Sin SMTP configurado, los 500 siguen quedando en `logs/a2lt_stock.log` 
+(handler `file`).

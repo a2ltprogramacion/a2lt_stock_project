@@ -72,6 +72,12 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # SEC-02b: CSP ANTES del TenantMiddleware (no al final de la lista):
+    # el TenantMiddleware retorna sus 403 con early return, sin invocar
+    # get_response, asi que ninguna clase por DEBAJO de el procesa esas
+    # respuestas. Por encima, CspMiddleware cubre tambien los 403 del
+    # tenant con la cabecera Content-Security-Policy.
+    'inventory.middleware.CspMiddleware',
     'inventory.middleware.TenantMiddleware',
 ]
 
@@ -163,13 +169,21 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Django emite un warning si HSTS se activa sin HTTPS, asi que lo
 # aislamos de DEBUG/SessionTesting.
 if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER = True
+    # SEC-07: SECURE_BROWSER_XSS_FILTER fue eliminado (no-op desde
+    # Django 5: el header X-XSS-Protection fue deprecado por los
+    # navegadores por introducir vulnerabilidades propias).
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
     # On-premise over HTTP LAN: no forzar HTTPS redirect (delega a
     # reverse-proxy si lo hubiere). Si se quiere HTTPS obligatorio,
     # definir SECURE_SSL_REDIRECT=True via env var.
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+    # SEC-03: este setting ASUME un reverse proxy confiable (Apache/Nginx)
+    # que fija/sobrescribe X-Forwarded-Proto antes de que la request llegue
+    # a Django. Si se despliega SIN proxy, ELIMINAR esta linea: cualquiera
+    # en la LAN podria inyectar X-Forwarded-Proto: https, forzar
+    # request.is_secure()=True y bypassear el origin-check de CSRF
+    # (ver docs/OPERACION.md, "Despliegue con y sin reverse proxy").
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     # Cookies y HSTS solo bajo HTTPS real para permitir operar en LAN local sobre HTTP sin romper auth
     SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
@@ -179,9 +193,29 @@ if not DEBUG:
         SECURE_HSTS_INCLUDE_SUBDOMAINS = True
         SECURE_HSTS_PRELOAD = True  # silencia W021 del check --deploy
 
+# SEC-02b: Content-Security-Policy. 'unsafe-inline' en script-src/style-src
+# es DEUDA ACEPTADA (scripts inline del CSRF por DOM + Tailwind JIT inyecta
+# <style> inline); migrar a nonces exige rework de todas las plantillas.
+# Overridable por env para despliegues con requisitos distintos.
+# FUERA del bloque `if not DEBUG:`: la CSP aplica tambien en dev (es un
+# header inocuo para el ciclo de desarrollo local) y en la suite de tests.
+CSP_POLICY = os.environ.get(
+    'CSP_POLICY',
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'; "
+    "form-action 'self'"
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. LOGGING (always-on, con file rotativo + console)
+# 9. LOGGING (always-on: file rotativo + console + mail_admins para 500)
 # ─────────────────────────────────────────────────────────────────────────────
 LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)
@@ -214,6 +248,12 @@ LOGGING = {
             'formatter': 'verbose',
             'level': 'INFO',
         },
+        # SEC-04: notifica los ERROR (500) a ADMINS por correo. El backend
+        # de correo se define por entorno mas abajo (default console).
+        'mail_admins': {
+            'level': 'ERROR',
+            'class': 'django.utils.log.AdminEmailHandler',
+        },
     },
     'loggers': {
         'inventory': {
@@ -222,7 +262,8 @@ LOGGING = {
             'propagate': False,
         },
         'django.request': {
-            'handlers': ['file'],
+            # SEC-04: los 500 van a archivo, consola y correo de ADMINS.
+            'handlers': ['file', 'console', 'mail_admins'],
             'level': 'ERROR',
             'propagate': False,
         },
@@ -254,6 +295,17 @@ CSRF_COOKIE_HTTPONLY = True
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@localhost')
 ADMINS = [('Admin A2LT', ADMIN_EMAIL)]
 MANAGERS = ADMINS
+
+# SEC-04: el handler mail_admins necesita un backend de correo. Default
+# console (escribe el "email" en stdout): seguro en dev y tests. En
+# produccion definir EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# + EMAIL_HOST/USER/PASSWORD en el .env (ver docs/OPERACION.md).
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() == 'true'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

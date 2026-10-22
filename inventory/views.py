@@ -1373,14 +1373,18 @@ def contactos(request):
     from django.core.exceptions import ValidationError
     from django.contrib import messages
     from .managers import get_current_empresa
-    from django.http import HttpResponseForbidden
 
     # Resolver empresa activa del ContextVar (TenantMiddleware lo setea).
     # Esto reemplaza getattr(request, 'empresa', None) que NUNCA se setea
     # (el middleware solo setea el ContextVar, no request.empresa).
     empresa_id = get_current_empresa()
     if not empresa_id:
-        return HttpResponseForbidden("Sesión de empresa no detectada.")
+        # SEC-06: 403 con pagina HTML con branding (antes texto plano).
+        return render(
+            request, 'inventory/403.html',
+            {'mensaje': 'Sesión de empresa no detectada.'},
+            status=403
+        )
 
     if request.method == 'POST':
         tipo = request.POST.get('tipo', 'CLIENTE')
