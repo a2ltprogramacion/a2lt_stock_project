@@ -2313,11 +2313,15 @@ class TasaCambio(models.Model):
     empresa = models.ForeignKey(
         Empresa, on_delete=models.CASCADE, related_name='tasas_cambio'
     )
+    # RESTRICT (no PROTECT): permite el teardown de un tenant recién
+    # sembrado (la tasa cae por CASCADE de ``empresa`` en la misma
+    # operación), pero un ``moneda.delete()`` directo con historial de
+    # tasas sigue bloqueado con RestrictedError.
     moneda_origen = models.ForeignKey(
-        Moneda, on_delete=models.PROTECT, related_name='tasas_origen'
+        Moneda, on_delete=models.RESTRICT, related_name='tasas_origen'
     )
     moneda_destino = models.ForeignKey(
-        Moneda, on_delete=models.PROTECT, related_name='tasas_destino'
+        Moneda, on_delete=models.RESTRICT, related_name='tasas_destino'
     )
     tasa = models.DecimalField(
         max_digits=18, decimal_places=6,
