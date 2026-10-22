@@ -1407,6 +1407,18 @@ class MovimientoKardex(models.Model):
         verbose_name = 'Movimiento del Kárdex'
         verbose_name_plural = '10. Movimientos del Kárdex'
         ordering = ['-fecha_hora']
+        indexes = [
+            # DATA-06: acelera los reportes de kárdex filtrados por
+            # articulo + almacen + rango de fecha. Igualdades primero y
+            # rango al final: así SQLite puede seek con las 3 condiciones.
+            # Con fecha_hora liderando, el rango anula el seek de las
+            # igualdades y el optimizador prefiere los índices FK de
+            # 1 columna (ver test_kardex_index.py).
+            models.Index(
+                fields=['articulo', 'almacen', 'fecha_hora'],
+                name='idx_kardex_fecha_art_alm',
+            ),
+        ]
 
     def __str__(self):
         return (
