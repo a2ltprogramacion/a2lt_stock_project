@@ -1643,7 +1643,7 @@ class TestExportacionLogicaSaaS(TestCase):
             cantidad=Decimal('5'),
             saldo_resultante=Decimal('5'),
             concepto='AJUSTE_ENTRADA',
-            usuario='Admin',
+            usuario_nombre='Admin',
             lote_carga=f"TEST-{random.randint(1000, 9999)}"
         )
         MovimientoKardex.objects.filter(pk=mov_viejo.pk).update(fecha_hora=timezone.now() - timedelta(days=30 * 8))

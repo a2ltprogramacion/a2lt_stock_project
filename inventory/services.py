@@ -37,6 +37,7 @@ como mapa de navegación.
 import logging
 from decimal import Decimal
 
+from django.contrib.auth.models import User
 from django.db import transaction
 
 from .calculos import calcular_factor_descuento
@@ -55,6 +56,30 @@ logger = logging.getLogger(__name__)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# EST-04 (REQ-EST04-05): HELPER ÚNICO DE RESOLUCIÓN str|User
+# ─────────────────────────────────────────────────────────────────────────────
+
+def resolver_usuario(usuario):
+    """EST-04 REQ-EST04-05: str|User|None -> (User|None, snapshot).
+
+    Instancia ``User`` → FK + ``user.username``; string con usuario
+    existente → FK resuelta + snapshot; string sin match (``'seed_db'``,
+    ``'Sistema'``, literales de tests) o vacío → FK ``NULL`` + snapshot
+    preservado — el snapshot ES la trazabilidad. Público: las vistas lo
+    reusan (EST-05).
+    """
+    if not usuario:
+        return None, ''
+    if isinstance(usuario, User):
+        return usuario, usuario.username
+    nombre = str(usuario)
+    try:
+        return User.objects.get(username=nombre), nombre
+    except User.DoesNotExist:
+        return None, nombre
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # FUNCIÓN PRINCIPAL: Registrar Movimiento de Kárdex
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -68,7 +93,7 @@ def registrar_movimiento(
     nota_entrega: NotaEntrega = None,
     lote_carga: str = '',
     detalle_adicional: str = '',
-    usuario: str = '',
+    usuario: str | User | None = None,
     documento_compra = None,
     permite_saldo_negativo: bool = False,
 ) -> MovimientoKardex:
@@ -207,6 +232,8 @@ def registrar_movimiento(
         )
 
     # ── Creación del registro en el Kárdex ───────────────────────────────────
+    # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
+    usuario_fk, usuario_nombre = resolver_usuario(usuario)
     movimiento = MovimientoKardex.objects.create(
         empresa=articulo.empresa,
         articulo=articulo,
@@ -219,7 +246,8 @@ def registrar_movimiento(
         documento_compra=documento_compra,
         lote_carga=lote_carga or '',
         detalle_adicional=detalle_adicional or '',
-        usuario=usuario or '',
+        usuario=usuario_fk,
+        usuario_nombre=usuario_nombre,
     )
 
     return movimiento
@@ -377,7 +405,7 @@ def procesar_salida_combo(
     almacen: Almacen,
     cantidad_combos,
     nota_entrega: NotaEntrega = None,
-    usuario: str = '',
+    usuario: str | User | None = None,
 ) -> list:
     """
     Procesa la venta de un COMBO desagregando sus componentes físicos
@@ -567,7 +595,7 @@ def _generar_reporte_txt(
 def procesar_carga_masiva(
     archivo_excel,
     almacen_id: int,
-    usuario: str = '',
+    usuario: str | User | None = None,
 ) -> dict:
     """
     Procesa un archivo Excel (.xlsx) de carga masiva de inventario.
@@ -858,7 +886,7 @@ def procesar_carga_masiva(
 # FUNCIÓN: Procesar Carga Masiva desde Excel — Atómica y Estricta (Ticket #27)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def procesar_carga_masiva_excel(file_io, empresa_id, usuario=''):
+def procesar_carga_masiva_excel(file_io, empresa_id, usuario: str | User | None = None):
     """
     Procesa un archivo Excel de carga masiva de forma estrictamente atómica.
 
@@ -1077,7 +1105,7 @@ def resolver_colision(
     decision: str,
     cantidad_excel,
     lote_id: str,
-    usuario: str = '',
+    usuario: str | User | None = None,
     costo=None,
     precio_divisa=None,
     nombre_excel: str = '',
@@ -1250,7 +1278,7 @@ def redondear_a_multiplo(valor, factor):
     return ((v / f).quantize(Decimal('1'), rounding=ROUND_HALF_UP) * f)
 
 @transaction.atomic
-def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario='',
+def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario: str | User | None = None,
                     observaciones='', empresa_id=None,
                     tipo_documento='NOTA_ENTREGA', numero_factura='',
                     descuento_global=Decimal('0')) -> NotaEntrega:
@@ -1730,7 +1758,7 @@ def sincronizar_tasa_cambio() -> dict:
 # 7. MOTOR DE REVERSO ATÓMICO DE LOTES DE CARGA MASIVA
 # ─────────────────────────────────────────────────────────────────────────────
 
-def revertir_carga_masiva(lote_id: str, usuario: str = '') -> dict:
+def revertir_carga_masiva(lote_id: str, usuario: str | User | None = None) -> dict:
     """
     Deshace atómicamente una carga masiva completa.
     Verifica que el inventario no haya sido alterado con salidas
@@ -1849,7 +1877,7 @@ def revertir_carga_masiva(lote_id: str, usuario: str = '') -> dict:
 # 8. MÓDULO DE MOVIMIENTOS Y AJUSTES MANUALES
 # ─────────────────────────────────────────────────────────────────────────────
 
-def transferir_mercancia(articulo_sku: str, almacen_origen_id: int, almacen_destino_id: int, cantidad: Decimal, usuario: str = '') -> dict:
+def transferir_mercancia(articulo_sku: str, almacen_origen_id: int, almacen_destino_id: int, cantidad: Decimal, usuario: str | User | None = None) -> dict:
     """
     Transfiere stock físico de un almacén a otro de forma atómica y auditable.
     """
@@ -1897,7 +1925,7 @@ def transferir_mercancia(articulo_sku: str, almacen_origen_id: int, almacen_dest
     return {'ok': True, 'mensaje': 'Transferencia ejecutada correctamente.'}
 
 
-def ejecutar_ajuste_manual(articulo_sku: str, almacen_id: int, nueva_cantidad_fisica: Decimal, motivo: str, usuario: str = '') -> dict:
+def ejecutar_ajuste_manual(articulo_sku: str, almacen_id: int, nueva_cantidad_fisica: Decimal, motivo: str, usuario: str | User | None = None) -> dict:
     """
     Asienta una diferencia matemática (Delta) para cuadrar el Kárdex
     con el inventario físico real.
@@ -1959,7 +1987,7 @@ def ejecutar_ajuste_manual(articulo_sku: str, almacen_id: int, nueva_cantidad_fi
 def registrar_compra_proveedor(
     empresa_id=None, proveedor_id=None, tipo_documento='FACTURA_COMPRA',
     numero_factura='', fecha_compra=None, descuento_global=Decimal('0.00'),
-    lista_items=None, almacen_id=None, usuario='',
+    lista_items=None, almacen_id=None, usuario: str | User | None = None,
     observaciones='', **kwargs) -> dict:
     """
     Registra el ingreso de mercancía por compra a proveedor mediante un Documento de Compra.
@@ -2335,7 +2363,7 @@ def exportar_datos_tenant(empresa_id: int, meses_historico: int = 6) -> dict:
 
 
 @transaction.atomic
-def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
+def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str, usuario: str | User = 'Sistema') -> dict:
     from .models import NotaEntrega, SerialArticulo
     from .services import registrar_movimiento
 
@@ -2357,7 +2385,9 @@ def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
             concepto='DEVOLUCION_VENTA',
             detalle_adicional=f"Reverso de Venta (Nota #{nota.numero}): {motivo}",
             nota_entrega=nota,
-            usuario='Sistema'
+            # EST-04 (REQ-EST04-07): registra quién anuló; default 'Sistema'
+            # solo por backward-compat.
+            usuario=usuario,
         )
         
         # Liberar seriales vinculados
@@ -2368,7 +2398,7 @@ def reversar_nota_entrega(empresa_id: int, nota_id: int, motivo: str) -> dict:
 
 
 @transaction.atomic
-def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str) -> dict:
+def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str, usuario: str | User = 'Sistema') -> dict:
     from .models import DocumentoCompra, SerialArticulo, MovimientoKardex
     from .services import registrar_movimiento
 
@@ -2397,7 +2427,9 @@ def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str) -> d
             cantidad=mov.cantidad,
             concepto='ANULACION_COMPRA',
             detalle_adicional=f"Reverso de Compra (Factura {compra.numero_factura}): {motivo}",
-            usuario='Sistema',
+            # EST-04 (REQ-EST04-07): registra quién anuló; default 'Sistema'
+            # solo por backward-compat.
+            usuario=usuario,
             documento_compra=compra
         )
     
@@ -2429,7 +2461,7 @@ def procesar_devolucion_venta(
     nota_id: int,
     items_devueltos: list,
     motivo: str,
-    usuario: str = 'Sistema',
+    usuario: str | User = 'Sistema',
 ) -> dict:
     """
     Crea una NotaCredito de VENTA con N DetalleNotaCredito.
@@ -2489,12 +2521,15 @@ def procesar_devolucion_venta(
         raise ValueError("La Nota de Entrega está anulada; no se puede emitir una NC sobre ella.")
 
     # 2. Crear cabecera (NotaCredito.save() calcula numero y numero_control).
+    # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
+    usuario_fk, usuario_nombre = resolver_usuario(usuario)
     nc = NotaCredito.objects.create(
         empresa_id=empresa_id,
         nota_entrega=nota,
         doc_origen_tipo='VENTA',
         motivo=motivo,
-        usuario=usuario,
+        usuario=usuario_fk,
+        usuario_nombre=usuario_nombre,
         estado='PROCESADO',
     )
 
@@ -2659,7 +2694,7 @@ def procesar_devolucion_compra(
     compra_id: int,
     items_devueltos: list,
     motivo: str,
-    usuario: str = 'Sistema',
+    usuario: str | User = 'Sistema',
 ) -> dict:
     """
     Crea una NotaCredito de COMPRA con N DetalleNotaCredito.
@@ -2693,12 +2728,15 @@ def procesar_devolucion_compra(
     if compra.estado == 'ANULADO':
         raise ValueError("La Compra está anulada; no se puede emitir una NC sobre ella.")
 
+    # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
+    usuario_fk, usuario_nombre = resolver_usuario(usuario)
     nc = NotaCredito.objects.create(
         empresa_id=empresa_id,
         factura_compra=compra,
         doc_origen_tipo='COMPRA',
         motivo=motivo,
-        usuario=usuario,
+        usuario=usuario_fk,
+        usuario_nombre=usuario_nombre,
         estado='PROCESADO',
     )
 

@@ -562,6 +562,82 @@ estructurales). `test_templates_sri.py` intacto.
 
 ---
 
+## ADR-33: Usuario forense: FK global a User + snapshot usuario_nombre
+en kárdex y notas de crédito
+
+**Estado:** Aceptada (2026-10-24). Remediación EST-04 /
+REQ-EST04-01..08 del Capítulo 3 de
+`docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+`MovimientoKardex.usuario` y `NotaCredito.usuario` eran
+`CharField(150)`: la "trazabilidad" era un string libre sin
+integridad referencial — cualquiera podía escribir `'admin'` desde
+el shell o un POST, sin que ningún constraint lo vinculase con
+`auth_user` (hallazgo EST-04). Auditoría del backfill sobre la BD
+real: 195 kárdex existentes, solo 8 con username existente
+(`angeldrk` → FK resuelta); los literales de demo/semilla
+(`'Demo Setup'` ×66, `'Demo User'` ×29, `'Sistema'` ×4, `''` ×88)
+no existen como usuarios y quedan FK NULL con el snapshot
+preservado. `NotaCredito`: 0 filas históricas.
+
+**Decisión:**
+
+1. Renombrar `usuario` → `usuario_nombre` como snapshot inmutable
+   de presentación (`RenameField`: el histórico se preserva).
+2. FK nueva `usuario` → `User` con `SET_NULL` — la trazabilidad
+   degrada, no se pierde: la baja de un usuario deja la FK en NULL
+   y el snapshot conserva el nombre.
+3. Helper único `services.resolver_usuario` acepta
+   `str | User | None`: instancia `User` → FK + `user.username`;
+   string con username existente → FK resuelta (match exacto por
+   `username`); sin match → FK NULL + snapshot con el string.
+   Solo los 3 sitios de persistencia resuelven (create de
+   `registrar_movimiento` y los `NotaCredito.objects.create` de
+   `procesar_devolucion_{venta,compra}`); los writers
+   intermedios reenvían el kwarg.
+4. Las vistas llenan la FK desde `request.user` (operador
+   autenticado); el `usuario` que llega por POST/JSON queda
+   **DEPRECADO**: se ignora con `logger.warning` y puede tocar,
+   como mucho, el snapshot de presentación — NUNCA la FK. La
+   identidad forense sale SIEMPRE del autenticado.
+5. Los `reversar_*` dejan de hardcodear `'Sistema'` y registran
+   el usuario real; el default `'Sistema'` se conserva sólo para
+   backward-compat.
+
+**Decisión de multi-tenant** (el punto clave del ADR,
+REQ-EST04-08): la FK es GLOBAL a la tabla `auth_user` — los
+usuarios NO son per-empresa; el aislamiento por tenant lo gobierna
+`PerfilUsuario` (`empresas_permitidas`/`empresa_activa`) en la
+capa de acceso, NO en la FK. Una FK filtrada por tenant no es
+viable sin un esquema de usuarios por empresa. El mismo usuario
+real puede figurar en el kárdex de varias empresas y la FK sigue
+resolviendo.
+
+**Consecuencias:**
+
+- `on_delete=SET_NULL`: borrar un `User` no borra historia (kárdex
+  y NC quedan con FK NULL + snapshot intacto).
+- El snapshot es la fuente de presentación: listados y PDF usan
+  `usuario_nombre` (el PDF de NC en `views.py` y
+  `nota_credito_detalle.html` renderizan `usuario_nombre` con
+  fallback `'Sistema'`; la FK puede ser None).
+- Migración `0029_usuario_fk_kardex_nc` escrita a mano porque
+  `makemigrations` autogenera `AddField`+`AlterField` destructivo
+  en SQLite (drop de columna = pérdida de datos); idempotente
+  (2ª pasada del backfill es no-op) y reversible (el reverse pone
+  la FK a NULL, el snapshot NUNCA se toca).
+- El kwarg de servicio sigue llamándose `usuario` (distinto del
+  campo): los ~60 call-sites de tests no se tocan.
+
+**Tests:** `inventory/test_cases/test_usuario_fk.py` (7): backfill
+match / sin match / idempotencia; resolución `str|User|None`;
+`reversar_*` con usuario (y backward-compat sin arg); vistas con
+`request.user` + `logger.warning` del POST `usuario` deprecado.
+
+---
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 

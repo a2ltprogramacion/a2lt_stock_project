@@ -23,6 +23,7 @@ dentro de un bloque @transaction.atomic (implementado en services.py).
 """
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models, transaction
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
@@ -1396,10 +1397,22 @@ class MovimientoKardex(models.Model):
         verbose_name='Detalle Adicional',
         help_text='Información de auditoría extra (ej: factura de compra, referencia externa).',
     )
-    usuario = models.CharField(
+    # EST-04 (REQ-EST04-01): el CharField histórico pasó a ser el snapshot
+    # `usuario_nombre` (RenameField 0029, datos preservados) y `usuario` es
+    # ahora la FK forense al usuario real. La baja del usuario nunca borra
+    # el kárdex (SET_NULL) y el snapshot preserva el nombre histórico.
+    usuario_nombre = models.CharField(
         max_length=150,
         blank=True,
         verbose_name='Usuario que Realizó el Movimiento',
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kardex_registrado_por',
+        verbose_name='Usuario (FK)',
     )
 
     objects = EmpresaManager()
@@ -2029,9 +2042,19 @@ class NotaCredito(models.Model):
         verbose_name='Motivo de Anulación',
         help_text='Si el estado es ANULADO, explica por qué.',
     )
-    usuario = models.CharField(
+    # EST-04 (REQ-EST04-02): mismo patrón forense que MovimientoKardex —
+    # snapshot `usuario_nombre` (conserva default='Sistema') + FK `usuario`.
+    usuario_nombre = models.CharField(
         max_length=150, default='Sistema',
         verbose_name='Usuario que emitió la NC',
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notas_credito_emitidas',
+        verbose_name='Usuario (FK)',
     )
     fecha = models.DateTimeField(auto_now_add=True)
 

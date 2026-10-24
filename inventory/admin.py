@@ -331,7 +331,7 @@ class MovimientoKardexAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
     readonly_fields = (
         'fecha_hora', 'articulo', 'almacen', 'tipo', 'concepto',
         'cantidad', 'saldo_resultante', 'nota_entrega',
-        'lote_carga', 'detalle_adicional', 'usuario',
+        'lote_carga', 'detalle_adicional', 'usuario', 'usuario_nombre',
     )
     date_hierarchy = 'fecha_hora'
 
