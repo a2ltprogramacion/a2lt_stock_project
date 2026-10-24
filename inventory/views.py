@@ -1153,7 +1153,8 @@ def vista_sincronizar_tasa(request):
         return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
     
     from .services import sincronizar_tasa_cambio
-    resultado = sincronizar_tasa_cambio()
+    # EST-05 (REQ-EST05-A1): fuente forense = usuario autenticado.
+    resultado = sincronizar_tasa_cambio(usuario=request.user)
     return JsonResponse(resultado)
 
 
@@ -1707,13 +1708,18 @@ def configuracion_view(request):
             config.save()
             
             if (config.tasa_bcv != bcv_old or config.tasa_mercado != mercado_old or config.factor_cobertura != factor_old):
+                # EST-05 (REQ-EST05-A1): usuario forense FK + snapshot,
+                # resueltos desde request.user (patrón EST-04).
+                usuario_fk, usuario_nombre = svc.resolver_usuario(request.user)
                 AuditoriaTasa.objects.create(
                     empresa=config.empresa,
                     tasa_bcv=config.tasa_bcv,
                     tasa_mercado=config.tasa_mercado,
                     factor_cobertura=config.factor_cobertura,
                     fuente='MANUAL',
-                    notas='Actualización desde Configuración Global'
+                    notas='Actualización desde Configuración Global',
+                    usuario=usuario_fk,
+                    usuario_nombre=usuario_nombre,
                 )
                 
             messages.success(request, 'Configuración global actualizada de manera exitosa.')

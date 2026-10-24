@@ -1485,6 +1485,24 @@ class AuditoriaTasa(models.Model):
         default='MANUAL',
         verbose_name='Fuente de la Tasa',
     )
+    # EST-05 (REQ-EST05-A1): mismo patrón EST-04 — FK forense al usuario
+    # real + snapshot del nombre. Campo nuevo (sin RenameField): el
+    # histórico pre-0030 queda con FK NULL y snapshot '' por diseño, sin
+    # backfill. La baja del usuario nunca borra la auditoría (SET_NULL).
+    usuario_nombre = models.CharField(
+        max_length=150,
+        blank=True,
+        default='',
+        verbose_name='Usuario que Registró la Tasa',
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tasas_registradas',
+        verbose_name='Usuario (FK)',
+    )
     notas = models.CharField(
         max_length=200,
         blank=True,

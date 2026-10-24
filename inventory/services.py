@@ -1653,10 +1653,14 @@ def es_url_api_segura(url: str) -> bool:
     return True
 
 
-def sincronizar_tasa_cambio() -> dict:
+def sincronizar_tasa_cambio(usuario: str | User | None = None) -> dict:
     """
     Se conecta a la API configurada para obtener la tasa de mercado,
     calcula el nuevo factor de cobertura y registra la auditoría.
+
+    EST-05 (REQ-EST05-A1): ``usuario`` resuelve FK+snapshot vía
+    ``resolver_usuario`` (patrón EST-04); sin valor → FK NULL + snapshot
+    '' — el histórico pre-0030 queda así por diseño.
     """
     import requests
     from decimal import Decimal, InvalidOperation
@@ -1738,12 +1742,16 @@ def sincronizar_tasa_cambio() -> dict:
         config_db.save()
 
         # Registro inalterable de auditoría
+        # EST-05 (REQ-EST05-A1): usuario forense FK + snapshot.
+        usuario_fk, usuario_nombre = resolver_usuario(usuario)
         AuditoriaTasa.objects.create(
             empresa=config_db.empresa,
             tasa_bcv=tasa_bcv_actual,
             tasa_mercado=tasa_mercado_obtenida,
             factor_cobertura=factor_nuevo,
-            fuente='API'
+            fuente='API',
+            usuario=usuario_fk,
+            usuario_nombre=usuario_nombre,
         )
     
     logger.info("[API] Tasa sincronizada exitosamente: %s (Factor: %s)", tasa_mercado_obtenida, factor_nuevo)

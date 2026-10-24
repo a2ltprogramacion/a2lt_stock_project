@@ -20,13 +20,15 @@ backfill de la migración ``0029`` (REQ-EST04-03):
 
 import importlib
 from decimal import Decimal
+from unittest.mock import patch
 
 import django.apps
 from django.contrib.auth.models import User
 from django.db import models
 from django.test import TestCase
+from django.urls import reverse
 
-from inventory.models import MovimientoKardex, NotaCredito
+from inventory.models import AuditoriaTasa, MovimientoKardex, NotaCredito
 
 MIGRACION_0029 = 'inventory.migrations.0029_usuario_fk_kardex_nc'
 
@@ -356,3 +358,100 @@ class TestVistasUsuarioForense(TestCase):
         self.assertIsNotNone(mov_decision)
         self.assertEqual(mov_decision.usuario_id, self.user.pk)
         self.assertEqual(mov_decision.usuario_nombre, 'op_carga')
+
+
+class TestAuditoriaTasaUsuario(TestCase):
+    """EST-05 (REQ-EST05-A1): FK ``usuario`` + snapshot en ``AuditoriaTasa``.
+
+    Mismo patrón EST-04 aplicado al histórico de tasas: los 2 writers
+    (``views.configuracion_view`` fuente='MANUAL' y
+    ``services.sincronizar_tasa_cambio`` fuente='API') resuelven con el
+    helper único ``resolver_usuario`` — la FK y el snapshot salen del
+    usuario autenticado. ``on_delete=SET_NULL``: la baja del usuario real
+    nunca borra la auditoría de tasas; el snapshot preserva el nombre.
+    """
+
+    def setUp(self):
+        from inventory.models import ConfiguracionEmpresa
+
+        self.empresa = _crear_empresa()
+        self.config = ConfiguracionEmpresa.objects.get(empresa=self.empresa)
+        self.config.tasa_bcv = Decimal('40.0000')
+        self.config.factor_cobertura = Decimal('1.0000')
+        self.config.tasa_mercado = Decimal('40.0000')
+        self.config.api_url = 'https://198.51.100.10/tasa'
+        self.config.http_method = 'GET'
+        self.config.response_selector = 'data.tasa_paralela'
+        self.config.save()
+
+        # Login multi-tenant con staff (patrón tests.py:8912: solo
+        # is_staff/is_superuser puede mutar la configuración global).
+        self.user = User.objects.create_user('op_tasas', password='pw1234')
+        self.user.is_staff = True
+        self.user.save()
+        perfil = self.user.perfil
+        perfil.empresas_permitidas.add(self.empresa)
+        perfil.empresa_activa = self.empresa
+        perfil.save()
+        self.client.login(username='op_tasas', password='pw1234')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+    # ── 1. Writer MANUAL: POST a configuración con tasa cambiada ──────────
+
+    def test_configuracion_manual_registra_usuario_fk(self):
+        """POST con tasa cambiada → última AuditoriaTasa lleva FK + snapshot."""
+        r = self.client.post(reverse('inventory:configuracion'), {
+            'tasa_bcv': '45.5000',
+            'tasa_mercado': '55.0000',
+            'factor_cobertura': '1.3000',
+        })
+        self.assertRedirects(r, reverse('inventory:configuracion'))
+
+        auditoria = AuditoriaTasa.objects.last()
+        self.assertIsNotNone(auditoria, 'la tasa cambió: debe auditarse')
+        self.assertEqual(auditoria.fuente, 'MANUAL')
+        self.assertEqual(auditoria.usuario_id, self.user.pk)
+        self.assertEqual(auditoria.usuario_nombre, 'op_tasas')
+
+    # ── 2. Writer API: sincronización con usuario resuelto ────────────────
+
+    @patch('requests.request')
+    def test_sincronizar_api_registra_usuario(self, mock_request):
+        """sincronizar_tasa_cambio(usuario=User) → AuditoriaTasa 'API' con FK."""
+        mock_response = mock_request.return_value
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'data': {'tasa_paralela': 50.00}}
+
+        from inventory.services import sincronizar_tasa_cambio
+        resultado = sincronizar_tasa_cambio(usuario=self.user)
+
+        self.assertTrue(resultado['ok'])
+        auditoria = AuditoriaTasa.objects.last()
+        self.assertIsNotNone(auditoria, 'la sync exitosa debe auditarse')
+        self.assertEqual(auditoria.fuente, 'API')
+        self.assertEqual(auditoria.usuario_id, self.user.pk)
+        self.assertEqual(auditoria.usuario_nombre, 'op_tasas')
+
+    # ── 3. Gherkin EST04-05 aplicado a tasas: SET_NULL preserva histórico ──
+
+    def test_baja_usuario_preserva_snapshot_auditoria(self):
+        """La baja del usuario real deja la FK en NULL y el snapshot intacto."""
+        auditoria = AuditoriaTasa.objects.create(
+            empresa=self.empresa,
+            tasa_bcv=Decimal('40.0000'),
+            tasa_mercado=Decimal('42.0000'),
+            factor_cobertura=Decimal('1.0500'),
+            fuente='MANUAL',
+            notas='Fixture directo EST-05',
+            usuario=self.user,
+            usuario_nombre='op_tasas',
+        )
+
+        self.user.delete()
+
+        auditoria.refresh_from_db()
+        self.assertEqual(AuditoriaTasa.objects.count(), 1)
+        self.assertIsNone(auditoria.usuario_id)
+        self.assertEqual(auditoria.usuario_nombre, 'op_tasas')
