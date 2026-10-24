@@ -638,6 +638,118 @@ match / sin match / idempotencia; resolución `str|User|None`;
 
 ---
 
+## ADR-34: Kárdex inmutable: guards de señal + QuerySet + escape
+hatch con allowlist (EST-01)
+
+**Estado:** Aceptada (2026-10-24). Remediación EST-01 /
+REQ-EST01-01..09 del Capítulo 4 de
+`docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+La "REGLA SAGRADA" (solo `services.registrar_movimiento` muta stock
+vía kárdex) era una intención del código, no un invariante: un
+`.delete()` de queryset, un `.update(cantidad=...)`, un script de
+shell o un `INSERT` directo la saltaban sin dejar rastro — borrando
+la trazabilidad forense que la propia regla prometía (hallazgo
+EST-01, spec §2.1).
+
+Corrección al plan: un override de `delete()` a nivel de instancia
+NO cubre los borrados bulk ni `.update()` (que además no emite
+señales); esa vía se descarta y se documenta.
+
+**Decisión:**
+
+1. **Señales `pre_save` + `pre_delete` con `sender=clase real`**
+   (`inventory/kardex_guard.py`, conectadas en `apps.ready()`):
+   cubren instancia, bulk y cascada — el collector de Django envía
+   TODAS las `pre_delete` antes de ejecutar un solo DELETE SQL, por
+   lo que el raise aborta la operación completa sin borrados
+   parciales. Los modelos históricos de migraciones
+   (reconstruidos por `ModelState`: id distinto, sin relación de
+   subclase) NO disparan estos receivers — las `RunPython` quedan
+   exentas por diseño (probado con el roundtrip de la `0029`:
+   `migrate inventory 0028 && migrate inventory` completa el
+   backfill `fila.save()` sobre históricos sin
+   `KardexProtegidoError`).
+2. **`KardexQuerySet`** bloquea `.update()` y `bulk_create()` —
+   las dos vías de mutación masiva que NO emiten señales — cableado
+   a AMBOS managers de `MovimientoKardex`: `objects` vía
+   `EmpresaManager.from_queryset(KardexQuerySet)()` (conserva el
+   filtro de tenant: el `get_queryset()` de `managers.py` aplica
+   `.none()`/`.filter` SOBRE un KardexQuerySet) y `global_objects`
+   vía `as_manager()` (sin filtro de tenant, mismo bloqueo).
+   Ningún otro modelo hereda el bloqueo.
+3. **Escape hatch `kardex_bypass(motivo)`**: `ContextVar` con
+   CONTADOR apilable (reentrante; thread/async-safe), log WARNING
+   con el motivo al entrar. El service usa el contexto INTERNO
+   `escritura_kardex_autorizada` (mismo contador, log INFO): el
+   camino legítimo no genera ruido de WARNING. El `finally` con
+   `reset(token)` impide fugas de contexto ante excepciones.
+4. **Excepción `KardexProtegidoError`** (subclase de
+   `IntegridadDocumentalError` → `PermissionDenied`): semántica de
+   "operación no permitida" — un camino HTTP respondería 403, no
+   500.
+
+**Divergencia documentada vs el plan (crítica):** el plan esperaba
+que el bypass hiciera pasable la cascada de `Empresa.delete()`. En
+Django 6 los FK PROTECT preexistentes
+(`MovimientoKardex.articulo/almacen`, `InventarioAlmacen.*`) lanzan
+`ProtectedError` durante `collect()` ANTES de que exista señal
+alguna — con o sin bypass. La primera excepción real de
+`Empresa.delete()` en un tenant con kárdex es `ProtectedError`;
+`KardexProtegidoError` queda como backstop del borrado directo de
+kárdex. Por eso `services.eliminar_tenant(empresa, motivo)` —
+única vía autorizada de teardown, motivo obligatorio (`ValueError`
+si viene vacío), WARNING auditable al log — hace teardown
+EXPLÍCITO en orden de dependencias scoped al tenant: kárdex →
+seriales → NC (detalles+cabeceras) → notas (detalles+cabeceras) →
+inventarios → compras (detalles+cabeceras) → recetas → contactos →
+artículos → almacenes → config → `empresa.delete()` final (barrido
+CASCADE/SET_NULL/RESTRICT del resto: correlativo, monedas, tasas,
+auditoría). Viable SIN migraciones nuevas.
+
+**Allowlist** (REQ-EST01-04; auditable por grep: un 4º uso del
+bypass en services/views/admin es defecto de diseño, no un caso):
+
+| Sitio | Uso del bypass |
+|-------|----------------|
+| `services.registrar_movimiento` | No usa el bypass público: contexto interno `escritura_kardex_autorizada` (el único punto donde nace kárdex legítimo) |
+| `seed_db --clear` (`seed_db.py:503`) | Reseed demo: bulk delete global del kárdex dentro del bypass |
+| Fixture export SaaS (`tests.py:1641`) | Crea kárdex directo y envejece su `fecha_hora` (create 1642 / `.update()` 1653; fixture declarado, no relajación) |
+| `TestBackfillUsuarioFK` (`test_cases/test_usuario_fk.py`) | Fixtures del cap. 3: kárdex histórico pre-FK para el backfill de la `0029` |
+| `services.eliminar_tenant` | Única vía de teardown de tenant (divergencia arriba) |
+| `generate_demo_data` | **NO necesita bypass**: crea kárdex vía `registrar_compra_proveedor` (service) |
+| Migraciones 0029/0030 | **Exentas por sender** (modelos históricos; REQ-EST01-07) |
+
+**Consecuencias:**
+
+- En producción el raise de `pre_delete` ocurre DENTRO del
+  `transaction.atomic(savepoint=False)` del collector: envenena la
+  transacción del caller (marca `needs_rollback`) — que ES el
+  rollback total deseado, nada queda medio borrado. Los tests lo
+  aíslan con un savepoint propio para poder seguir consultando.
+- El bypass es el mecanismo COMPARTIDO que reutilizará EST-02
+  (`seed_db --clear` y teardowns: mismo ContextVar, misma
+  allowlist, auditable por grep en UN solo módulo).
+- Las cascadas `SET_NULL` de la baja de usuarios (Gherkin
+  EST04-05) no disparan el guard por diseño: el collector las
+  resuelve con el `_base_manager` plano sobre `UpdateQuery` crudo
+  (sin señales) y la fila de kárdex persiste con FK NULL +
+  snapshot.
+- `makemigrations --check` limpio: el wiring de managers no toca
+  el estado del esquema (`use_in_migrations` inactivo).
+
+**Tests:** `inventory/test_cases/test_kardex_inmutable.py` (8):
+delete bloqueado en instancia/queryset/`global_objects`; `create`
+directo y `bulk_create` bloqueados; `.update()` bloqueado en ambos
+managers; bypass apilable con WARNING; `Empresa.delete()` con
+kárdex bloqueado con rollback total; `eliminar_tenant` teardown
+completo + motivo obligatorio; reverso N+1 (solo INSERT
+compensatorio); receivers cableados solo a la clase real.
+
+---
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 

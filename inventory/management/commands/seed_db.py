@@ -18,6 +18,7 @@ from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand, CommandError
 
+from inventory.kardex_guard import kardex_bypass
 from inventory.managers import set_current_empresa
 from inventory.models import (
     Empresa,
@@ -496,18 +497,22 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.WARNING("Limpiando base de datos existente..."))
         try:
-            MovimientoKardex.global_objects.all().delete()
-            SerialArticulo.global_objects.all().delete()
-            DetalleNotaEntrega.objects.all().delete()
-            NotaEntrega.global_objects.all().delete()
-            InventarioAlmacen.global_objects.all().delete()
-            DocumentoCompra.global_objects.all().delete()
-            RecetaCombo.objects.all().delete()
-            Contacto.global_objects.all().delete()
-            Articulo.global_objects.all().delete()
-            Almacen.global_objects.all().delete()
-            ConfiguracionEmpresa.global_objects.all().delete()
-            Empresa.objects.all().delete()
+            # EST-01 (allowlist ADR): reseed de demo — única vía autorizada
+            # para borrar kárdex en masa. El WARNING del bypass deja
+            # auditoría del motivo en el log.
+            with kardex_bypass('seed_db --clear: reseed demo'):
+                MovimientoKardex.global_objects.all().delete()
+                SerialArticulo.global_objects.all().delete()
+                DetalleNotaEntrega.objects.all().delete()
+                NotaEntrega.global_objects.all().delete()
+                InventarioAlmacen.global_objects.all().delete()
+                DocumentoCompra.global_objects.all().delete()
+                RecetaCombo.objects.all().delete()
+                Contacto.global_objects.all().delete()
+                Articulo.global_objects.all().delete()
+                Almacen.global_objects.all().delete()
+                ConfiguracionEmpresa.global_objects.all().delete()
+                Empresa.objects.all().delete()
             self.stdout.write(self.style.SUCCESS("  [OK] Base de datos limpia."))
         except Exception as e:
             raise CommandError(f"Error al limpiar BD: {e}")

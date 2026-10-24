@@ -28,6 +28,7 @@ from django.db import models
 from django.test import TestCase
 from django.urls import reverse
 
+from inventory.kardex_guard import kardex_bypass
 from inventory.models import AuditoriaTasa, MovimientoKardex, NotaCredito
 
 MIGRACION_0029 = 'inventory.migrations.0029_usuario_fk_kardex_nc'
@@ -63,18 +64,24 @@ class TestBackfillUsuarioFK(TestCase):
         )
 
     def _crear_kardex(self, usuario_nombre, cantidad=Decimal('1')):
-        """Fixture directo (no pasa por services): fila histórica pre-migración."""
-        return MovimientoKardex.objects.create(
-            empresa=self.empresa,
-            articulo=self.articulo,
-            almacen=self.almacen,
-            tipo='ENTRADA',
-            cantidad=cantidad,
-            saldo_resultante=cantidad,
-            concepto='AJUSTE_ENTRADA',
-            usuario_nombre=usuario_nombre,
-            usuario=None,
-        )
+        """Fixture directo (no pasa por services): fila histórica pre-migración.
+
+        EST-01 (allowlist ADR): crear kárdex directo es uso legítimo
+        documentado del bypass (REQ-EST01-04) — este fixture simula filas
+        históricas previas a la migración 0029.
+        """
+        with kardex_bypass('fixture EST-04: backfill 0029'):
+            return MovimientoKardex.objects.create(
+                empresa=self.empresa,
+                articulo=self.articulo,
+                almacen=self.almacen,
+                tipo='ENTRADA',
+                cantidad=cantidad,
+                saldo_resultante=cantidad,
+                concepto='AJUSTE_ENTRADA',
+                usuario_nombre=usuario_nombre,
+                usuario=None,
+            )
 
     # ── 1. REQ-EST04-01/02: esquema FK usuario + snapshot usuario_nombre ──
 
@@ -110,7 +117,10 @@ class TestBackfillUsuarioFK(TestCase):
         mov = self._crear_kardex('op_backfill')
 
         mod = importlib.import_module(MIGRACION_0029)
-        mod.backfill_usuario_fk(django.apps.apps, None)
+        # EST-01 (allowlist ADR): el backfill muta fila.save() sobre la clase
+        # REAL (apps de runtime) — bypass legítimo del fixture.
+        with kardex_bypass('fixture EST-04: backfill 0029'):
+            mod.backfill_usuario_fk(django.apps.apps, None)
 
         mov.refresh_from_db()
         self.assertEqual(mov.usuario_id, user.pk)
@@ -125,7 +135,10 @@ class TestBackfillUsuarioFK(TestCase):
         ]
 
         mod = importlib.import_module(MIGRACION_0029)
-        mod.backfill_usuario_fk(django.apps.apps, None)
+        # EST-01 (allowlist ADR): idem test anterior — el backfill por match
+        # de username hace fila.save() sobre la clase real.
+        with kardex_bypass('fixture EST-04: backfill 0029'):
+            mod.backfill_usuario_fk(django.apps.apps, None)
 
         pares = []
         for fila in filas:
@@ -135,7 +148,8 @@ class TestBackfillUsuarioFK(TestCase):
         self.assertEqual(pares, [(None, 'seed_db'), (None, 'Sistema')])
 
         # Segunda pasada → no-op (backfill idempotente, REQ-EST04-03).
-        mod.backfill_usuario_fk(django.apps.apps, None)
+        with kardex_bypass('fixture EST-04: backfill 0029'):
+            mod.backfill_usuario_fk(django.apps.apps, None)
         for fila, par in zip(filas, pares):
             fila.refresh_from_db()
             self.assertEqual((fila.usuario_id, fila.usuario_nombre), par)

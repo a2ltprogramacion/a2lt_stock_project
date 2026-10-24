@@ -25,12 +25,45 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models, transaction
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .managers import EmpresaManager, EmpresaQuerySet, get_current_empresa
 from .calculos import calcular_totales_documento
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 0B. EXCEPCIONES DE INTEGRIDAD DOCUMENTAL (EST-01/EST-02)
+#
+# PermissionDenied — no ValidationError — porque semánticamente es
+# "operación no permitida" y, si algún camino HTTP lo provocara, la vista
+# responde 403 y no 500.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class IntegridadDocumentalError(PermissionDenied):
+    """Base común EST-01/EST-02: operación prohibida sobre registros históricos del sistema."""
+
+
+class KardexProtegidoError(IntegridadDocumentalError):
+    """EST-01: el kárdex solo muta vía services.registrar_movimiento o kardex_bypass."""
+
+
+class KardexQuerySet(models.QuerySet):
+    """REQ-EST01-02: .update() no emite pre_save (doc Django) y bulk_create tampoco
+    → ambas vías de INSERT/UPDATE masivo sin señales se bloquean aquí."""
+
+    def update(self, **kwargs):
+        from .kardex_guard import bypass_activo, bloquear_kardex  # perezoso: rompería el ciclo models↔kardex_guard
+        if not bypass_activo():
+            bloquear_kardex('.update()')
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        from .kardex_guard import bypass_activo, bloquear_kardex
+        if not bypass_activo():
+            bloquear_kardex('bulk_create')
+        return super().bulk_create(objs, **kwargs)
 
 
 # Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
@@ -1415,8 +1448,14 @@ class MovimientoKardex(models.Model):
         verbose_name='Usuario (FK)',
     )
 
-    objects = EmpresaManager()
-    global_objects = models.Manager()
+    # EST-01 (REQ-EST01-02): wiring con KardexQuerySet.
+    #   * objects: EmpresaManager.from_queryset preserva el filtro de tenant
+    #     (get_queryset() de managers.py aplica .none()/.filter SOBRE un
+    #     KardexQuerySet) y bloquea .update()/bulk_create.
+    #   * global_objects: sin filtro de tenant, mismo bloqueo (Gherkin EST01-05).
+    # managers.py NO se toca: ningún otro modelo hereda el bloqueo.
+    objects = EmpresaManager.from_queryset(KardexQuerySet)()
+    global_objects = KardexQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Movimiento del Kárdex'

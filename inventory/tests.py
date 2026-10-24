@@ -1635,18 +1635,22 @@ class TestExportacionLogicaSaaS(TestCase):
         # Hackeamos la fecha del movimiento viejo
         import random
         from inventory.models import MovimientoKardex
-        mov_viejo = MovimientoKardex.objects.create(
-            empresa=self.empresa1,
-            articulo=self.articulo1,
-            almacen=self.almacen1,
-            tipo='ENTRADA',
-            cantidad=Decimal('5'),
-            saldo_resultante=Decimal('5'),
-            concepto='AJUSTE_ENTRADA',
-            usuario_nombre='Admin',
-            lote_carga=f"TEST-{random.randint(1000, 9999)}"
-        )
-        MovimientoKardex.objects.filter(pk=mov_viejo.pk).update(fecha_hora=timezone.now() - timedelta(days=30 * 8))
+        from inventory.kardex_guard import kardex_bypass
+        # EST-01 (allowlist ADR): fixture que crea kárdex directo y envejece
+        # su fecha_hora — uso legítimo documentado del bypass (REQ-EST01-04).
+        with kardex_bypass('fixture export SaaS: movimiento viejo'):
+            mov_viejo = MovimientoKardex.objects.create(
+                empresa=self.empresa1,
+                articulo=self.articulo1,
+                almacen=self.almacen1,
+                tipo='ENTRADA',
+                cantidad=Decimal('5'),
+                saldo_resultante=Decimal('5'),
+                concepto='AJUSTE_ENTRADA',
+                usuario_nombre='Admin',
+                lote_carga=f"TEST-{random.randint(1000, 9999)}"
+            )
+            MovimientoKardex.objects.filter(pk=mov_viejo.pk).update(fecha_hora=timezone.now() - timedelta(days=30 * 8))
         # Tenant 2 (Ruido que NO debe salir en el backup del Tenant 1)
         self.empresa2 = crear_empresa(nombre='Tenant Dos', rif='J-TENANT-2')
         self.almacen2 = crear_almacen(self.empresa2, nombre='Almacen T2')

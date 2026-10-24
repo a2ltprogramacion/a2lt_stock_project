@@ -41,6 +41,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 
 from .calculos import calcular_factor_descuento
+from .kardex_guard import escritura_kardex_autorizada
 from .models import (
     Articulo,
     Almacen,
@@ -234,21 +235,25 @@ def registrar_movimiento(
     # ── Creación del registro en el Kárdex ───────────────────────────────────
     # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
     usuario_fk, usuario_nombre = resolver_usuario(usuario)
-    movimiento = MovimientoKardex.objects.create(
-        empresa=articulo.empresa,
-        articulo=articulo,
-        almacen=almacen,
-        tipo=tipo,
-        concepto=concepto,
-        cantidad=cantidad,
-        saldo_resultante=saldo,
-        nota_entrega=nota_entrega,
-        documento_compra=documento_compra,
-        lote_carga=lote_carga or '',
-        detalle_adicional=detalle_adicional or '',
-        usuario=usuario_fk,
-        usuario_nombre=usuario_nombre,
-    )
+    # EST-01 (REQ-EST01-05/06): este es el ÚNICO punto donde nace kárdex por
+    # fuera del bypass público; el contexto interno autoriza el INSERT sin
+    # ruido de WARNING (log INFO) y deja todo lo demás bloqueado.
+    with escritura_kardex_autorizada(concepto):
+        movimiento = MovimientoKardex.objects.create(
+            empresa=articulo.empresa,
+            articulo=articulo,
+            almacen=almacen,
+            tipo=tipo,
+            concepto=concepto,
+            cantidad=cantidad,
+            saldo_resultante=saldo,
+            nota_entrega=nota_entrega,
+            documento_compra=documento_compra,
+            lote_carga=lote_carga or '',
+            detalle_adicional=detalle_adicional or '',
+            usuario=usuario_fk,
+            usuario_nombre=usuario_nombre,
+        )
 
     return movimiento
 
@@ -2445,6 +2450,59 @@ def reversar_documento_compra(empresa_id: int, compra_id: int, motivo: str, usua
     seriales.filter(estado='DISPONIBLE').update(estado='ANULADO_COMPRA')
     
     return {'ok': True, 'mensaje': f"Compra Factura {compra.numero_factura} reversada exitosamente."}
+
+
+@transaction.atomic
+def eliminar_tenant(empresa, motivo: str) -> None:
+    """EST-01 (Gherkin EST01-08): ÚNICA vía autorizada de teardown de un tenant con datos.
+
+    Borra en ORDEN DE DEPENDENCIAS scoped al tenant — el patrón del
+    ``seed_db --clear`` ya incluido en la allowlist del ADR (REQ-EST01-04)
+    — dentro de UN solo ``kardex_bypass`` con motivo auditable (WARNING).
+
+    Nota de diseño (divergencia reportada y aprobada por el coordinador,
+    2026-10-24): un ``empresa.delete()`` directo con datos lanza
+    ``ProtectedError`` ANTES de que las señales pre_delete del kárdex
+    existan — los FK PROTECT preexistentes de MovimientoKardex/
+    InventarioAlmacen hacia Articulo/Almacen abortan el collector durante
+    collect() (ver el precedente RESTRICT 5d137fa de TasaCambio→Moneda en
+    test_tenant_lifecycle.py). El guard de EST-01 sigue siendo el backstop
+    del borrado directo de kárdex; el orden de dependencias es lo que
+    hace viable el teardown SIN migraciones (cap. 4: "sin migraciones
+    nuevas").
+    """
+    if not motivo:
+        raise ValueError('eliminar_tenant exige un motivo auditable.')
+
+    from .kardex_guard import kardex_bypass
+    from .models import (
+        Almacen, Articulo, ConfiguracionEmpresa, Contacto,
+        DetalleDocumentoCompra, DetalleNotaCredito, DetalleNotaEntrega,
+        DocumentoCompra, InventarioAlmacen, MovimientoKardex,
+        NotaCredito, NotaEntrega, RecetaCombo, SerialArticulo,
+    )
+
+    with kardex_bypass(f'teardown tenant {empresa.rif}: {motivo}'):
+        # Hojas primero: cada modelo libera sus FK PROTECT (articulo,
+        # almacen, contacto, documentos origen) antes de tocar el objetivo.
+        MovimientoKardex.global_objects.filter(empresa=empresa).delete()
+        SerialArticulo.global_objects.filter(empresa=empresa).delete()
+        DetalleNotaCredito.global_objects.filter(nota_credito__empresa=empresa).delete()
+        NotaCredito.global_objects.filter(empresa=empresa).delete()
+        DetalleNotaEntrega.objects.filter(nota_entrega__empresa=empresa).delete()
+        NotaEntrega.global_objects.filter(empresa=empresa).delete()
+        InventarioAlmacen.global_objects.filter(empresa=empresa).delete()
+        DetalleDocumentoCompra.global_objects.filter(documento_compra__empresa=empresa).delete()
+        DocumentoCompra.global_objects.filter(empresa=empresa).delete()
+        RecetaCombo.objects.filter(combo__empresa=empresa).delete()
+        Contacto.global_objects.filter(empresa=empresa).delete()
+        Articulo.global_objects.filter(empresa=empresa).delete()
+        Almacen.global_objects.filter(empresa=empresa).delete()
+        ConfiguracionEmpresa.global_objects.filter(empresa=empresa).delete()
+        # Barrido final por CASCADE/SET_NULL: Correlativo, Moneda,
+        # TasaCambio (RESTRICT: cae en la misma operación, 5d137fa),
+        # AuditoriaTasa y cualquier resto. Tenant SIN kárdex = como hoy.
+        empresa.delete()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
