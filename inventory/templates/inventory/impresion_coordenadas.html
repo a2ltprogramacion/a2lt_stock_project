@@ -103,7 +103,7 @@
             <div class="movable-layer" style="top: calc(70mm + ({{ forloop.counter0 }} * {{ config.print_row_spacing }}mm)); left: 160mm;">
                 <!-- Usamos widthratio como hack de multiplicacion, pero la vista nos da mejor precision. Como pediste CSS, calc es la solucion correcta de HTML5 -->
                 $<span class="line-total" data-qty="{{ d.cantidad }}" data-price="{{ d.precio_base }}"></span>
-                <script>
+                <script nonce="{{ csp_nonce }}">
                     document.currentScript.previousElementSibling.innerText = (parseFloat("{{ d.cantidad|stringformat:'.2f' }}") * parseFloat("{{ d.precio_base|stringformat:'.2f' }}")).toFixed(2);
                 </script>
             </div>

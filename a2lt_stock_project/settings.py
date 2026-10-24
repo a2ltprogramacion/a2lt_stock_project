@@ -20,6 +20,9 @@ Para produccion real, configurar .env:
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -27,7 +30,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ─────────────────────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
-    from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured(
         'SECRET_KEY no definida en variables de entorno. '
         'Generar con: python -c "import secrets; print(secrets.token_urlsafe(64))"'
@@ -74,10 +76,12 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # SEC-02b: CSP ANTES del TenantMiddleware (no al final de la lista):
     # el TenantMiddleware retorna sus 403 con early return, sin invocar
-    # get_response, asi que ninguna clase por DEBAJO de el procesa esas
-    # respuestas. Por encima, CspMiddleware cubre tambien los 403 del
-    # tenant con la cabecera Content-Security-Policy.
-    'inventory.middleware.CspMiddleware',
+    # get_response. El middleware NATIVO de Django 6 es MiddlewareMixin:
+    # setea request._csp_nonce en process_request (fase de bajada, antes
+    # de que el tenant renderice sus 403) y aplica el header en
+    # process_response al SUBIR la respuesta por su frame. Por encima,
+    # cubre tambien los 403 del tenant con la cabecera CSP activa.
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'inventory.middleware.TenantMiddleware',
 ]
 
@@ -91,6 +95,11 @@ TEMPLATES = [
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
+                # SEC-02b/REQ-CSP-04: expone {{ csp_nonce }} (lee
+                # request._csp_nonce que setea el middleware nativo).
+                # Sin el, los scripts inline renderizan nonce="" y el
+                # JS muere en modo enforcing.
+                'django.template.context_processors.csp',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'inventory.context_processors.inject_config',
@@ -193,25 +202,45 @@ if not DEBUG:
         SECURE_HSTS_INCLUDE_SUBDOMAINS = True
         SECURE_HSTS_PRELOAD = True  # silencia W021 del check --deploy
 
-# SEC-02b: Content-Security-Policy. 'unsafe-inline' en script-src/style-src
-# es DEUDA ACEPTADA (scripts inline del CSRF por DOM + Tailwind JIT inyecta
-# <style> inline); migrar a nonces exige rework de todas las plantillas.
-# Overridable por env para despliegues con requisitos distintos.
-# FUERA del bloque `if not DEBUG:`: la CSP aplica tambien en dev (es un
-# header inocuo para el ciclo de desarrollo local) y en la suite de tests.
-CSP_POLICY = os.environ.get(
-    'CSP_POLICY',
-    "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-    "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
-    "img-src 'self' data:; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "base-uri 'self'; "
-    "frame-ancestors 'none'; "
-    "form-action 'self'"
-)
+# SEC-02b/REQ-CSP-01/03: Content-Security-Policy NATIVA de Django 6.
+# Dict unico con constantes django.utils.csp.CSP; el middleware nativo
+# (django.middleware.csp.ContentSecurityPolicyMiddleware) lo serializa
+# con build_policy() y el nonce por request (LazyNonce garantiza que
+# header y {{ csp_nonce }} usan el MISMO valor).
+# 'unsafe-inline' ELIMINADO de script-src (CSP3: con nonce el navegador
+# lo ignoraria de todos modos — eliminacion efectiva). style-src SI lo
+# conserva: DEUDA ACEPTADA, Tailwind CDN JIT inyecta <style> en runtime
+# (SEC-05 mantiene el CDN hasta que exista build de Tailwind).
+# FUERA del bloque `if not DEBUG:`: la CSP aplica tambien en dev (header
+# inocuo para el ciclo de desarrollo local) y en la suite de tests.
+_CSP_DICT = {
+    "default-src": [CSP.SELF],
+    "script-src": [CSP.SELF, CSP.NONCE, "https://cdn.tailwindcss.com"],
+    "style-src": [CSP.SELF, CSP.UNSAFE_INLINE, "https://cdn.jsdelivr.net",
+                  "https://fonts.googleapis.com"],
+    "font-src": [CSP.SELF, "https://cdn.jsdelivr.net", "https://fonts.gstatic.com"],
+    "img-src": [CSP.SELF, "data:"],
+    "connect-src": [CSP.SELF],
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.SELF],
+    "frame-ancestors": [CSP.NONE],
+    "form-action": [CSP.SELF],
+}
+
+# REQ-CSP-06: knob Report-Only -> enforcing (env-only, sin duplicar la
+# politica). 'report' (default): emite Content-Security-Policy-Report-Only
+# (no bloqueante) para la ventana de adopcion — las violaciones sin
+# report-uri se loguean en la consola del navegador. 'enforce': emite el
+# header bloqueante. Flip y rollback de emergencia = variable de entorno
+# + restart del proceso, cero codigo. Typo => ImproperlyConfigured en
+# arranque (fail-fast, no fail-silent).
+CSP_MODE = os.environ.get('CSP_MODE', 'report')  # 'report' | 'enforce'
+if CSP_MODE not in ('report', 'enforce'):
+    raise ImproperlyConfigured(f"CSP_MODE invalido: {CSP_MODE!r}")
+if CSP_MODE == 'enforce':
+    SECURE_CSP = _CSP_DICT            # header bloqueante
+else:
+    SECURE_CSP_REPORT_ONLY = _CSP_DICT  # header -Report-Only (default)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

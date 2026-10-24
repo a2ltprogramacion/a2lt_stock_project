@@ -114,7 +114,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Helper: filter template tag get_item
 document.addEventListener('DOMContentLoaded', () => {
     // Soporte básico para print automático si ?print=1

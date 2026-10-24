@@ -156,26 +156,3 @@ class TenantMiddleware:
 
         # OK: el ContextVar se setea fuera de _authorize
         return None
-
-
-class CspMiddleware:
-    """
-    SEC-02b: aplica la politica Content-Security-Policy (settings.CSP_POLICY)
-    a TODAS las respuestas que no traigan ya una cabecera CSP propia
-    (has_header: no sobrescribe politicas fijadas por vistas concretas).
-
-    Debe registrarse ANTES de TenantMiddleware en settings.MIDDLEWARE:
-    el TenantMiddleware retorna sus 403 con early return (sin invocar
-    self.get_response), asi que ninguna clase por DEBAJO de el en la
-    cadena llegaria a procesar esas respuestas. Por encima, esta clase
-    cubre tambien los 403 del tenant (ver test_sec02b_csp_header_en_403_del_middleware).
-    """
-
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        response = self.get_response(request)
-        if not response.has_header('Content-Security-Policy'):
-            response['Content-Security-Policy'] = settings.CSP_POLICY
-        return response

@@ -488,6 +488,80 @@ verifican el layout base.
 
 ---
 
+## ADR-32: CSP nativa de Django 6 con nonces por request
+
+**Estado:** Aceptada (2026-10-24). Remediación SEC-02b / REQ-CSP-01..09 del
+Capítulo 2 de `docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+La política CSP previa la construía un middleware propio
+(`inventory.middleware.CspMiddleware`) serializando el string crudo
+`CSP_POLICY` de settings.py. Sin nonces, los 16 bloques `<script>`
+inline repartidos en 14 plantillas exigían `'unsafe-inline'` en
+script-src: cualquier script inyectado en una plantilla ejecutaba sin
+restricción (mitigación XSS nula para inline). Django 6.0 incorporó CSP
+nativa: `SECURE_CSP` / `SECURE_CSP_REPORT_ONLY` (dicts de directivas),
+`django.middleware.csp.ContentSecurityPolicyMiddleware` (MiddlewareMixin
+que setea `request._csp_nonce` en process_request y aplica el header en
+process_response) y el context processor
+`django.template.context_processors.csp` que expone `{{ csp_nonce }}`
+(LazyNonce: header y plantilla comparten el MISMO valor por request).
+
+**Decisión:**
+
+1. **Adoptar el stack nativo y eliminar el propio.** MIDDLEWARE usa
+   `django.middleware.csp.ContentSecurityPolicyMiddleware` en la MISMA
+   posición que ocupaba el nuestro: inmediatamente ANTES de
+   `TenantMiddleware` (el tenant retorna sus 403 con early return sin
+   invocar `get_response`; por ser MiddlewareMixin, el nativo ya fijó el
+   nonce en la bajada y aplica el header al subir, así los 403 del
+   tenant también quedan cubiertos). Se eliminan el string `CSP_POLICY`
+   (settings.py) y `class CspMiddleware` (middleware.py) sin alias
+   deprecado; `TenantMiddleware` se conserva intacto.
+2. **Política como dict único `_CSP_DICT`** con constantes
+   `django.utils.csp.CSP`: `script-src` = self + NONCE +
+   `cdn.tailwindcss.com` SIN `'unsafe-inline'` (con nonce, CSP3 lo
+   ignoraría de todos modos — eliminación efectiva); `object-src
+   'none'`; `frame-ancestors 'none'`; `style-src` CONSERVA
+   `'unsafe-inline'` (deuda, ver Consecuencias). Los 16 scripts inline
+   llevan `nonce="{{ csp_nonce }}"`; los 4 tags CDN externos con SRI no
+   se tocan (el nonce solo autoriza inline).
+3. **Knob `CSP_MODE`** (solo variable de entorno, sin duplicar la
+   política): `'report'` (default) → `SECURE_CSP_REPORT_ONLY =
+   _CSP_DICT` → header `Content-Security-Policy-Report-Only` (no
+   bloqueante, ventana de adopción); `'enforce'` → `SECURE_CSP =
+   _CSP_DICT` → header bloqueante. Valor fuera de `report|enforce` →
+   `ImproperlyConfigured` en arranque (fail-fast, no fail-silent).
+   Flip a enforcing y rollback de emergencia = env var + restart, cero
+   código.
+
+**Consecuencias:**
+
+- `script-src` queda SIN `'unsafe-inline'`: un script inline solo
+  ejecuta si lleva el nonce del request. El gate estático
+  `test_csp_gate_estatico_scripts_inline_con_nonce` impide añadir
+  plantillas con `<script>` inline sin nonce.
+- **Deuda declarada:** `'unsafe-inline'` en `style-src` NO es removable
+  mientras exista el Tailwind CDN JIT (inyecta `<style>` en runtime;
+  SEC-05 mantiene el CDN hasta que exista un build de Tailwind).
+- Report-Only sin `report-uri`: las violaciones solo se ven en la
+  consola del navegador; suficiente para la LAN. El flip definitivo
+  exige navegación manual de las 7 vistas con JS (spec §2.5).
+- Hoy no hay caching de HTML → nonce-per-request seguro (REQ-CSP-09).
+  Si algún día se cachean páginas, excluir header/nonce del cache
+  (documentado en `docs/OPERACION.md`).
+- El middleware nativo respeta headers CSP pre-existentes y valida el
+  dict en `manage.py check` (E026).
+
+**Tests:** `inventory/test_cases/test_security_csp_403.py` reworkado al
+contrato nativo (15 tests: helper `csp_de()` modo-agnóstico, 5 sec02b
+reworkados y 6 nuevos — gate estático, nonce header==scripts, nonces
+distintos, default report-only, flip enforce, eliminaciones
+estructurales). `test_templates_sri.py` intacto.
+
+---
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 

@@ -282,7 +282,7 @@
                 </div>
     </section>
 
-<script>
+<script nonce="{{ csp_nonce }}">
     let globalFactor = Number("{{ config.factor_cobertura|stringformat:'.4f'|default:'1.0000' }}");
     let globalBCV = Number("{{ config.tasa_bcv|stringformat:'.4f'|default:'0.0000' }}");
 

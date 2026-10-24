@@ -126,7 +126,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
+<script nonce="{{ csp_nonce }}">
 // Usamos un IIFE para aislar el scope
 (() => {
     // Referencias DOM

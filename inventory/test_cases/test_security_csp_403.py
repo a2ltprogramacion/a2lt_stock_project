@@ -1,33 +1,39 @@
 """
-Tests de seguridad: SEC-06 (403 con template HTML) y SEC-02b (CSP middleware).
+Tests de seguridad: SEC-06 (403 con template HTML) y SEC-02b (CSP nativo).
 
 Remediaciones del bloque "seguridad HTTP/UX" de docs/AUDIT_REPORT.md
-(ronda 2026-10, sin spec formal):
+(SEC-06) y migracion al CSP nativo de Django 6 con nonces (SEC-02b,
+REQ-CSP-* del Capitulo 2 de docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md):
 
 - SEC-06: los 403 se servian en texto plano (middleware del tenant y
   vista contactos). Ahora renderizan inventory/403.html con el branding
   del sistema (hereda de base.html), conservando los mensajes literales
   y el status 403.
-- SEC-02b: Content-Security-Policy aplicada via middleware a TODAS las
-  respuestas (incluidos los 403 del TenantMiddleware). La politica se
-  define en settings.CSP_POLICY (overridable por env).
+- SEC-02b: Content-Security-Policy via el middleware NATIVO de Django 6
+  (django.middleware.csp.ContentSecurityPolicyMiddleware). La politica
+  es el dict settings.SECURE_CSP / settings.SECURE_CSP_REPORT_ONLY
+  (segun el knob CSP_MODE, default 'report') con nonce por request;
+  el context processor django.template.context_processors.csp expone
+  {{ csp_nonce }} a las plantillas.
 
-Decision de colocacion (importante): CspMiddleware se registra ANTES de
-TenantMiddleware en settings.MIDDLEWARE. TenantMiddleware retorna sus 403
-con "return forbidden" SIN invocar self.get_response (early return), por
-lo que ninguno de los middlewares por DEBAJO de el en la cadena llega a
-procesar esas respuestas. Colocar CspMiddleware al final de la lista lo
-dejarria debajo del TenantMiddleware y los 403 del tenant NO llevarian
-la cabecera CSP (el test test_sec02b_csp_header_en_403_del_middleware
-garantiza la cobertura).
+Decision de colocacion (importante): el middleware CSP (nativo) se registra
+ANTES de TenantMiddleware en settings.MIDDLEWARE. TenantMiddleware retorna sus 403
+con "return forbidden" SIN invocar self.get_response (early return).
+El middleware nativo es MiddlewareMixin: setea request._csp_nonce en
+process_request (fase de bajada, ANTES de que el tenant renderice sus
+403) y aplica el header en process_response al SUBIR la respuesta por
+su frame, asi que estando POR ENCIMA cubre tambien los 403 del tenant
+(el test test_sec02b_csp_header_en_403_del_middleware garantiza la
+cobertura).
 """
 from pathlib import Path
+import re
 
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import HttpResponse
 from django.shortcuts import render
-from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from inventory.models import Empresa
@@ -35,6 +41,30 @@ from inventory.models import Empresa
 # Titulo literal que debe mostrar el template 403 (SEC-06). Em-dash
 # incluido: el test garantiza el branding exacto de la pagina.
 TITULO_403 = '403 — Acceso Denegado'
+
+
+def csp_de(resp):
+    """
+    Valor del header CSP ACTIVO para el modo configurado (modo-agnostico,
+    REQ-CSP-06): con CSP_MODE='report' (default de la suite, que corre sin
+    env) el header es Content-Security-Policy-Report-Only; con 'enforce'
+    es el bloqueante. None si ninguno presente.
+    """
+    return (resp.get('Content-Security-Policy')
+            or resp.get('Content-Security-Policy-Report-Only'))
+
+
+def fragmento_directiva(politica, directiva):
+    """
+    Valor de `directiva` dentro de una politica CSP serializada
+    (build_policy une directivas con '; ' y valores con ' ').
+    '' si la directiva no esta presente.
+    """
+    for parte in politica.split(';'):
+        trozos = parte.strip().split(None, 1)
+        if trozos and trozos[0] == directiva:
+            return trozos[1] if len(trozos) > 1 else ''
+    return ''
 
 
 class FixtureSec06Sec02b(TestCase):
@@ -190,15 +220,24 @@ class TestSec02bContentSecurityPolicy(FixtureSec06Sec02b):
 
     def test_sec02b_csp_header_en_login(self):
         """
-        La pantalla de login (anonima, sin tenant) lleva la cabecera CSP.
+        La pantalla de login (anonima, sin tenant) lleva la cabecera CSP
+        del modo activo (default de la suite: -Report-Only).
 
         Nota: la URL efectiva del login es la raiz '/' (name='login';
         no existe '/login/' como ruta separada), ver inventory/urls.py.
+
+        REQ-CSP-03: script-src lleva nonce y NO lleva 'unsafe-inline'
+        (con nonce, CSP3 lo ignoraria de todos modos — eliminacion
+        efectiva, no cosmética); style-src SI lo conserva (deuda
+        documentada: Tailwind CDN JIT inyecta <style> en runtime).
         """
         resp = self.client.get(reverse('inventory:login'))
         self.assertEqual(resp.status_code, 200)
 
-        csp = resp.get('Content-Security-Policy', '')
+        csp = csp_de(resp)
+        self.assertTrue(
+            csp, "El login debe llevar la cabecera CSP del modo activo"
+        )
         for directiva in (
             "default-src 'self'",
             'cdn.tailwindcss.com',
@@ -209,6 +248,22 @@ class TestSec02bContentSecurityPolicy(FixtureSec06Sec02b):
                 directiva, csp,
                 f"La CSP del login debe contener '{directiva}'. got: {csp!r}"
             )
+
+        script_src = fragmento_directiva(csp, 'script-src')
+        self.assertIn(
+            "'nonce-", script_src,
+            f"script-src debe llevar el nonce por request (la pagina de "
+            f"login renderiza scripts inline nocificados). got: {script_src!r}"
+        )
+        self.assertNotIn(
+            "'unsafe-inline'", script_src,
+            "REQ-CSP-03: script-src no debe llevar 'unsafe-inline' "
+            f"(el nonce lo reemplaza). got: {script_src!r}"
+        )
+        self.assertIn(
+            "'unsafe-inline'", fragmento_directiva(csp, 'style-src'),
+            "style-src conserva 'unsafe-inline' (deuda Tailwind CDN JIT)"
+        )
 
     # ── 6. Pagina autenticada lleva la CSP ────────────────────────────
 
@@ -225,8 +280,9 @@ class TestSec02bContentSecurityPolicy(FixtureSec06Sec02b):
         resp = self.client.get(reverse('inventory:dashboard'))
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(
-            resp.has_header('Content-Security-Policy'),
-            "La respuesta autenticada debe llevar Content-Security-Policy"
+            csp_de(resp),
+            "La respuesta autenticada debe llevar la cabecera CSP "
+            "del modo activo (default: -Report-Only)"
         )
 
     # ── 7. Los 403 del TenantMiddleware tambien llevan la CSP ─────────
@@ -234,29 +290,40 @@ class TestSec02bContentSecurityPolicy(FixtureSec06Sec02b):
     def test_sec02b_csp_header_en_403_del_middleware(self):
         """
         El 403 del TenantMiddleware (mismo disparo del test SEC-06 #1)
-        TAMBIEN lleva la CSP. Esto exige que CspMiddleware este POR
-        ENCIMA del TenantMiddleware en settings.MIDDLEWARE: el 403 del
-        tenant se retorna con early return (sin llamar get_response),
-        asi que los middlewares por debajo de el nunca lo procesan.
+        TAMBIEN lleva la CSP. Esto exige que el middleware CSP nativo
+        este POR ENCIMA del TenantMiddleware en settings.MIDDLEWARE:
+        el 403 del tenant se retorna con early return (sin llamar
+        get_response); al ser MiddlewareMixin, el nativo lo procesa
+        en process_response al subir la respuesta por su frame.
         """
         self.client.login(username='csp403_user', password='pw12345')
         resp = self.client.get(reverse('inventory:dashboard'))  # sin empresa en sesion
 
         self.assertEqual(resp.status_code, 403)
         self.assertTrue(
-            resp.has_header('Content-Security-Policy'),
-            "El 403 del TenantMiddleware debe llevar Content-Security-Policy"
+            csp_de(resp),
+            "El 403 del TenantMiddleware debe llevar la cabecera CSP "
+            "del modo activo"
         )
 
     # ── 9. La politica cubre los origenes externos reales ──────────────
 
     def test_sec02b_politica_cubre_recursos_reales(self):
         """
-        settings.CSP_POLICY debe listar los 4 origenes externos que el
-        frontend realmente referencia (inventario de la auditoria):
+        El dict activo (settings.SECURE_CSP_REPORT_ONLY o settings.SECURE_CSP
+        segun el knob settings.CSP_MODE) debe listar los 4 origenes externos
+        que el frontend realmente referencia (inventario de la auditoria):
         Tailwind CDN, jsdelivr (bootstrap-icons + woff2), Google Fonts
         (@import CSS) y fonts.gstatic.com (ficheros de fuente).
         """
+        modo = getattr(settings, 'CSP_MODE', 'report')
+        politica = (settings.SECURE_CSP if modo == 'enforce'
+                    else settings.SECURE_CSP_REPORT_ONLY)
+        # Aplana dict -> string para no acoplarse a la directiva exacta
+        # en la que vive cada origen.
+        valores = ' '.join(
+            str(v) for vals in politica.values() for v in (vals or [])
+        )
         for origen in (
             'cdn.tailwindcss.com',
             'cdn.jsdelivr.net',
@@ -264,41 +331,284 @@ class TestSec02bContentSecurityPolicy(FixtureSec06Sec02b):
             'fonts.gstatic.com',
         ):
             self.assertIn(
-                origen, settings.CSP_POLICY,
-                f"CSP_POLICY debe permitir el origen real {origen}"
+                origen, valores,
+                f"El dict CSP del modo {modo!r} debe permitir el "
+                f"origen real {origen}. got: {valores!r}"
+            )
+
+    # ── 11. Nonce del header == nonce de los scripts renderizados ─────
+
+    def test_csp_nonce_header_coincide_con_scripts_renderizados(self):
+        """
+        REQ-CSP-04: en una pagina real (dashboard, hereda los 3 scripts
+        inline de base.html) el nonce del header script-src es el MISMO
+        que renderiza cada <script> inline del body (LazyNonce: header y
+        plantilla comparten valor por request).
+        """
+        self.client.login(username='csp403_user', password='pw12345')
+        session = self.client.session
+        session['empresa_id'] = self.empresa.id
+        session.save()
+
+        resp = self.client.get(reverse('inventory:dashboard'))
+        self.assertEqual(resp.status_code, 200)
+
+        csp = csp_de(resp)
+        self.assertTrue(csp, "El dashboard debe llevar la CSP del modo activo")
+        m = re.search(r"'nonce-([^']+)'", fragmento_directiva(csp, 'script-src'))
+        self.assertIsNotNone(
+            m, f"script-src del header debe llevar 'nonce-<token>'. got: {csp!r}"
+        )
+        token = m.group(1)
+
+        body = resp.content.decode('utf-8')
+        inline = [
+            tag for tag in re.findall(r'<script\b[^>]*>', body)
+            if 'src=' not in tag
+            and 'application/json' not in tag  # json_script = data block
+        ]
+        self.assertTrue(
+            inline, "El dashboard debe renderizar scripts inline (base.html)"
+        )
+        for tag in inline:
+            self.assertIn(
+                f'nonce="{token}"', tag,
+                f"Cada script inline debe llevar el nonce del header "
+                f"({token!r}). tags: {inline!r}"
+            )
+
+    # ── 13. Nonces distintos entre requests (no reuso) ─────────────────
+
+    def test_csp_nonces_distintos_entre_requests(self):
+        """
+        REQ-CSP-03: el nonce es por request (secrets.token_urlsafe(16)
+        via LazyNonce). Dos GET al login deben producir tokens
+        DISTINTOS en el header — el reuso permitiria eludir la politica
+        si un nonce filtrado sobreviviera.
+        """
+        tokens = []
+        for _ in range(2):
+            resp = self.client.get(reverse('inventory:login'))
+            csp = csp_de(resp)
+            self.assertTrue(csp, "El login debe llevar la CSP del modo activo")
+            m = re.search(r"'nonce-([^']+)'", fragmento_directiva(csp, 'script-src'))
+            self.assertIsNotNone(
+                m,
+                f"script-src del header debe llevar 'nonce-<token>' "
+                f"(login.html renderiza script inline). got: {csp!r}"
+            )
+            tokens.append(m.group(1))
+        self.assertNotEqual(
+            tokens[0], tokens[1],
+            "El nonce debe regenerarse por request (CSP-03): dos GET al "
+            "login produjeron el mismo token"
+        )
+
+    # ── 14. Default del knob: Report-Only, no bloqueante ───────────────
+
+    def test_csp_report_only_default_emite_header_no_bloqueante(self):
+        """
+        REQ-CSP-06: con el knob en su default (CSP_MODE='report', la
+        suite corre sin env) la politica viaja como
+        Content-Security-Policy-Report-Only (ventana de adopcion: no
+        bloquea nada) y el header bloqueante NO se emite (SECURE_CSP
+        queda en su default {} = sin header).
+        """
+        self.assertEqual(
+            getattr(settings, 'CSP_MODE', None), 'report',
+            "El default del knob CSP_MODE debe ser 'report' "
+            "(despliegue seguro gradual)"
+        )
+        resp = self.client.get(reverse('inventory:login'))
+        self.assertEqual(resp.status_code, 200)
+
+        self.assertTrue(
+            resp.get('Content-Security-Policy-Report-Only'),
+            "Modo report: el header -Report-Only debe estar presente"
+        )
+        self.assertFalse(
+            resp.get('Content-Security-Policy'),
+            "Modo report: el header bloqueante NO debe emitirse"
+        )
+
+    # ── 15. Flip a enforcing: header bloqueante por settings ───────────
+
+    def test_csp_enforce_flip_emite_header_bloqueante(self):
+        """
+        REQ-CSP-06: el flip a enforcing es un cambio de SETTINGS (en
+        produccion: CSP_MODE=enforce + restart; aqui se simula con
+        override_settings, que el nativo respeta porque lee
+        settings.SECURE_CSP / SECURE_CSP_REPORT_ONLY por request): se
+        emite el header BLOQUEANTE y el -Report-Only desaparece.
+        """
+        with override_settings(
+            SECURE_CSP=settings._CSP_DICT,
+            SECURE_CSP_REPORT_ONLY={},
+        ):
+            resp = self.client.get(reverse('inventory:login'))
+            self.assertEqual(resp.status_code, 200)
+
+            bloqueante = resp.get('Content-Security-Policy')
+            self.assertTrue(
+                bloqueante,
+                "Modo enforce: el header bloqueante debe estar presente"
+            )
+            self.assertFalse(
+                resp.get('Content-Security-Policy-Report-Only'),
+                "Modo enforce: el header -Report-Only NO debe emitirse"
+            )
+            # El nonce sigue viajando en el header bloqueante.
+            self.assertIn(
+                "'nonce-", fragmento_directiva(bloqueante, 'script-src'),
+                f"El flip conserva el nonce en script-src. got: {bloqueante!r}"
             )
 
 
 class TestSec02bCspMiddlewareUnit(SimpleTestCase):
-    """SEC-02b: unit test del middleware (sin BD)."""
+    """SEC-02b: unit tests del middleware nativo + invariantes estructurales."""
 
     # ── 8. El middleware no sobrescribe un header existente ───────────
 
     def test_sec02b_csp_no_sobrescribe_header_existente(self):
         """
-        CspMiddleware respeta responses que ya traen su propia CSP
-        (has_header check): no debe sobrescribir 'X' pre-fijado.
-        Control positivo en el mismo test: un response sin CSP previa
-        si recibe settings.CSP_POLICY.
+        El middleware NATIVO respeta responses que ya traen su propia
+        CSP: no debe sobrescribir 'X' pre-fijado. Control positivo en
+        el mismo test: un response sin CSP previa si recibe la politica
+        del modo activo (default: header -Report-Only con nonce).
         """
-        from inventory.middleware import CspMiddleware
+        from django.middleware.csp import ContentSecurityPolicyMiddleware
 
         request = RequestFactory().get('/')
 
         # Arrange/Act: response con CSP pre-fijada.
         resp_preexistente = HttpResponse('contenido')
         resp_preexistente['Content-Security-Policy'] = 'X'
-        middleware = CspMiddleware(get_response=lambda r: resp_preexistente)
+        middleware = ContentSecurityPolicyMiddleware(
+            get_response=lambda r: resp_preexistente
+        )
 
         # Assert: el middleware NO cambia el header existente.
         salida = middleware(request)
         self.assertEqual(salida['Content-Security-Policy'], 'X')
 
-        # Control positivo: sin header previo se aplica la politica.
+        # Control positivo: sin header previo se aplica la politica
+        # del modo activo (REQ-CSP-03: sin 'unsafe-inline' en
+        # script-src). Nota: este unit test NO renderiza plantillas,
+        # asi que el LazyNonce nunca se evalua y el header sale sin
+        # nonce (comportamiento nativo: el nonce solo viaja si la
+        # respuesta lo consumio) — no se afirma el nonce aqui.
         resp_fresca = HttpResponse('contenido')
-        middleware_fresco = CspMiddleware(get_response=lambda r: resp_fresca)
+        middleware_fresco = ContentSecurityPolicyMiddleware(
+            get_response=lambda r: resp_fresca
+        )
         salida_fresca = middleware_fresco(request)
-        self.assertEqual(salida_fresca['Content-Security-Policy'], settings.CSP_POLICY)
+        politica = csp_de(salida_fresca)
+        self.assertTrue(
+            politica,
+            "Un response fresco debe recibir la CSP del modo activo"
+        )
+        self.assertIn(
+            'cdn.tailwindcss.com', politica,
+            f"La politica del modo activo debe permitir Tailwind CDN. "
+            f"got: {politica!r}"
+        )
+        self.assertNotIn(
+            "'unsafe-inline'", fragmento_directiva(politica, 'script-src'),
+            f"script-src no debe llevar 'unsafe-inline' (REQ-CSP-03). "
+            f"got: {politica!r}"
+        )
+
+    # ── 10. Migracion al CSP nativo: eliminaciones y posicion ─────────
+
+    def test_csp_csp_policy_y_middleware_propio_eliminados(self):
+        """
+        Invariante estructural de la migracion (REQ-CSP-01/02):
+          - settings.py ya no define CSP_POLICY (string crudo retirado
+            sin alias deprecado: su consumidor unico era el middleware
+            propio, ya eliminado).
+          - inventory/middleware.py ya no define class CspMiddleware
+            (TenantMiddleware se conserva intacto).
+          - settings.MIDDLEWARE tiene el middleware nativo
+            inmediatamente ANTES de TenantMiddleware.
+        """
+        raiz = Path(settings.BASE_DIR)
+
+        fuente_settings = (
+            raiz / 'a2lt_stock_project' / 'settings.py'
+        ).read_text(encoding='utf-8')
+        self.assertNotIn(
+            'CSP_POLICY', fuente_settings,
+            "settings.py no debe definir CSP_POLICY: la configuracion "
+            "canonica es el dict SECURE_CSP / SECURE_CSP_REPORT_ONLY"
+        )
+
+        fuente_middleware = (
+            raiz / 'inventory' / 'middleware.py'
+        ).read_text(encoding='utf-8')
+        self.assertNotIn(
+            'class CspMiddleware', fuente_middleware,
+            "inventory/middleware.py no debe definir CspMiddleware: la "
+            "CSP la aplica el middleware nativo de Django 6"
+        )
+
+        mw = settings.MIDDLEWARE
+        self.assertIn(
+            'django.middleware.csp.ContentSecurityPolicyMiddleware', mw
+        )
+        self.assertEqual(
+            mw.index('django.middleware.csp.ContentSecurityPolicyMiddleware')
+            + 1,
+            mw.index('inventory.middleware.TenantMiddleware'),
+            "El middleware CSP nativo debe estar inmediatamente ANTES "
+            "del TenantMiddleware (los 403 early-return del tenant "
+            "suben por su frame y reciben el header)"
+        )
+
+
+class TestCspNocificacionPlantillas(SimpleTestCase):
+    """REQ-CSP-04/05: gate estatico de plantillas (scan de archivos)."""
+
+    # ── 12. Gate estatico: todo script inline lleva nonce ───────────────
+
+    def test_csp_gate_estatico_scripts_inline_con_nonce(self):
+        """
+        REQ-CSP-05: anti-regresion estatico. Recorre TODO el arbol de
+        plantillas (inventory/templates/ + templates/ del proyecto) y
+        exige que cada tag <script> SIN src= (inline) lleve nonce=. Los
+        tags externos con SRI (src=) NO se tocan: el nonce solo autoriza
+        scripts inline. Falla reportando archivo:linea exactos.
+        """
+        raiz = Path(settings.BASE_DIR)
+        faltantes = []
+        vistos = 0
+        for sub in ('inventory/templates', 'templates'):
+            base_dir = raiz / sub
+            if not base_dir.exists():
+                continue
+            for ruta in sorted(base_dir.rglob('*.html')):
+                contenido = ruta.read_text(encoding='utf-8')
+                for m in re.finditer(r'<script\b[^>]*>', contenido):
+                    tag = m.group(0)
+                    if 'src=' in tag:
+                        continue  # externo SRI: fuera del alcance del gate
+                    vistos += 1
+                    if 'nonce=' not in tag:
+                        linea = contenido.count('\n', 0, m.start()) + 1
+                        faltantes.append(
+                            f'{ruta.relative_to(raiz)}:{linea}'
+                        )
+        self.assertTrue(
+            vistos > 0,
+            "El gate no escaneo ningun <script> inline: revisa el arbol "
+            "de plantillas (inventory/templates/)"
+        )
+        self.assertEqual(
+            faltantes, [],
+            "REQ-CSP-05: TODO <script> inline debe llevar nonce= (un "
+            "script sin nonce rompe el JS de esa pagina al activar "
+            "enforcing). Scripts sin nonce en: "
+            + ', '.join(faltantes)
+        )
 
 
 if __name__ == '__main__':
