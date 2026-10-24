@@ -29,6 +29,7 @@ from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .managers import EmpresaManager, EmpresaQuerySet, get_current_empresa
+from .calculos import calcular_totales_documento
 
 
 # Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
@@ -1182,9 +1183,10 @@ class DocumentoCompra(models.Model):
         return sum(d.iva_bs for d in self.detalles.all())
 
     @property
-    def total_documento_bs(self):
-        """Total documento = subtotal_bs + IVA BS."""
-        return self.subtotal_bs + self.total_iva_bs
+    def total_bs_bruto(self):
+        """Total bruto en Bs (subtotal + IVA, SIN descuento_global). DATA-01: delega en calculos."""
+        totales = calcular_totales_documento(self.detalles.all(), self.descuento_global)
+        return totales['subtotal_bs_bruto'] + totales['total_iva_bs_bruto']
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1696,9 +1698,10 @@ class NotaEntrega(models.Model):
         return sum(d.iva_bs for d in self.detalles.all())
 
     @property
-    def total_documento_bs(self):
-        """Total documento = subtotal_bs + IVA BS (si aplica)."""
-        return self.subtotal_bs + self.total_iva_bs
+    def total_bs_bruto(self):
+        """Total bruto en Bs (subtotal + IVA, SIN descuento_global). DATA-01: delega en calculos."""
+        totales = calcular_totales_documento(self.detalles.all(), self.descuento_global)
+        return totales['subtotal_bs_bruto'] + totales['total_iva_bs_bruto']
 
 
 # ─────────────────────────────────────────────────────────────────────────────

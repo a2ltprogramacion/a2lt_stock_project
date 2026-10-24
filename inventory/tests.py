@@ -6219,7 +6219,7 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         self.empresa = crear_empresa(nombre='FaseN2 Corp', rif='J-N2-001')
     
     def test_n2_nota_entrega_tiene_propiedades_subtotal_y_total(self):
-        """NotaEntrega debe tener propiedades subtotal_usd, subtotal_bs, total_iva_bs, total_documento_bs."""
+        """NotaEntrega debe tener propiedades subtotal_usd, subtotal_bs, total_iva_bs, total_bs_bruto."""
         from inventory.models import NotaEntrega, Almacen
         alm = crear_almacen(self.empresa, 'Almacén N2a')
         nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
@@ -6228,7 +6228,10 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         self.assertTrue(hasattr(nota, 'subtotal_bs_bcv'))
         self.assertTrue(hasattr(nota, 'subtotal_bs'))
         self.assertTrue(hasattr(nota, 'total_iva_bs'))
-        self.assertTrue(hasattr(nota, 'total_documento_bs'))
+        # EST-06: la property bruta se llama total_bs_bruto (delega en calculos)
+        # y total_documento_bs desaparece sin alias deprecado (REQ-EST06-02).
+        self.assertTrue(hasattr(nota, 'total_bs_bruto'))
+        self.assertFalse(hasattr(nota, 'total_documento_bs'))
     
     def test_n2_subtotal_nota_sin_detalles_es_cero(self):
         """subtotal_usd de una nota sin detalles debe ser Decimal('0')."""
@@ -6237,7 +6240,8 @@ class TestModelosNotaEntregaFaseN2(TestCase):
         nota = NotaEntrega.objects.create(empresa=self.empresa, almacen=alm)
         self.assertEqual(nota.subtotal_usd, Decimal('0'))
         self.assertEqual(nota.total_iva_bs, Decimal('0'))
-        self.assertEqual(nota.total_documento_bs, Decimal('0'))
+        # EST-06: sin detalles, el bruto delegante también es 0 (REQ-EST06-04).
+        self.assertEqual(nota.total_bs_bruto, Decimal('0'))
     
     def test_n2_subtotal_nota_suma_detalles_correctamente(self):
         """subtotal_usd de nota con 2 detalles debe ser la suma de sus subtotales."""
