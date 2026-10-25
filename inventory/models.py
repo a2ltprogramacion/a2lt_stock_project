@@ -324,6 +324,27 @@ class ConfiguracionEmpresa(models.Model):
                 & models.Q(margen_global__lt=100),
                 name='margen_rango_valido',
             ),
+            # DATA-08 (extensión): backlog de campos monetarios pendientes.
+            # ``descuento_global`` es un porcentaje: fuera de [0, 100]
+            # produce totales negativos o invertidos en las notas.
+            models.CheckConstraint(
+                condition=models.Q(descuento_global__gte=0)
+                & models.Q(descuento_global__lte=100),
+                name='descuento_global_rango',
+            ),
+            # ``factor_redondeo``: el help_text lo promete desde 0018
+            # ("Debe ser mayor a 0") — un múltiplo 0 rompe el módulo del
+            # redondeo de precios.
+            models.CheckConstraint(
+                condition=models.Q(factor_redondeo__gt=0),
+                name='factor_redondeo_positivo',
+            ),
+            # ``tasa_mercado``: DATA-05 la deriva en save(), pero
+            # bulk_create()/SQL crudo saltan esa capa.
+            models.CheckConstraint(
+                condition=models.Q(tasa_mercado__gte=0),
+                name='tasa_mercado_no_negativa',
+            ),
         ]
 
     def __str__(self):
@@ -1280,6 +1301,38 @@ class DetalleDocumentoCompra(models.Model):
         verbose_name = 'Detalle de Compra'
         verbose_name_plural = '13. Detalles de Compras'
         ordering = ['id']
+        # DATA-08 (extensión): rangos monetarios a nivel de BD. Los
+        # services ya validan (registrar_compra_proveedor), pero
+        # bulk_create()/SQL crudo saltan esa capa: el esquema es la
+        # última línea de defensa (mismo criterio que las 0024).
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cantidad__gt=0),
+                name='cantidad_compra_positiva',
+            ),
+            # Los 5 snapshots de costo en UNA constraint combinada: una
+            # fila con cualquier costo negativo no es una compra.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(costo_base__gte=0)
+                    & models.Q(costo_ajustado__gte=0)
+                    & models.Q(costo_directo_bcv__gte=0)
+                    & models.Q(costo_ajustado_bcv__gte=0)
+                    & models.Q(costo_unitario_snapshot__gte=0)
+                ),
+                name='costos_compra_no_negativos',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(descuento_aplicado__gte=0)
+                & models.Q(descuento_aplicado__lte=100),
+                name='descuento_compra_rango',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(iva_porcentaje__gte=0)
+                & models.Q(iva_porcentaje__lte=100),
+                name='iva_compra_rango',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.documento_compra.numero_interno} - {self.articulo.sku}"
@@ -2296,6 +2349,29 @@ class DetalleNotaCredito(models.Model):
                     | models.Q(detalle_origen_venta__isnull=True, detalle_origen_compra__isnull=False)
                 ),
                 name='detalle_nc_un_origen_exacto',
+            ),
+            # DATA-08 (extensión): rangos monetarios a nivel de BD. Los
+            # services ya validan (procesar_devolucion_*), pero
+            # bulk_create()/SQL crudo saltan esa capa.
+            models.CheckConstraint(
+                condition=models.Q(cantidad_devuelta__gt=0),
+                name='cantidad_devuelta_positiva',
+            ),
+            # Los 4 montos en UNA constraint combinada: un reembolso
+            # negativo no es una devolución, es un cargo mal persistido.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(precio_unitario_snapshot__gte=0)
+                    & models.Q(subtotal_devuelto_usd__gte=0)
+                    & models.Q(iva_usd__gte=0)
+                    & models.Q(linea_total_usd__gte=0)
+                ),
+                name='montos_nc_no_negativos',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(iva_porcentaje_snapshot__gte=0)
+                & models.Q(iva_porcentaje_snapshot__lte=100),
+                name='iva_nc_rango',
             ),
         ]
 
