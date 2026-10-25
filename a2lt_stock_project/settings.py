@@ -23,9 +23,15 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. Seguridad: SECRET_KEY con fallback explicito
+# 1. Seguridad: SECRET_KEY obligatoria desde variable de entorno
 # ─────────────────────────────────────────────────────────────────────────────
-SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-insecure-key-change-in-prod')
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    from django.core.exceptions import ImproperlyConfigured
+    raise ImproperlyConfigured(
+        'SECRET_KEY no definida en variables de entorno. '
+        'Generar con: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. DEBUG desde env (default False). Para desarrollo local usar DEBUG=True.
@@ -74,7 +80,7 @@ ROOT_URLCONF = 'a2lt_stock_project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -204,6 +210,7 @@ LOGGING = {
             'filename': LOGS_DIR / 'a2lt_stock.log',
             'maxBytes': 10 * 1024 * 1024,  # 10 MB
             'backupCount': 5,
+            'encoding': 'utf-8',
             'formatter': 'verbose',
             'level': 'INFO',
         },
@@ -236,7 +243,9 @@ LOGGING = {
 # 10. CSP / Cookies
 # ─────────────────────────────────────────────────────────────────────────────
 SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = False  # False para que JS (getCookie) pueda leerlo via A6
+# SEC-02: la cookie CSRF no debe ser legible por JS (mitiga robo de token vía XSS).
+# El token se expone al frontend mediante <meta name="csrf-token"> en base.html.
+CSRF_COOKIE_HTTPONLY = True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
