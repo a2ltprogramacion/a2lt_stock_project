@@ -8,6 +8,23 @@ vez público.
 
 ---
 
+## 2026-10-25 — Bloque estructural (EST-01/02/04/05/06 + CSP nonces; spec G1 + plan G2)
+
+### Seguridad / infraestructura
+- **CSP nonces (SEC-02b)**: CSP nativa de Django 6 con nonce por request; `'unsafe-inline'` eliminado de `script-src`; 16 scripts inline en 14 plantillas nonceficados con gate anti-regresión estático; knob `CSP_MODE` (report/enforce) con flip por entorno (`cc59926`). ADR-32.
+
+### Integridad estructural
+- **EST-06**: `total_bs_bruto` delegando en `calculos.py`; la property deshonesta `total_documento_bs` eliminada de NE y DC (`ae82253`).
+- **EST-04**: usuario forense — FK global a `User` + snapshot `usuario_nombre` en kárdex y NC; migración `0029` con backfill (8/195 reales resueltos); `usuario` por POST deprecado; `reversar_*` registran usuario real (`ea9cea0`). ADR-33.
+- **EST-05**: `AuditoriaTasa.usuario` FK + snapshot (migración `0030`) — cierra el último hueco forense de tasas (`24813c7`).
+- **EST-01**: kárdex inmutable — señales `pre_save`/`pre_delete` + `KardexQuerySet` (bloquea `.update()`/`bulk_create`) en ambos managers; escape hatch `kardex_bypass` con allowlist; `services.eliminar_tenant()` como única vía de teardown (`7fe7905`). ADR-34.
+- **EST-02**: documentos emitidos inmutables — señal con matriz en 6 modelos (cabeceras solo ANULADO+motivo; líneas 100%); admin totalmente readonly (POST → 403 sin tocar stock); NC refactorizada a pre-create (`ed6c682`). ADR-35. Fase 2 (guard `.update()`) diferida por decisión G1.
+
+### Cifras
+- Suite: 485 → **522 tests OK (6 skipped)** con checkpoints verificados por tarea. Migraciones: 28 → **30**. Cada fix con verificación independiente adversarial (rollback atómico). 4 divergencias plan↔realidad documentadas con evidencia en commits y ADRs.
+
+---
+
 ## 2026-10-20 — Remediación de auditoría (rondas P0, P1 y P2 de integridad de datos)
 
 ### Seguridad

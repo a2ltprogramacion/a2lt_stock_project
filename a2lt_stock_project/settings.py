@@ -20,6 +20,9 @@ Para produccion real, configurar .env:
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -27,7 +30,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ─────────────────────────────────────────────────────────────────────────────
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
-    from django.core.exceptions import ImproperlyConfigured
     raise ImproperlyConfigured(
         'SECRET_KEY no definida en variables de entorno. '
         'Generar con: python -c "import secrets; print(secrets.token_urlsafe(64))"'
@@ -72,6 +74,14 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # SEC-02b: CSP ANTES del TenantMiddleware (no al final de la lista):
+    # el TenantMiddleware retorna sus 403 con early return, sin invocar
+    # get_response. El middleware NATIVO de Django 6 es MiddlewareMixin:
+    # setea request._csp_nonce en process_request (fase de bajada, antes
+    # de que el tenant renderice sus 403) y aplica el header en
+    # process_response al SUBIR la respuesta por su frame. Por encima,
+    # cubre tambien los 403 del tenant con la cabecera CSP activa.
+    'django.middleware.csp.ContentSecurityPolicyMiddleware',
     'inventory.middleware.TenantMiddleware',
 ]
 
@@ -85,6 +95,11 @@ TEMPLATES = [
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
+                # SEC-02b/REQ-CSP-04: expone {{ csp_nonce }} (lee
+                # request._csp_nonce que setea el middleware nativo).
+                # Sin el, los scripts inline renderizan nonce="" y el
+                # JS muere en modo enforcing.
+                'django.template.context_processors.csp',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'inventory.context_processors.inject_config',
@@ -163,13 +178,21 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Django emite un warning si HSTS se activa sin HTTPS, asi que lo
 # aislamos de DEBUG/SessionTesting.
 if not DEBUG:
-    SECURE_BROWSER_XSS_FILTER = True
+    # SEC-07: SECURE_BROWSER_XSS_FILTER fue eliminado (no-op desde
+    # Django 5: el header X-XSS-Protection fue deprecado por los
+    # navegadores por introducir vulnerabilidades propias).
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
     # On-premise over HTTP LAN: no forzar HTTPS redirect (delega a
     # reverse-proxy si lo hubiere). Si se quiere HTTPS obligatorio,
     # definir SECURE_SSL_REDIRECT=True via env var.
     SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').lower() == 'true'
+    # SEC-03: este setting ASUME un reverse proxy confiable (Apache/Nginx)
+    # que fija/sobrescribe X-Forwarded-Proto antes de que la request llegue
+    # a Django. Si se despliega SIN proxy, ELIMINAR esta linea: cualquiera
+    # en la LAN podria inyectar X-Forwarded-Proto: https, forzar
+    # request.is_secure()=True y bypassear el origin-check de CSRF
+    # (ver docs/OPERACION.md, "Despliegue con y sin reverse proxy").
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     # Cookies y HSTS solo bajo HTTPS real para permitir operar en LAN local sobre HTTP sin romper auth
     SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
@@ -179,9 +202,49 @@ if not DEBUG:
         SECURE_HSTS_INCLUDE_SUBDOMAINS = True
         SECURE_HSTS_PRELOAD = True  # silencia W021 del check --deploy
 
+# SEC-02b/REQ-CSP-01/03: Content-Security-Policy NATIVA de Django 6.
+# Dict unico con constantes django.utils.csp.CSP; el middleware nativo
+# (django.middleware.csp.ContentSecurityPolicyMiddleware) lo serializa
+# con build_policy() y el nonce por request (LazyNonce garantiza que
+# header y {{ csp_nonce }} usan el MISMO valor).
+# 'unsafe-inline' ELIMINADO de script-src (CSP3: con nonce el navegador
+# lo ignoraria de todos modos — eliminacion efectiva). style-src SI lo
+# conserva: DEUDA ACEPTADA, Tailwind CDN JIT inyecta <style> en runtime
+# (SEC-05 mantiene el CDN hasta que exista build de Tailwind).
+# FUERA del bloque `if not DEBUG:`: la CSP aplica tambien en dev (header
+# inocuo para el ciclo de desarrollo local) y en la suite de tests.
+_CSP_DICT = {
+    "default-src": [CSP.SELF],
+    "script-src": [CSP.SELF, CSP.NONCE, "https://cdn.tailwindcss.com"],
+    "style-src": [CSP.SELF, CSP.UNSAFE_INLINE, "https://cdn.jsdelivr.net",
+                  "https://fonts.googleapis.com"],
+    "font-src": [CSP.SELF, "https://cdn.jsdelivr.net", "https://fonts.gstatic.com"],
+    "img-src": [CSP.SELF, "data:"],
+    "connect-src": [CSP.SELF],
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.SELF],
+    "frame-ancestors": [CSP.NONE],
+    "form-action": [CSP.SELF],
+}
+
+# REQ-CSP-06: knob Report-Only -> enforcing (env-only, sin duplicar la
+# politica). 'report' (default): emite Content-Security-Policy-Report-Only
+# (no bloqueante) para la ventana de adopcion — las violaciones sin
+# report-uri se loguean en la consola del navegador. 'enforce': emite el
+# header bloqueante. Flip y rollback de emergencia = variable de entorno
+# + restart del proceso, cero codigo. Typo => ImproperlyConfigured en
+# arranque (fail-fast, no fail-silent).
+CSP_MODE = os.environ.get('CSP_MODE', 'report')  # 'report' | 'enforce'
+if CSP_MODE not in ('report', 'enforce'):
+    raise ImproperlyConfigured(f"CSP_MODE invalido: {CSP_MODE!r}")
+if CSP_MODE == 'enforce':
+    SECURE_CSP = _CSP_DICT            # header bloqueante
+else:
+    SECURE_CSP_REPORT_ONLY = _CSP_DICT  # header -Report-Only (default)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. LOGGING (always-on, con file rotativo + console)
+# 9. LOGGING (always-on: file rotativo + console + mail_admins para 500)
 # ─────────────────────────────────────────────────────────────────────────────
 LOGS_DIR = BASE_DIR / 'logs'
 LOGS_DIR.mkdir(exist_ok=True)
@@ -214,6 +277,12 @@ LOGGING = {
             'formatter': 'verbose',
             'level': 'INFO',
         },
+        # SEC-04: notifica los ERROR (500) a ADMINS por correo. El backend
+        # de correo se define por entorno mas abajo (default console).
+        'mail_admins': {
+            'level': 'ERROR',
+            'class': 'django.utils.log.AdminEmailHandler',
+        },
     },
     'loggers': {
         'inventory': {
@@ -222,7 +291,8 @@ LOGGING = {
             'propagate': False,
         },
         'django.request': {
-            'handlers': ['file'],
+            # SEC-04: los 500 van a archivo, consola y correo de ADMINS.
+            'handlers': ['file', 'console', 'mail_admins'],
             'level': 'ERROR',
             'propagate': False,
         },
@@ -254,6 +324,17 @@ CSRF_COOKIE_HTTPONLY = True
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@localhost')
 ADMINS = [('Admin A2LT', ADMIN_EMAIL)]
 MANAGERS = ADMINS
+
+# SEC-04: el handler mail_admins necesita un backend de correo. Default
+# console (escribe el "email" en stdout): seguro en dev y tests. En
+# produccion definir EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+# + EMAIL_HOST/USER/PASSWORD en el .env (ver docs/OPERACION.md).
+EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() == 'true'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

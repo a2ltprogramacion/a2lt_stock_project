@@ -466,7 +466,12 @@ def vista_carga_masiva(request):
     # ── POST: Procesar archivo ───────────────────────────────────────────────
     archivo = request.FILES.get('archivo_excel')
     almacen_id = request.POST.get('almacen_id')
-    usuario = request.POST.get('usuario', '')
+    # EST-04 (REQ-EST04-06): el `usuario` por POST está deprecado — se ignora
+    # con warning; la fuente forense es SIEMPRE el operador autenticado.
+    if request.POST.get('usuario'):
+        logger.warning(
+            '[EST04] POST "usuario" deprecado e ignorado; fuente forense = request.user'
+        )
 
     if not archivo:
         return JsonResponse({'ok': False, 'error': 'No se recibió ningún archivo.'}, status=400)
@@ -483,7 +488,7 @@ def vista_carga_masiva(request):
         resultado = svc.procesar_carga_masiva(
             archivo_excel=archivo,
             almacen_id=almacen_id,
-            usuario=usuario or request.user.username if request.user.is_authenticated else 'anónimo',
+            usuario=request.user,
         )
     except ValueError as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=422)
@@ -545,13 +550,11 @@ def vista_carga_masiva_excel(request):
     if not archivo:
         return JsonResponse({'ok': False, 'error': 'No se recibió ningún archivo.'}, status=400)
 
-    usuario = request.user.username if request.user.is_authenticated else 'anónimo'
-
     try:
         resultado = svc.procesar_carga_masiva_excel(
             file_io=archivo,
             empresa_id=empresa_id,
-            usuario=usuario,
+            usuario=request.user,
         )
     except ValueError as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=422)
@@ -608,7 +611,12 @@ def vista_resolver_colision(request):
     costo = datos.get('costo')
     precio_divisa = datos.get('precio_divisa')
     nombre_excel = datos.get('nombre_excel', '')
-    usuario = datos.get('usuario', '')
+    # EST-04 (REQ-EST04-06): el `usuario` por JSON está deprecado — se ignora
+    # con warning; la fuente forense es SIEMPRE el operador autenticado.
+    if datos.get('usuario'):
+        logger.warning(
+            '[EST04] POST "usuario" deprecado e ignorado; fuente forense = request.user'
+        )
 
     # Validaciones básicas
     if not lote_id:
@@ -627,7 +635,7 @@ def vista_resolver_colision(request):
             decision=decision,
             cantidad_excel=cantidad_excel,
             lote_id=lote_id,
-            usuario=usuario or (request.user.username if request.user.is_authenticated else 'anónimo'),
+            usuario=request.user,
             costo=costo if costo else None,
             precio_divisa=precio_divisa if precio_divisa else None,
             nombre_excel=nombre_excel,
@@ -756,7 +764,7 @@ def vista_crear_venta(request):
             cliente_id=cliente_id,
             lista_items=lista_items,
             almacen_id=almacen_id,
-            usuario=request.user.username if request.user.is_authenticated else 'API',
+            usuario=request.user,
             observaciones=observaciones,
             tipo_documento=data.get('tipo_documento', 'NOTA_ENTREGA'),
             numero_factura=data.get('numero_factura', ''),
@@ -1145,7 +1153,8 @@ def vista_sincronizar_tasa(request):
         return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
     
     from .services import sincronizar_tasa_cambio
-    resultado = sincronizar_tasa_cambio()
+    # EST-05 (REQ-EST05-A1): fuente forense = usuario autenticado.
+    resultado = sincronizar_tasa_cambio(usuario=request.user)
     return JsonResponse(resultado)
 
 
@@ -1342,7 +1351,7 @@ def vista_registrar_asiento_manual(request):
             cantidad=cantidad,
             concepto=accion,
             detalle_adicional=detalle,
-            usuario=str(request.user.username),
+            usuario=request.user,
         )
 
         return JsonResponse({
@@ -1373,14 +1382,18 @@ def contactos(request):
     from django.core.exceptions import ValidationError
     from django.contrib import messages
     from .managers import get_current_empresa
-    from django.http import HttpResponseForbidden
 
     # Resolver empresa activa del ContextVar (TenantMiddleware lo setea).
     # Esto reemplaza getattr(request, 'empresa', None) que NUNCA se setea
     # (el middleware solo setea el ContextVar, no request.empresa).
     empresa_id = get_current_empresa()
     if not empresa_id:
-        return HttpResponseForbidden("Sesión de empresa no detectada.")
+        # SEC-06: 403 con pagina HTML con branding (antes texto plano).
+        return render(
+            request, 'inventory/403.html',
+            {'mensaje': 'Sesión de empresa no detectada.'},
+            status=403
+        )
 
     if request.method == 'POST':
         tipo = request.POST.get('tipo', 'CLIENTE')
@@ -1695,13 +1708,18 @@ def configuracion_view(request):
             config.save()
             
             if (config.tasa_bcv != bcv_old or config.tasa_mercado != mercado_old or config.factor_cobertura != factor_old):
+                # EST-05 (REQ-EST05-A1): usuario forense FK + snapshot,
+                # resueltos desde request.user (patrón EST-04).
+                usuario_fk, usuario_nombre = svc.resolver_usuario(request.user)
                 AuditoriaTasa.objects.create(
                     empresa=config.empresa,
                     tasa_bcv=config.tasa_bcv,
                     tasa_mercado=config.tasa_mercado,
                     factor_cobertura=config.factor_cobertura,
                     fuente='MANUAL',
-                    notas='Actualización desde Configuración Global'
+                    notas='Actualización desde Configuración Global',
+                    usuario=usuario_fk,
+                    usuario_nombre=usuario_nombre,
                 )
                 
             messages.success(request, 'Configuración global actualizada de manera exitosa.')
@@ -2050,7 +2068,7 @@ def registrar_compra_api(request):
             descuento_global=descuento_global,
             almacen_id=almacen_id,
             lista_items=lista_items,
-            usuario=request.user.username,
+            usuario=request.user,
             observaciones=observaciones
         )
 
@@ -2103,7 +2121,7 @@ def api_reversar_venta(request):
         if not nota_id or not motivo:
             return JsonResponse({'ok': False, 'error': 'ID y motivo son obligatorios.'}, status=400)
             
-        resultado = svc.reversar_nota_entrega(empresa_id, nota_id, motivo)
+        resultado = svc.reversar_nota_entrega(empresa_id, nota_id, motivo, usuario=request.user)
         return JsonResponse(resultado)
     except Exception:
         logger.exception("Error inesperado en reversión/creación de nota de crédito (API)")
@@ -2124,7 +2142,7 @@ def api_reversar_compra(request):
         if not compra_id or not motivo:
             return JsonResponse({'ok': False, 'error': 'ID y motivo son obligatorios.'}, status=400)
 
-        resultado = svc.reversar_documento_compra(empresa_id, compra_id, motivo)
+        resultado = svc.reversar_documento_compra(empresa_id, compra_id, motivo, usuario=request.user)
         return JsonResponse(resultado)
     except Exception:
         logger.exception("Error inesperado en reversión/creación de nota de crédito (API)")
@@ -2419,7 +2437,7 @@ def api_crear_nc(request):
                 nota_id=int(doc_id),
                 items_devueltos=items_normalized,
                 motivo=motivo,
-                usuario=request.user.username or 'Sistema',
+                usuario=request.user,
             )
         elif tipo == 'compra':
             result = svc.procesar_devolucion_compra(
@@ -2427,7 +2445,7 @@ def api_crear_nc(request):
                 compra_id=int(doc_id),
                 items_devueltos=items_normalized,
                 motivo=motivo,
-                usuario=request.user.username or 'Sistema',
+                usuario=request.user,
             )
         else:
             return JsonResponse({'ok': False, 'error': 'tipo debe ser venta|compra.'}, status=400)
@@ -2527,7 +2545,7 @@ def generar_pdf_nc(request, nc_id):
         f"<b>Fecha:</b> {nc.fecha: '%d/%m/%Y %H:%M' if nc.fecha else ''}<br/>"
         f"<b>Motivo:</b> {nc.motivo}<br/>"
         f"<b>Documento Origen:</b> {('NE-' + str(nc.nota_entrega.numero).zfill(8)) if nc.nota_entrega else (nc.factura_compra.tipo_documento + ' ' + nc.factura_compra.numero_interno if nc.factura_compra else '-')}<br/>"
-        f"<b>Usuario:</b> {nc.usuario}",
+        f"<b>Usuario:</b> {nc.usuario_nombre or 'Sistema'}",
         header_style,
     ))
     story.append(Spacer(1, 10))

@@ -180,7 +180,7 @@
     .dark .nc-row-check:checked + .nc-row-style { background-color: rgb(49 46 129 / 0.2); }
 </style>
 
-<script>
+<script nonce="{{ csp_nonce }}">
     const ENDPOINT_CREAR = "{% url 'inventory:crear_nc' %}";
     const ENDPOINT_API   = "{% url 'inventory:api_origen_detalle' %}";
 

@@ -488,6 +488,397 @@ verifican el layout base.
 
 ---
 
+## ADR-32: CSP nativa de Django 6 con nonces por request
+
+**Estado:** Aceptada (2026-10-24). Remediación SEC-02b / REQ-CSP-01..09 del
+Capítulo 2 de `docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+La política CSP previa la construía un middleware propio
+(`inventory.middleware.CspMiddleware`) serializando el string crudo
+`CSP_POLICY` de settings.py. Sin nonces, los 16 bloques `<script>`
+inline repartidos en 14 plantillas exigían `'unsafe-inline'` en
+script-src: cualquier script inyectado en una plantilla ejecutaba sin
+restricción (mitigación XSS nula para inline). Django 6.0 incorporó CSP
+nativa: `SECURE_CSP` / `SECURE_CSP_REPORT_ONLY` (dicts de directivas),
+`django.middleware.csp.ContentSecurityPolicyMiddleware` (MiddlewareMixin
+que setea `request._csp_nonce` en process_request y aplica el header en
+process_response) y el context processor
+`django.template.context_processors.csp` que expone `{{ csp_nonce }}`
+(LazyNonce: header y plantilla comparten el MISMO valor por request).
+
+**Decisión:**
+
+1. **Adoptar el stack nativo y eliminar el propio.** MIDDLEWARE usa
+   `django.middleware.csp.ContentSecurityPolicyMiddleware` en la MISMA
+   posición que ocupaba el nuestro: inmediatamente ANTES de
+   `TenantMiddleware` (el tenant retorna sus 403 con early return sin
+   invocar `get_response`; por ser MiddlewareMixin, el nativo ya fijó el
+   nonce en la bajada y aplica el header al subir, así los 403 del
+   tenant también quedan cubiertos). Se eliminan el string `CSP_POLICY`
+   (settings.py) y `class CspMiddleware` (middleware.py) sin alias
+   deprecado; `TenantMiddleware` se conserva intacto.
+2. **Política como dict único `_CSP_DICT`** con constantes
+   `django.utils.csp.CSP`: `script-src` = self + NONCE +
+   `cdn.tailwindcss.com` SIN `'unsafe-inline'` (con nonce, CSP3 lo
+   ignoraría de todos modos — eliminación efectiva); `object-src
+   'none'`; `frame-ancestors 'none'`; `style-src` CONSERVA
+   `'unsafe-inline'` (deuda, ver Consecuencias). Los 16 scripts inline
+   llevan `nonce="{{ csp_nonce }}"`; los 4 tags CDN externos con SRI no
+   se tocan (el nonce solo autoriza inline).
+3. **Knob `CSP_MODE`** (solo variable de entorno, sin duplicar la
+   política): `'report'` (default) → `SECURE_CSP_REPORT_ONLY =
+   _CSP_DICT` → header `Content-Security-Policy-Report-Only` (no
+   bloqueante, ventana de adopción); `'enforce'` → `SECURE_CSP =
+   _CSP_DICT` → header bloqueante. Valor fuera de `report|enforce` →
+   `ImproperlyConfigured` en arranque (fail-fast, no fail-silent).
+   Flip a enforcing y rollback de emergencia = env var + restart, cero
+   código.
+
+**Consecuencias:**
+
+- `script-src` queda SIN `'unsafe-inline'`: un script inline solo
+  ejecuta si lleva el nonce del request. El gate estático
+  `test_csp_gate_estatico_scripts_inline_con_nonce` impide añadir
+  plantillas con `<script>` inline sin nonce.
+- **Deuda declarada:** `'unsafe-inline'` en `style-src` NO es removable
+  mientras exista el Tailwind CDN JIT (inyecta `<style>` en runtime;
+  SEC-05 mantiene el CDN hasta que exista un build de Tailwind).
+- Report-Only sin `report-uri`: las violaciones solo se ven en la
+  consola del navegador; suficiente para la LAN. El flip definitivo
+  exige navegación manual de las 7 vistas con JS (spec §2.5).
+- Hoy no hay caching de HTML → nonce-per-request seguro (REQ-CSP-09).
+  Si algún día se cachean páginas, excluir header/nonce del cache
+  (documentado en `docs/OPERACION.md`).
+- El middleware nativo respeta headers CSP pre-existentes y valida el
+  dict en `manage.py check` (E026).
+
+**Tests:** `inventory/test_cases/test_security_csp_403.py` reworkado al
+contrato nativo (15 tests: helper `csp_de()` modo-agnóstico, 5 sec02b
+reworkados y 6 nuevos — gate estático, nonce header==scripts, nonces
+distintos, default report-only, flip enforce, eliminaciones
+estructurales). `test_templates_sri.py` intacto.
+
+---
+
+## ADR-33: Usuario forense: FK global a User + snapshot usuario_nombre
+en kárdex y notas de crédito
+
+**Estado:** Aceptada (2026-10-24). Remediación EST-04 /
+REQ-EST04-01..08 del Capítulo 3 de
+`docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+`MovimientoKardex.usuario` y `NotaCredito.usuario` eran
+`CharField(150)`: la "trazabilidad" era un string libre sin
+integridad referencial — cualquiera podía escribir `'admin'` desde
+el shell o un POST, sin que ningún constraint lo vinculase con
+`auth_user` (hallazgo EST-04). Auditoría del backfill sobre la BD
+real: 195 kárdex existentes, solo 8 con username existente
+(`angeldrk` → FK resuelta); los literales de demo/semilla
+(`'Demo Setup'` ×66, `'Demo User'` ×29, `'Sistema'` ×4, `''` ×88)
+no existen como usuarios y quedan FK NULL con el snapshot
+preservado. `NotaCredito`: 0 filas históricas.
+
+**Decisión:**
+
+1. Renombrar `usuario` → `usuario_nombre` como snapshot inmutable
+   de presentación (`RenameField`: el histórico se preserva).
+2. FK nueva `usuario` → `User` con `SET_NULL` — la trazabilidad
+   degrada, no se pierde: la baja de un usuario deja la FK en NULL
+   y el snapshot conserva el nombre.
+3. Helper único `services.resolver_usuario` acepta
+   `str | User | None`: instancia `User` → FK + `user.username`;
+   string con username existente → FK resuelta (match exacto por
+   `username`); sin match → FK NULL + snapshot con el string.
+   Solo los 3 sitios de persistencia resuelven (create de
+   `registrar_movimiento` y los `NotaCredito.objects.create` de
+   `procesar_devolucion_{venta,compra}`); los writers
+   intermedios reenvían el kwarg.
+4. Las vistas llenan la FK desde `request.user` (operador
+   autenticado); el `usuario` que llega por POST/JSON queda
+   **DEPRECADO**: se ignora con `logger.warning` y puede tocar,
+   como mucho, el snapshot de presentación — NUNCA la FK. La
+   identidad forense sale SIEMPRE del autenticado.
+5. Los `reversar_*` dejan de hardcodear `'Sistema'` y registran
+   el usuario real; el default `'Sistema'` se conserva sólo para
+   backward-compat.
+
+**Decisión de multi-tenant** (el punto clave del ADR,
+REQ-EST04-08): la FK es GLOBAL a la tabla `auth_user` — los
+usuarios NO son per-empresa; el aislamiento por tenant lo gobierna
+`PerfilUsuario` (`empresas_permitidas`/`empresa_activa`) en la
+capa de acceso, NO en la FK. Una FK filtrada por tenant no es
+viable sin un esquema de usuarios por empresa. El mismo usuario
+real puede figurar en el kárdex de varias empresas y la FK sigue
+resolviendo.
+
+**Consecuencias:**
+
+- `on_delete=SET_NULL`: borrar un `User` no borra historia (kárdex
+  y NC quedan con FK NULL + snapshot intacto).
+- El snapshot es la fuente de presentación: listados y PDF usan
+  `usuario_nombre` (el PDF de NC en `views.py` y
+  `nota_credito_detalle.html` renderizan `usuario_nombre` con
+  fallback `'Sistema'`; la FK puede ser None).
+- Migración `0029_usuario_fk_kardex_nc` escrita a mano porque
+  `makemigrations` autogenera `AddField`+`AlterField` destructivo
+  en SQLite (drop de columna = pérdida de datos); idempotente
+  (2ª pasada del backfill es no-op) y reversible (el reverse pone
+  la FK a NULL, el snapshot NUNCA se toca).
+- El kwarg de servicio sigue llamándose `usuario` (distinto del
+  campo): los ~60 call-sites de tests no se tocan.
+
+**Tests:** `inventory/test_cases/test_usuario_fk.py` (7): backfill
+match / sin match / idempotencia; resolución `str|User|None`;
+`reversar_*` con usuario (y backward-compat sin arg); vistas con
+`request.user` + `logger.warning` del POST `usuario` deprecado.
+
+---
+
+## ADR-34: Kárdex inmutable: guards de señal + QuerySet + escape
+hatch con allowlist (EST-01)
+
+**Estado:** Aceptada (2026-10-24). Remediación EST-01 /
+REQ-EST01-01..09 del Capítulo 4 de
+`docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+La "REGLA SAGRADA" (solo `services.registrar_movimiento` muta stock
+vía kárdex) era una intención del código, no un invariante: un
+`.delete()` de queryset, un `.update(cantidad=...)`, un script de
+shell o un `INSERT` directo la saltaban sin dejar rastro — borrando
+la trazabilidad forense que la propia regla prometía (hallazgo
+EST-01, spec §2.1).
+
+Corrección al plan: un override de `delete()` a nivel de instancia
+NO cubre los borrados bulk ni `.update()` (que además no emite
+señales); esa vía se descarta y se documenta.
+
+**Decisión:**
+
+1. **Señales `pre_save` + `pre_delete` con `sender=clase real`**
+   (`inventory/kardex_guard.py`, conectadas en `apps.ready()`):
+   cubren instancia, bulk y cascada — el collector de Django envía
+   TODAS las `pre_delete` antes de ejecutar un solo DELETE SQL, por
+   lo que el raise aborta la operación completa sin borrados
+   parciales. Los modelos históricos de migraciones
+   (reconstruidos por `ModelState`: id distinto, sin relación de
+   subclase) NO disparan estos receivers — las `RunPython` quedan
+   exentas por diseño (probado con el roundtrip de la `0029`:
+   `migrate inventory 0028 && migrate inventory` completa el
+   backfill `fila.save()` sobre históricos sin
+   `KardexProtegidoError`).
+2. **`KardexQuerySet`** bloquea `.update()` y `bulk_create()` —
+   las dos vías de mutación masiva que NO emiten señales — cableado
+   a AMBOS managers de `MovimientoKardex`: `objects` vía
+   `EmpresaManager.from_queryset(KardexQuerySet)()` (conserva el
+   filtro de tenant: el `get_queryset()` de `managers.py` aplica
+   `.none()`/`.filter` SOBRE un KardexQuerySet) y `global_objects`
+   vía `as_manager()` (sin filtro de tenant, mismo bloqueo).
+   Ningún otro modelo hereda el bloqueo.
+3. **Escape hatch `kardex_bypass(motivo)`**: `ContextVar` con
+   CONTADOR apilable (reentrante; thread/async-safe), log WARNING
+   con el motivo al entrar. El service usa el contexto INTERNO
+   `escritura_kardex_autorizada` (mismo contador, log INFO): el
+   camino legítimo no genera ruido de WARNING. El `finally` con
+   `reset(token)` impide fugas de contexto ante excepciones.
+4. **Excepción `KardexProtegidoError`** (subclase de
+   `IntegridadDocumentalError` → `PermissionDenied`): semántica de
+   "operación no permitida" — un camino HTTP respondería 403, no
+   500.
+
+**Divergencia documentada vs el plan (crítica):** el plan esperaba
+que el bypass hiciera pasable la cascada de `Empresa.delete()`. En
+Django 6 los FK PROTECT preexistentes
+(`MovimientoKardex.articulo/almacen`, `InventarioAlmacen.*`) lanzan
+`ProtectedError` durante `collect()` ANTES de que exista señal
+alguna — con o sin bypass. La primera excepción real de
+`Empresa.delete()` en un tenant con kárdex es `ProtectedError`;
+`KardexProtegidoError` queda como backstop del borrado directo de
+kárdex. Por eso `services.eliminar_tenant(empresa, motivo)` —
+única vía autorizada de teardown, motivo obligatorio (`ValueError`
+si viene vacío), WARNING auditable al log — hace teardown
+EXPLÍCITO en orden de dependencias scoped al tenant: kárdex →
+seriales → NC (detalles+cabeceras) → notas (detalles+cabeceras) →
+inventarios → compras (detalles+cabeceras) → recetas → contactos →
+artículos → almacenes → config → `empresa.delete()` final (barrido
+CASCADE/SET_NULL/RESTRICT del resto: correlativo, monedas, tasas,
+auditoría). Viable SIN migraciones nuevas.
+
+**Allowlist** (REQ-EST01-04; auditable por grep: un 4º uso del
+bypass en services/views/admin es defecto de diseño, no un caso):
+
+| Sitio | Uso del bypass |
+|-------|----------------|
+| `services.registrar_movimiento` | No usa el bypass público: contexto interno `escritura_kardex_autorizada` (el único punto donde nace kárdex legítimo) |
+| `seed_db --clear` (`seed_db.py:503`) | Reseed demo: bulk delete global del kárdex dentro del bypass |
+| Fixture export SaaS (`tests.py:1641`) | Crea kárdex directo y envejece su `fecha_hora` (create 1642 / `.update()` 1653; fixture declarado, no relajación) |
+| `TestBackfillUsuarioFK` (`test_cases/test_usuario_fk.py`) | Fixtures del cap. 3: kárdex histórico pre-FK para el backfill de la `0029` |
+| `services.eliminar_tenant` | Única vía de teardown de tenant (divergencia arriba) |
+| `generate_demo_data` | **NO necesita bypass**: crea kárdex vía `registrar_compra_proveedor` (service) |
+| Migraciones 0029/0030 | **Exentas por sender** (modelos históricos; REQ-EST01-07) |
+
+**Consecuencias:**
+
+- En producción el raise de `pre_delete` ocurre DENTRO del
+  `transaction.atomic(savepoint=False)` del collector: envenena la
+  transacción del caller (marca `needs_rollback`) — que ES el
+  rollback total deseado, nada queda medio borrado. Los tests lo
+  aíslan con un savepoint propio para poder seguir consultando.
+- El bypass es el mecanismo COMPARTIDO que reutilizará EST-02
+  (`seed_db --clear` y teardowns: mismo ContextVar, misma
+  allowlist, auditable por grep en UN solo módulo).
+- Las cascadas `SET_NULL` de la baja de usuarios (Gherkin
+  EST04-05) no disparan el guard por diseño: el collector las
+  resuelve con el `_base_manager` plano sobre `UpdateQuery` crudo
+  (sin señales) y la fila de kárdex persiste con FK NULL +
+  snapshot.
+- `makemigrations --check` limpio: el wiring de managers no toca
+  el estado del esquema (`use_in_migrations` inactivo).
+
+**Tests:** `inventory/test_cases/test_kardex_inmutable.py` (8):
+delete bloqueado en instancia/queryset/`global_objects`; `create`
+directo y `bulk_create` bloqueados; `.update()` bloqueado en ambos
+managers; bypass apilable con WARNING; `Empresa.delete()` con
+kárdex bloqueado con rollback total; `eliminar_tenant` teardown
+completo + motivo obligatorio; reverso N+1 (solo INSERT
+compensatorio); receivers cableados solo a la clase real.
+
+---
+
+## ADR-35: Documentos emitidos inmutables: señal pre_save con matriz
++ admin readonly + NC pre-create (EST-02)
+
+**Estado:** Aceptada (2026-10-24). Remediación EST-02 /
+REQ-EST02-01..10 del Capítulo 5 de
+`docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+Los 6 modelos de documentos emitidos (`NotaEntrega`,
+`DocumentoCompra`, `NotaCredito` y sus `Detalle*`) eran mutables
+desde cualquier punto del código. Nada impedía
+`.update(estado='PROCESADO')` sobre una NE ANULADA ("reabrirla" sin
+traza), `.update(precio_base=999)` sobre una línea histórica, o
+borrar las líneas de un documento PROCESADO con sus snapshots. El
+admin agravaba el vector: editar `estado` a mano desde `/admin/`
+"anulaba" una venta SIN reversar stock. Invariante contable/fiscal
+que faltaba enforcear: una factura emitida no se edita — el
+documento es registro histórico.
+
+Corrección documentada al auditor (spec §1.5): la auditoría real
+encontró **6 mutaciones post-emisión, no las 4 del plan** — los 2
+extra eran tails de CREACIÓN que mutaban la cabecera tras el INSERT
+(`procesar_venta`: `save(update_fields=['iva_total','iva_check'])`
+sobre la NE recién creada; `registrar_compra_proveedor`:
+`save(update_fields=['monto_total_usd','iva_total',
+'monto_total_bs_snapshot'])` sobre la DC recién creada). Conectar
+el guard alfabético los habría roto: se resolvió con el refactor
+pre-create (punto 6), no relajando la matriz. Además, la **fase 2**
+del capítulo (guard de `.update()` queryset sobre los 6 modelos —
+vía que no emite señales) queda **DIFERIDA como deuda documentada**:
+hoy hay **0 usos de `.update()` sobre documentos** (los únicos
+`.update()` de `services` son sobre `SerialArticulo`), no existe
+writer que calificar, y el escape hatch ya está documentado en la
+allowlist de EST-01.
+
+**Decisión:**
+
+1. **Señal `pre_save` compartida para 6 senders** (NE/DC/NC + sus
+   `Detalle*`; `inventory/kardex_guard.py`, mismo módulo auditable
+   de EST-01) gobernada por una **MATRIZ de campos mutables** —
+   datos, no código. Un único handler fetch→diff: `raw` (fixtures
+   `loaddata`) y `bypass_activo()` quedan exentos; `instance.pk is
+   None` es CREATE (aún no emitido); el fetch usa `_base_manager`
+   porque `EmpresaManager` retorna `.none()` sin request — con
+   `objects` el guard quedaría ciego en shell/commands.
+2. **Cabeceras**: SOLO mutan `estado` (transición única
+   PROCESADO→ANULADO) + `motivo_anulacion` en el MISMO save de esa
+   transición. ANULADO = documento CERRADO: toda mutación posterior
+   se bloquea (reabrir estado o retocar el motivo incluidos). El
+   re-save idempotente (diff vacío) pasa; un `save(update_fields=…)`
+   con campos ajenos a la matriz se bloquea AUNQUE el valor no
+   cambie (la intención de tocar ya es ilegítima). **Líneas**
+   (`Detalle*`): matriz VACÍA — solo re-save idempotente.
+   `cantidad_devuelta_acumulada` NO es columna sino `@property` que
+   SUMA las filas `DetalleNotaCredito` del detalle origen: el flujo
+   de devolución hace INSERT de la línea NC, nunca UPDATE de la fila
+   origen → la matriz vacía es correcta por construcción.
+3. **`DocumentoInmutableError`** — familia
+   `IntegridadDocumentalError` → `PermissionDenied` (un camino HTTP
+   responde 403, no 500), con log ERROR forense (modelo, pk, campos,
+   traceback) antes del raise.
+4. **`pre_delete` bloquea instancia, queryset bulk y cascada en los
+   6**: el collector de Django envía TODOS los `pre_delete` antes de
+   ejecutar un solo DELETE SQL → abort completo, sin borrados
+   parciales (y el raise envenena la transacción del caller con
+   `needs_rollback` — ese ES el rollback total deseado). El bypass es
+   el MISMO `ContextVar` apilable de EST-01 (`kardex_bypass`):
+   allowlist única auditable por grep, ya cubre `seed_db --clear` y
+   `services.eliminar_tenant` sin módulo paralelo.
+5. **Admin TOTALMENTE readonly para los 6**
+   (`ReadOnlyDocumentoAdminMixin`): `has_add/change/delete_permission
+   = False` (el documento nace y anula vía services), view
+   conservado sin ampliación de exposición,
+   `get_readonly_fields` dinámico con TODOS los campos concretos
+   sobre objeto existente, e inlines `can_delete=False`. Cierra el
+   vector "anular desde admin sin reversar stock": el guard queda
+   como backstop del ORM, no como UX.
+6. **REFACTOR pre-create**: NE/DC y NC nacen COMPLETAS — los tails
+   de creación que mutaban cabeceras tras el INSERT se eliminaron
+   (los totales se computan ANTES del `create`; jamás existió una
+   "NE PROCESADO 100 ms con iva_total mentido"). La NC calcula
+   `monto_total_reembolso` ANTES del create con doble pasada
+   (1: validar+calcular por línea; 2: persistir cabecera y detalles
+   con los valores ya resueltos — la aritmética no se recalcula,
+   drift imposible). `calculos.calcular_linea_devolucion` es la
+   fuente única de la aritmética de devolución y
+   `DetalleNotaCredito.save()` delega en ella (DATA-01): misma
+   fórmula en ambos extremos.
+7. **Divergencia resuelta**: la NC nacía con `prefijo=''` — el
+   `save()` retornaba en `guardar_con_reintento` antes de
+   rellenarlo y el primer re-save del ORM lo completaba: mutación
+   post-emisión sobre campo fuera de la matriz. Fix en el
+   nacimiento, no en la matriz: la NC nace con prefijo definitivo
+   persistido en el INSERT. Sin allowlist.
+8. **Dead code eliminado**: el `nc.delete()` dentro de los `except`
+   de `procesar_devolucion_*` era un no-op dentro de
+   `@transaction.atomic` cuyo `pre_delete` habría enmascarado la
+   excepción original del rollback (REQ-EST02-05).
+
+**Consecuencias:**
+
+- Los flujos legítimos quedan intactos: venta, compra, devolución y
+  reversos no editan documentos emitidos (29 tests NC pasan sin
+  edición de ningún caso; suite completa verde).
+- Fase 2 (guard de `.update()` sobre los 6) documentada como deuda:
+  sin usos actuales no hay writer legítimo que calificar; cuando
+  exista, el mecanismo será el estilo `KardexQuerySet` de EST-01.
+- El POST forzado al change view del admin cambia de estado →
+  **403 sin tocar la fila ni el stock**: la anulación pasa por
+  `services.reversar_nota_entrega` o no ocurre.
+- Los modelos históricos de migraciones (sender=clase real,
+  reconstruidos por `ModelState`) no disparan los receivers — las
+  `RunPython` quedan exentas por diseño, como en EST-01.
+
+**Tests:** `inventory/test_cases/test_inmutabilidad_documentos.py`
+(10): campo fuera de matriz bloqueado en NE/DC (fila intacta);
+anulación legítima + ANULADO cerrado; re-save idempotente OK +
+`update_fields` ajeno bloqueado; devolución fallida sin masking y
+rollback limpio; precio/snapshot de líneas bloqueados; deletes de
+cabecera/línea/NC/bulk bloqueados (patrón savepoint); re-save de
+línea NC + origen intacto (`cantidad_devuelta_acumulada` sin
+columna); permisos readonly totales del admin; POST al admin → 403
+sin tocar estado ni stock; NC nace con monto definitivo + gates de
+fuente (`monto_total_reembolso=` en el create, helper compartido,
+sin `nc.save(`, sin `nc.delete()`).
+
+---
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 

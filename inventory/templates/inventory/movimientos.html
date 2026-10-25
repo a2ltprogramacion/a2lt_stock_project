@@ -221,7 +221,7 @@
         {% endif %}
     </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
     /* Registro de asiento manual (sin cambios funcionales, sólo cleanup) */
     function registerManualMovement() {
         const articuloId = document.getElementById('kardex-product').value;

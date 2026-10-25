@@ -8,3 +8,6 @@ class InventoryConfig(AppConfig):
 
     def ready(self):
         import inventory.signals
+        # EST-01: conecta los receivers pre_save/pre_delete de MovimientoKardex
+        # (kardex_guard importa models; no hay ciclo de imports).
+        import inventory.kardex_guard  # noqa: F401

@@ -290,7 +290,7 @@
                 </div>
             </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
     function openContactModal(type) {
         document.getElementById('form-c-type').value = type;
         document.getElementById('contact-modal-title').innerHTML = type === 'CLIENTE' ? `<i class="fa-solid fa-user-plus text-indigo-500"></i> Registrar Cliente` : `<i class="fa-solid fa-truck-field text-indigo-500"></i> Registrar Proveedor`;

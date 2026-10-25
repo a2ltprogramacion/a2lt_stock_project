@@ -23,12 +23,54 @@ dentro de un bloque @transaction.atomic (implementado en services.py).
 """
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import models, transaction
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.auth.models import User
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .managers import EmpresaManager, EmpresaQuerySet, get_current_empresa
+from .calculos import calcular_totales_documento
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 0B. EXCEPCIONES DE INTEGRIDAD DOCUMENTAL (EST-01/EST-02)
+#
+# PermissionDenied — no ValidationError — porque semánticamente es
+# "operación no permitida" y, si algún camino HTTP lo provocara, la vista
+# responde 403 y no 500.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class IntegridadDocumentalError(PermissionDenied):
+    """Base común EST-01/EST-02: operación prohibida sobre registros históricos del sistema."""
+
+
+class KardexProtegidoError(IntegridadDocumentalError):
+    """EST-01: el kárdex solo muta vía services.registrar_movimiento o kardex_bypass."""
+
+
+class DocumentoInmutableError(IntegridadDocumentalError):
+    """EST-02 (REQ-EST02-01..04): un documento emitido es registro histórico.
+    Solo muta el par estado→ANULADO + motivo_anulacion (y solo vía
+    services.reversar_*); las líneas Detalle* son 100% inmutables y los
+    borrados quedan bloqueados. El bypass es el kardex_bypass de EST-01."""
+
+
+class KardexQuerySet(models.QuerySet):
+    """REQ-EST01-02: .update() no emite pre_save (doc Django) y bulk_create tampoco
+    → ambas vías de INSERT/UPDATE masivo sin señales se bloquean aquí."""
+
+    def update(self, **kwargs):
+        from .kardex_guard import bypass_activo, bloquear_kardex  # perezoso: rompería el ciclo models↔kardex_guard
+        if not bypass_activo():
+            bloquear_kardex('.update()')
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        from .kardex_guard import bypass_activo, bloquear_kardex
+        if not bypass_activo():
+            bloquear_kardex('bulk_create')
+        return super().bulk_create(objs, **kwargs)
 
 
 # Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
@@ -1182,9 +1224,10 @@ class DocumentoCompra(models.Model):
         return sum(d.iva_bs for d in self.detalles.all())
 
     @property
-    def total_documento_bs(self):
-        """Total documento = subtotal_bs + IVA BS."""
-        return self.subtotal_bs + self.total_iva_bs
+    def total_bs_bruto(self):
+        """Total bruto en Bs (subtotal + IVA, SIN descuento_global). DATA-01: delega en calculos."""
+        totales = calcular_totales_documento(self.detalles.all(), self.descuento_global)
+        return totales['subtotal_bs_bruto'] + totales['total_iva_bs_bruto']
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1394,19 +1437,49 @@ class MovimientoKardex(models.Model):
         verbose_name='Detalle Adicional',
         help_text='Información de auditoría extra (ej: factura de compra, referencia externa).',
     )
-    usuario = models.CharField(
+    # EST-04 (REQ-EST04-01): el CharField histórico pasó a ser el snapshot
+    # `usuario_nombre` (RenameField 0029, datos preservados) y `usuario` es
+    # ahora la FK forense al usuario real. La baja del usuario nunca borra
+    # el kárdex (SET_NULL) y el snapshot preserva el nombre histórico.
+    usuario_nombre = models.CharField(
         max_length=150,
         blank=True,
         verbose_name='Usuario que Realizó el Movimiento',
     )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kardex_registrado_por',
+        verbose_name='Usuario (FK)',
+    )
 
-    objects = EmpresaManager()
-    global_objects = models.Manager()
+    # EST-01 (REQ-EST01-02): wiring con KardexQuerySet.
+    #   * objects: EmpresaManager.from_queryset preserva el filtro de tenant
+    #     (get_queryset() de managers.py aplica .none()/.filter SOBRE un
+    #     KardexQuerySet) y bloquea .update()/bulk_create.
+    #   * global_objects: sin filtro de tenant, mismo bloqueo (Gherkin EST01-05).
+    # managers.py NO se toca: ningún otro modelo hereda el bloqueo.
+    objects = EmpresaManager.from_queryset(KardexQuerySet)()
+    global_objects = KardexQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Movimiento del Kárdex'
         verbose_name_plural = '10. Movimientos del Kárdex'
         ordering = ['-fecha_hora']
+        indexes = [
+            # DATA-06: acelera los reportes de kárdex filtrados por
+            # articulo + almacen + rango de fecha. Igualdades primero y
+            # rango al final: así SQLite puede seek con las 3 condiciones.
+            # Con fecha_hora liderando, el rango anula el seek de las
+            # igualdades y el optimizador prefiere los índices FK de
+            # 1 columna (ver test_kardex_index.py).
+            models.Index(
+                fields=['articulo', 'almacen', 'fecha_hora'],
+                name='idx_kardex_fecha_art_alm',
+            ),
+        ]
 
     def __str__(self):
         return (
@@ -1457,6 +1530,24 @@ class AuditoriaTasa(models.Model):
         choices=FUENTE_CHOICES,
         default='MANUAL',
         verbose_name='Fuente de la Tasa',
+    )
+    # EST-05 (REQ-EST05-A1): mismo patrón EST-04 — FK forense al usuario
+    # real + snapshot del nombre. Campo nuevo (sin RenameField): el
+    # histórico pre-0030 queda con FK NULL y snapshot '' por diseño, sin
+    # backfill. La baja del usuario nunca borra la auditoría (SET_NULL).
+    usuario_nombre = models.CharField(
+        max_length=150,
+        blank=True,
+        default='',
+        verbose_name='Usuario que Registró la Tasa',
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tasas_registradas',
+        verbose_name='Usuario (FK)',
     )
     notas = models.CharField(
         max_length=200,
@@ -1684,9 +1775,10 @@ class NotaEntrega(models.Model):
         return sum(d.iva_bs for d in self.detalles.all())
 
     @property
-    def total_documento_bs(self):
-        """Total documento = subtotal_bs + IVA BS (si aplica)."""
-        return self.subtotal_bs + self.total_iva_bs
+    def total_bs_bruto(self):
+        """Total bruto en Bs (subtotal + IVA, SIN descuento_global). DATA-01: delega en calculos."""
+        totales = calcular_totales_documento(self.detalles.all(), self.descuento_global)
+        return totales['subtotal_bs_bruto'] + totales['total_iva_bs_bruto']
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2014,9 +2106,19 @@ class NotaCredito(models.Model):
         verbose_name='Motivo de Anulación',
         help_text='Si el estado es ANULADO, explica por qué.',
     )
-    usuario = models.CharField(
+    # EST-04 (REQ-EST04-02): mismo patrón forense que MovimientoKardex —
+    # snapshot `usuario_nombre` (conserva default='Sistema') + FK `usuario`.
+    usuario_nombre = models.CharField(
         max_length=150, default='Sistema',
         verbose_name='Usuario que emitió la NC',
+    )
+    usuario = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notas_credito_emitidas',
+        verbose_name='Usuario (FK)',
     )
     fecha = models.DateTimeField(auto_now_add=True)
 
@@ -2067,6 +2169,14 @@ class NotaCredito(models.Model):
             return super().save(*args, **kwargs)
 
         if not self.numero or self.numero == 0:
+            # EST-02 (§5, patrón pre-create): la NC nace COMPLETA — el
+            # prefijo se persiste en el INSERT (guardar_con_reintento solo
+            # escribe numero_control). Antes quedaba '' y el primer re-save
+            # del ORM lo rellenaba: mutación post-emisión que el guard de
+            # señales bloquea (campo fuera de la matriz {estado,
+            # motivo_anulacion}). G1: no allowlist — se arregla el nacimiento.
+            if not self.prefijo:
+                self.prefijo = self._prefijo_correlativo()
             from .correlativos import TIPO_NOTA_CREDITO, guardar_con_reintento
             return guardar_con_reintento(
                 self, TIPO_NOTA_CREDITO,
@@ -2196,16 +2306,22 @@ class DetalleNotaCredito(models.Model):
         """
         Calcula subtotal_devuelto_usd, iva_usd, linea_total_usd en cada save()
         (snapshot inmutable post-creación).
+
+        EST-02 (REQ-EST02-06): delega en ``calculos.calcular_linea_devolucion``
+        — la MISMA fuente única que usa ``services.procesar_devolucion_*`` en
+        su pasada pre-create (la NC nace con monto_total_reembolso definitivo).
+        Fórmula y quantize idénticos a los históricos: drift imposible.
         """
-        from decimal import Decimal as _D
-        cantidad = _D(str(self.cantidad_devuelta or 0))
-        precio = _D(str(self.precio_unitario_snapshot or 0))
-        iva_pct = _D(str(self.iva_porcentaje_snapshot or 0))
-        subtotal = (cantidad * precio).quantize(_D('0.0001'))
-        iva = (subtotal * iva_pct / _D('100')).quantize(_D('0.0001'))
-        self.subtotal_devuelto_usd = subtotal
-        self.iva_usd = iva
-        self.linea_total_usd = (subtotal + iva).quantize(_D('0.0001'))
+        from .calculos import calcular_linea_devolucion
+        (
+            self.subtotal_devuelto_usd,
+            self.iva_usd,
+            self.linea_total_usd,
+        ) = calcular_linea_devolucion(
+            self.cantidad_devuelta,
+            self.precio_unitario_snapshot,
+            self.iva_porcentaje_snapshot,
+        )
         super().save(*args, **kwargs)
 
 
@@ -2301,11 +2417,15 @@ class TasaCambio(models.Model):
     empresa = models.ForeignKey(
         Empresa, on_delete=models.CASCADE, related_name='tasas_cambio'
     )
+    # RESTRICT (no PROTECT): permite el teardown de un tenant recién
+    # sembrado (la tasa cae por CASCADE de ``empresa`` en la misma
+    # operación), pero un ``moneda.delete()`` directo con historial de
+    # tasas sigue bloqueado con RestrictedError.
     moneda_origen = models.ForeignKey(
-        Moneda, on_delete=models.PROTECT, related_name='tasas_origen'
+        Moneda, on_delete=models.RESTRICT, related_name='tasas_origen'
     )
     moneda_destino = models.ForeignKey(
-        Moneda, on_delete=models.PROTECT, related_name='tasas_destino'
+        Moneda, on_delete=models.RESTRICT, related_name='tasas_destino'
     )
     tasa = models.DecimalField(
         max_digits=18, decimal_places=6,

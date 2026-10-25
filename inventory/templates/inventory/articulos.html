@@ -223,7 +223,7 @@
 </div>
 
 {{ articulos_lista|json_script:"articulos-data" }}
-<script>
+<script nonce="{{ csp_nonce }}">
 // ── Modal Producto ──
 let allArticulos = JSON.parse(document.getElementById('articulos-data').textContent);
 // Defaults globales (inyectados por la vista) para artículos nuevos.

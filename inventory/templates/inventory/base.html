@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- SEC-02: token CSRF expuesto al JS (cookie HttpOnly no es legible). -->
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <script>
+    <script nonce="{{ csp_nonce }}">
         // SEC-02: obtiene el token CSRF desde el DOM (la cookie es HttpOnly).
         // Se define en <head> (no al final del body) para que este disponible
         // ANTES de los scripts de contenido que lo invocan durante su carga de
@@ -20,11 +20,13 @@
     <title>A2LT Stock - Sistema de Control y Social Selling</title>
     <link rel="icon" type="image/svg+xml" href="{% static 'inventory/img/favicon.svg' %}">
     <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SEC-05: SRI pineado; actualizar hash al cambiar de version -->
+    <script src="https://cdn.tailwindcss.com/3.4.17" integrity="sha384-igm5BeiBt36UU4gqwWS7imYmelpTsZlQ45FZf+XBn9MuJbn4nQr7yx1yFydocC/K" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <!-- Bootstrap Icons (icons.getbootstrap.com) para Iconos -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- SEC-05: SRI pineado; actualizar hash al cambiar de version -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous" referrerpolicy="no-referrer">
 
-    <script>
+    <script nonce="{{ csp_nonce }}">
         // Init theme from localStorage
         if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
@@ -128,6 +130,8 @@
         }
     </script>
     <style>
+        /* SEC-05: riesgo residual — @import de Google Fonts sin SRI posible
+           (la spec no lo soporta y el CSS servido varia por user-agent). */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
         body {
@@ -387,7 +391,7 @@
     </div>
 
     <!-- Theme and Global Utilities script -->
-    <script>
+    <script nonce="{{ csp_nonce }}">
         // ── Sidebar toggle (colapsable) ─────────────────────────────────────
         function toggleSidebar() {
             const sb = document.getElementById('app-sidebar');

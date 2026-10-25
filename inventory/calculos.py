@@ -231,3 +231,33 @@ def calcular_lineas(detalles, *, campo_usd, campo_bs):
         resultado.append(detalle)
 
     return resultado
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EST-02 (REQ-EST02-06) — Línea de devolución (Nota de Crédito)
+# ─────────────────────────────────────────────────────────────────────────────
+
+CUARTO_DECIMAL = Decimal('0.0001')
+
+
+def calcular_linea_devolucion(cantidad, precio_unitario, iva_porcentaje):
+    """Subtotal, IVA y total de UNA línea de devolución (NC), a 4 decimales.
+
+    Fuente ÚNICA de la aritmética (DATA-01): ``DetalleNotaCredito.save()``
+    delega aquí al persistir, y ``services.procesar_devolucion_*`` la usa en
+    su pasada 1 (pre-create) para que la NC nazca con
+    ``monto_total_reembolso`` definitivo — misma fórmula en ambos extremos,
+    drift imposible (cap. 5 §5).
+
+    Misma aritmética que tenía el modelo:
+    ``subtotal = (cantidad × precio)`` a 4 decimales;
+    ``iva = (subtotal × iva_pct / 100)`` a 4 decimales;
+    ``total = subtotal + iva`` a 4 decimales.
+    """
+    cantidad = _a_decimal(cantidad, 'cantidad_devuelta')
+    precio = _a_decimal(precio_unitario, 'precio_unitario')
+    iva_pct = _a_decimal(iva_porcentaje, 'iva_porcentaje')
+    subtotal = (cantidad * precio).quantize(CUARTO_DECIMAL)
+    iva = (subtotal * iva_pct / CIEN).quantize(CUARTO_DECIMAL)
+    total = (subtotal + iva).quantize(CUARTO_DECIMAL)
+    return subtotal, iva, total

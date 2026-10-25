@@ -1,6 +1,7 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.db import transaction
+from datetime import date
 from decimal import Decimal
 from .models import (
     Empresa, ConfiguracionEmpresa, Almacen, Contacto,
@@ -48,7 +49,7 @@ def create_tenant_defaults(sender, instance, created, **kwargs):
                 moneda_origen=usd,
                 moneda_destino=ves,
                 tasa=Decimal(config.tasa_bcv) * Decimal(config.factor_cobertura),
-                fecha=Decimal('60.0000') and __import__('datetime').date.today(),
+                fecha=date.today(),
                 fuente='MANUAL',
                 notas='Tasa inicial al crear empresa'
             )
