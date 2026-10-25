@@ -49,6 +49,13 @@ class KardexProtegidoError(IntegridadDocumentalError):
     """EST-01: el kárdex solo muta vía services.registrar_movimiento o kardex_bypass."""
 
 
+class DocumentoInmutableError(IntegridadDocumentalError):
+    """EST-02 (REQ-EST02-01..04): un documento emitido es registro histórico.
+    Solo muta el par estado→ANULADO + motivo_anulacion (y solo vía
+    services.reversar_*); las líneas Detalle* son 100% inmutables y los
+    borrados quedan bloqueados. El bypass es el kardex_bypass de EST-01."""
+
+
 class KardexQuerySet(models.QuerySet):
     """REQ-EST01-02: .update() no emite pre_save (doc Django) y bulk_create tampoco
     → ambas vías de INSERT/UPDATE masivo sin señales se bloquean aquí."""
@@ -2162,6 +2169,14 @@ class NotaCredito(models.Model):
             return super().save(*args, **kwargs)
 
         if not self.numero or self.numero == 0:
+            # EST-02 (§5, patrón pre-create): la NC nace COMPLETA — el
+            # prefijo se persiste en el INSERT (guardar_con_reintento solo
+            # escribe numero_control). Antes quedaba '' y el primer re-save
+            # del ORM lo rellenaba: mutación post-emisión que el guard de
+            # señales bloquea (campo fuera de la matriz {estado,
+            # motivo_anulacion}). G1: no allowlist — se arregla el nacimiento.
+            if not self.prefijo:
+                self.prefijo = self._prefijo_correlativo()
             from .correlativos import TIPO_NOTA_CREDITO, guardar_con_reintento
             return guardar_con_reintento(
                 self, TIPO_NOTA_CREDITO,
@@ -2291,16 +2306,22 @@ class DetalleNotaCredito(models.Model):
         """
         Calcula subtotal_devuelto_usd, iva_usd, linea_total_usd en cada save()
         (snapshot inmutable post-creación).
+
+        EST-02 (REQ-EST02-06): delega en ``calculos.calcular_linea_devolucion``
+        — la MISMA fuente única que usa ``services.procesar_devolucion_*`` en
+        su pasada pre-create (la NC nace con monto_total_reembolso definitivo).
+        Fórmula y quantize idénticos a los históricos: drift imposible.
         """
-        from decimal import Decimal as _D
-        cantidad = _D(str(self.cantidad_devuelta or 0))
-        precio = _D(str(self.precio_unitario_snapshot or 0))
-        iva_pct = _D(str(self.iva_porcentaje_snapshot or 0))
-        subtotal = (cantidad * precio).quantize(_D('0.0001'))
-        iva = (subtotal * iva_pct / _D('100')).quantize(_D('0.0001'))
-        self.subtotal_devuelto_usd = subtotal
-        self.iva_usd = iva
-        self.linea_total_usd = (subtotal + iva).quantize(_D('0.0001'))
+        from .calculos import calcular_linea_devolucion
+        (
+            self.subtotal_devuelto_usd,
+            self.iva_usd,
+            self.linea_total_usd,
+        ) = calcular_linea_devolucion(
+            self.cantidad_devuelta,
+            self.precio_unitario_snapshot,
+            self.iva_porcentaje_snapshot,
+        )
         super().save(*args, **kwargs)
 
 

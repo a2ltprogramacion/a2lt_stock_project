@@ -750,6 +750,135 @@ compensatorio); receivers cableados solo a la clase real.
 
 ---
 
+## ADR-35: Documentos emitidos inmutables: señal pre_save con matriz
++ admin readonly + NC pre-create (EST-02)
+
+**Estado:** Aceptada (2026-10-24). Remediación EST-02 /
+REQ-EST02-01..10 del Capítulo 5 de
+`docs/plans/EST_ESTRUCTURALES_PLAN_Y_TAREAS.md`.
+
+**Contexto:**
+
+Los 6 modelos de documentos emitidos (`NotaEntrega`,
+`DocumentoCompra`, `NotaCredito` y sus `Detalle*`) eran mutables
+desde cualquier punto del código. Nada impedía
+`.update(estado='PROCESADO')` sobre una NE ANULADA ("reabrirla" sin
+traza), `.update(precio_base=999)` sobre una línea histórica, o
+borrar las líneas de un documento PROCESADO con sus snapshots. El
+admin agravaba el vector: editar `estado` a mano desde `/admin/`
+"anulaba" una venta SIN reversar stock. Invariante contable/fiscal
+que faltaba enforcear: una factura emitida no se edita — el
+documento es registro histórico.
+
+Corrección documentada al auditor (spec §1.5): la auditoría real
+encontró **6 mutaciones post-emisión, no las 4 del plan** — los 2
+extra eran tails de CREACIÓN que mutaban la cabecera tras el INSERT
+(`procesar_venta`: `save(update_fields=['iva_total','iva_check'])`
+sobre la NE recién creada; `registrar_compra_proveedor`:
+`save(update_fields=['monto_total_usd','iva_total',
+'monto_total_bs_snapshot'])` sobre la DC recién creada). Conectar
+el guard alfabético los habría roto: se resolvió con el refactor
+pre-create (punto 6), no relajando la matriz. Además, la **fase 2**
+del capítulo (guard de `.update()` queryset sobre los 6 modelos —
+vía que no emite señales) queda **DIFERIDA como deuda documentada**:
+hoy hay **0 usos de `.update()` sobre documentos** (los únicos
+`.update()` de `services` son sobre `SerialArticulo`), no existe
+writer que calificar, y el escape hatch ya está documentado en la
+allowlist de EST-01.
+
+**Decisión:**
+
+1. **Señal `pre_save` compartida para 6 senders** (NE/DC/NC + sus
+   `Detalle*`; `inventory/kardex_guard.py`, mismo módulo auditable
+   de EST-01) gobernada por una **MATRIZ de campos mutables** —
+   datos, no código. Un único handler fetch→diff: `raw` (fixtures
+   `loaddata`) y `bypass_activo()` quedan exentos; `instance.pk is
+   None` es CREATE (aún no emitido); el fetch usa `_base_manager`
+   porque `EmpresaManager` retorna `.none()` sin request — con
+   `objects` el guard quedaría ciego en shell/commands.
+2. **Cabeceras**: SOLO mutan `estado` (transición única
+   PROCESADO→ANULADO) + `motivo_anulacion` en el MISMO save de esa
+   transición. ANULADO = documento CERRADO: toda mutación posterior
+   se bloquea (reabrir estado o retocar el motivo incluidos). El
+   re-save idempotente (diff vacío) pasa; un `save(update_fields=…)`
+   con campos ajenos a la matriz se bloquea AUNQUE el valor no
+   cambie (la intención de tocar ya es ilegítima). **Líneas**
+   (`Detalle*`): matriz VACÍA — solo re-save idempotente.
+   `cantidad_devuelta_acumulada` NO es columna sino `@property` que
+   SUMA las filas `DetalleNotaCredito` del detalle origen: el flujo
+   de devolución hace INSERT de la línea NC, nunca UPDATE de la fila
+   origen → la matriz vacía es correcta por construcción.
+3. **`DocumentoInmutableError`** — familia
+   `IntegridadDocumentalError` → `PermissionDenied` (un camino HTTP
+   responde 403, no 500), con log ERROR forense (modelo, pk, campos,
+   traceback) antes del raise.
+4. **`pre_delete` bloquea instancia, queryset bulk y cascada en los
+   6**: el collector de Django envía TODOS los `pre_delete` antes de
+   ejecutar un solo DELETE SQL → abort completo, sin borrados
+   parciales (y el raise envenena la transacción del caller con
+   `needs_rollback` — ese ES el rollback total deseado). El bypass es
+   el MISMO `ContextVar` apilable de EST-01 (`kardex_bypass`):
+   allowlist única auditable por grep, ya cubre `seed_db --clear` y
+   `services.eliminar_tenant` sin módulo paralelo.
+5. **Admin TOTALMENTE readonly para los 6**
+   (`ReadOnlyDocumentoAdminMixin`): `has_add/change/delete_permission
+   = False` (el documento nace y anula vía services), view
+   conservado sin ampliación de exposición,
+   `get_readonly_fields` dinámico con TODOS los campos concretos
+   sobre objeto existente, e inlines `can_delete=False`. Cierra el
+   vector "anular desde admin sin reversar stock": el guard queda
+   como backstop del ORM, no como UX.
+6. **REFACTOR pre-create**: NE/DC y NC nacen COMPLETAS — los tails
+   de creación que mutaban cabeceras tras el INSERT se eliminaron
+   (los totales se computan ANTES del `create`; jamás existió una
+   "NE PROCESADO 100 ms con iva_total mentido"). La NC calcula
+   `monto_total_reembolso` ANTES del create con doble pasada
+   (1: validar+calcular por línea; 2: persistir cabecera y detalles
+   con los valores ya resueltos — la aritmética no se recalcula,
+   drift imposible). `calculos.calcular_linea_devolucion` es la
+   fuente única de la aritmética de devolución y
+   `DetalleNotaCredito.save()` delega en ella (DATA-01): misma
+   fórmula en ambos extremos.
+7. **Divergencia resuelta**: la NC nacía con `prefijo=''` — el
+   `save()` retornaba en `guardar_con_reintento` antes de
+   rellenarlo y el primer re-save del ORM lo completaba: mutación
+   post-emisión sobre campo fuera de la matriz. Fix en el
+   nacimiento, no en la matriz: la NC nace con prefijo definitivo
+   persistido en el INSERT. Sin allowlist.
+8. **Dead code eliminado**: el `nc.delete()` dentro de los `except`
+   de `procesar_devolucion_*` era un no-op dentro de
+   `@transaction.atomic` cuyo `pre_delete` habría enmascarado la
+   excepción original del rollback (REQ-EST02-05).
+
+**Consecuencias:**
+
+- Los flujos legítimos quedan intactos: venta, compra, devolución y
+  reversos no editan documentos emitidos (29 tests NC pasan sin
+  edición de ningún caso; suite completa verde).
+- Fase 2 (guard de `.update()` sobre los 6) documentada como deuda:
+  sin usos actuales no hay writer legítimo que calificar; cuando
+  exista, el mecanismo será el estilo `KardexQuerySet` de EST-01.
+- El POST forzado al change view del admin cambia de estado →
+  **403 sin tocar la fila ni el stock**: la anulación pasa por
+  `services.reversar_nota_entrega` o no ocurre.
+- Los modelos históricos de migraciones (sender=clase real,
+  reconstruidos por `ModelState`) no disparan los receivers — las
+  `RunPython` quedan exentas por diseño, como en EST-01.
+
+**Tests:** `inventory/test_cases/test_inmutabilidad_documentos.py`
+(10): campo fuera de matriz bloqueado en NE/DC (fila intacta);
+anulación legítima + ANULADO cerrado; re-save idempotente OK +
+`update_fields` ajeno bloqueado; devolución fallida sin masking y
+rollback limpio; precio/snapshot de líneas bloqueados; deletes de
+cabecera/línea/NC/bulk bloqueados (patrón savepoint); re-save de
+línea NC + origen intacto (`cantidad_devuelta_acumulada` sin
+columna); permisos readonly totales del admin; POST al admin → 403
+sin tocar estado ni stock; NC nace con monto definitivo + gates de
+fuente (`monto_total_reembolso=` en el create, helper compartido,
+sin `nc.save(`, sin `nc.delete()`).
+
+---
+
 ## ADRs no implementadas / candidatas
 
 Las siguientes ADRs aparecen referenciadas en código pero no tienen 

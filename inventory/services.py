@@ -40,7 +40,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.db import transaction
 
-from .calculos import calcular_factor_descuento
+from .calculos import calcular_factor_descuento, calcular_linea_devolucion
 from .kardex_guard import escritura_kardex_autorizada
 from .models import (
     Articulo,
@@ -1412,21 +1412,14 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario: 
                     identificacion=ident_generica,
                 )
 
-    # 3. Creación de la Cabecera (Nota de Entrega o Factura)
-    nota_entrega = NotaEntrega.objects.create(
-        empresa=almacen.empresa,
-        cliente=cliente,
-        almacen=almacen,
-        tasa_bcv_aplicada=tasa_aplicada,
-        factor_cobertura_aplicado=factor_aplicado,
-        tasa_mercado_aplicada=tasa_mercado_aplicada,
-        observaciones=observaciones,
-        tipo_documento=tipo_documento,
-        numero_factura=numero_factura,
-        descuento_global=descuento_global,
-    )
-
-    # 4. Procesamiento de Ítems
+    # 4. PASADA 1 (EST-02, patrón §5 — divergencia reportada y aprobada por
+    #    el coordinador, 2026-10-24): resolver + validar ítems y computar el
+    #    iva_total ANTES del create. La cabecera nace COMPLETA: el antiguo
+    #    tail nota_entrega.save(update_fields=['iva_total', 'iva_check'])
+    #    mutaba una NE ya emitida (campos fuera de la matriz EST-02) — una
+    #    NE PROCESADO existía 100ms con iva mentido.
+    items_procesados = []
+    iva_total_calc = Decimal('0')
     for item in lista_items:
         articulo = Articulo.objects.get(sku=item['articulo_sku'])
         cantidad = Decimal(str(item['cantidad']))
@@ -1490,27 +1483,6 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario: 
                 )
             # Si permite_sin_stock=True, se continúa (la salida generará saldo negativo).
 
-        # Descuento atómico del Kárdex (usa el almacén por línea).
-        if articulo.tipo == 'FISICO':
-            registrar_movimiento(
-                articulo=articulo,
-                almacen=almacen_para_kardex,
-                tipo='SALIDA',
-                cantidad=cantidad,
-                concepto='VENTA',
-                nota_entrega=nota_entrega,
-                usuario=usuario,
-                permite_saldo_negativo=permite_sin_stock,
-            )
-        elif articulo.tipo == 'COMBO':
-            procesar_salida_combo(
-                combo=articulo,
-                almacen=almacen_para_kardex,
-                cantidad_combos=cantidad,
-                nota_entrega=nota_entrega,
-                usuario=usuario
-            )
-
         # Inmutabilidad Financiera: 4 snapshots de precios al momento de la venta
         precio_ajustado = (precio_base * factor_aplicado).quantize(Decimal('0.0001'))
         precio_directo_bcv = (precio_base * tasa_aplicada).quantize(Decimal('0.01'))
@@ -1533,6 +1505,82 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario: 
             iva_porcentaje = iva_porcentaje_item
         else:
             iva_porcentaje = articulo.iva_porcentaje
+
+        # IVA de la línea — MISMA aritmética que DetalleNotaEntrega.iva_bs
+        # (subtotal_bs: precio_ajustado_bcv * cantidad * factor_descuento),
+        # para que el iva_total del create sea idéntico al que antes calculaba
+        # el tail re-leyendo los detalles persistidos.
+        factor_descuento = Decimal('1') - (descuento_aplicado / Decimal('100'))
+        iva_total_calc += (
+            precio_ajustado_bcv * cantidad * factor_descuento
+        ) * (iva_porcentaje / Decimal('100'))
+
+        items_procesados.append({
+            'item': item,
+            'articulo': articulo,
+            'cantidad': cantidad,
+            'almacen': almacen_para_kardex,
+            'precio_base': precio_base,
+            'precio_ajustado': precio_ajustado,
+            'precio_directo_bcv': precio_directo_bcv,
+            'precio_ajustado_bcv': precio_ajustado_bcv,
+            'descuento_aplicado': descuento_aplicado,
+            'iva_porcentaje': iva_porcentaje,
+        })
+
+    # 5. Creación de la Cabecera COMPLETA (Nota de Entrega o Factura):
+    #    iva_total/iva_check definitivos al nacer — tras emisión solo muta
+    #    el par estado→ANULADO + motivo_anulacion (matriz EST-02).
+    nota_entrega = NotaEntrega.objects.create(
+        empresa=almacen.empresa,
+        cliente=cliente,
+        almacen=almacen,
+        tasa_bcv_aplicada=tasa_aplicada,
+        factor_cobertura_aplicado=factor_aplicado,
+        tasa_mercado_aplicada=tasa_mercado_aplicada,
+        observaciones=observaciones,
+        tipo_documento=tipo_documento,
+        numero_factura=numero_factura,
+        descuento_global=descuento_global,
+        iva_total=iva_total_calc.quantize(Decimal('0.0001')),
+        iva_check=iva_total_calc > 0,
+    )
+
+    # 6. PASADA 2: persistir kárdex + detalles + seriales con los valores ya
+    #    resueltos en pasada 1 (la aritmética no se recalcula: drift imposible).
+    for linea in items_procesados:
+        item = linea['item']
+        articulo = linea['articulo']
+        cantidad = linea['cantidad']
+        almacen_para_kardex = linea['almacen']
+
+        # Descuento atómico del Kárdex (usa el almacén por línea).
+        if articulo.tipo == 'FISICO':
+            registrar_movimiento(
+                articulo=articulo,
+                almacen=almacen_para_kardex,
+                tipo='SALIDA',
+                cantidad=cantidad,
+                concepto='VENTA',
+                nota_entrega=nota_entrega,
+                usuario=usuario,
+                permite_saldo_negativo=permite_sin_stock,
+            )
+        elif articulo.tipo == 'COMBO':
+            procesar_salida_combo(
+                combo=articulo,
+                almacen=almacen_para_kardex,
+                cantidad_combos=cantidad,
+                nota_entrega=nota_entrega,
+                usuario=usuario
+            )
+
+        precio_base = linea['precio_base']
+        precio_ajustado = linea['precio_ajustado']
+        precio_directo_bcv = linea['precio_directo_bcv']
+        precio_ajustado_bcv = linea['precio_ajustado_bcv']
+        descuento_aplicado = linea['descuento_aplicado']
+        iva_porcentaje = linea['iva_porcentaje']
 
         # Creación de Detalle (Línea de factura) — ADR-18: 4 precios snapshot + IVA
         # El almacen aquí es el de la línea (puede diferir del de cabecera).
@@ -1588,14 +1636,8 @@ def procesar_venta(cliente_id=None, lista_items=None, almacen_id=None, usuario: 
             
             SerialArticulo.objects.bulk_update(seriales_db, ['estado', 'detalle_nota'])
 
-    # N2: Cálculo de iva_total (siempre, desde snapshot individual de cada detalle)
-    iva_total_calc = Decimal('0')
-    for det in nota_entrega.detalles.all():
-        iva_total_calc += det.iva_bs
-    nota_entrega.iva_total = iva_total_calc.quantize(Decimal('0.0001'))
-    # iva_check refleja si el documento lleva IVA (algún item con iva_porcentaje > 0)
-    nota_entrega.iva_check = iva_total_calc > 0
-    nota_entrega.save(update_fields=['iva_total', 'iva_check'])
+    # N2 (EST-02): iva_total/iva_check nacieron con la cabecera (pasada 1) —
+    # el documento no vuelve a salvarse tras su emisión (matriz EST-02).
 
     # El objeto en memoria ya tiene el valor correcto de iva_total
     logger.info(
@@ -2126,30 +2168,19 @@ def registrar_compra_proveedor(
                     "para esta empresa. No se pueden duplicar documentos."
                 )
 
-        # Crear cabecera (los totales se recalculan abajo).
-        # numero y numero_interno NO se pasan -> DocumentoCompra.save()
-        # los auto-genera con Max('numero') + correlativo_inicial_factura_compra.
-        documento = DocumentoCompra.objects.create(
-            empresa_id=empresa_id_int,
-            proveedor=proveedor,
-            tipo_documento=tipo_documento,
-            numero_factura=numero_factura,
-            fecha_compra=fecha_compra,
-            monto_total_usd=Decimal('0.0000'),  # se recalcula
-            descuento_global=descuento_global,
-            iva_total=Decimal('0.0000'),  # se recalcula
-            tasa_bcv_aplicada=tasa_bcv_snap,
-            tasa_mercado_aplicada=tasa_mercado_snap,
-            factor_cobertura_aplicado=factor_snap,
-            fuente_tasa='MANUAL',
-            monto_total_bs_snapshot=Decimal('0.00'),
-            observaciones=observaciones,
-        )
-
-        # Procesar ítems
-        subtotal_usd = Decimal('0.0000')
-        iva_total_usd = Decimal('0.0000')
-
+        # PASADA 1 (EST-02, patrón §5 — divergencia reportada y aprobada por
+        # el coordinador, 2026-10-24): validar ítems y computar los totales
+        # ANTES del create. La cabecera nace COMPLETA: el antiguo tail
+        # documento.save(update_fields=['monto_total_usd', 'iva_total',
+        # 'monto_total_bs_snapshot']) mutaba una DC ya emitida (campos fuera
+        # de la matriz EST-02).
+        # MISMA aritmética que el tail original: por ítem, subtotal_usd
+        # (costo_base × cantidad × factor descuento individual) → descuento
+        # global proporcional → IVA sobre la base descontada.
+        factor_global = calcular_factor_descuento(descuento_global)
+        subtotal_after_discount = Decimal('0')
+        iva_total_usd = Decimal('0')
+        items_compra = []
         for item in lista_items:
             sku = item.get('sku') or item.get('articulo_sku')
             cantidad = Decimal(str(item.get('cantidad', 0)))
@@ -2165,6 +2196,62 @@ def registrar_compra_proveedor(
                 raise ValueError(f"descuento_aplicado para {sku} debe estar entre 0 y 100.")
             if not (Decimal('0') <= iva_porcentaje <= Decimal('100')):
                 raise ValueError(f"iva_porcentaje para {sku} debe estar entre 0 y 100.")
+
+            # Totales por línea — misma aritmética del tail original:
+            # item_subtotal ≡ DetalleDocumentoCompra.subtotal_usd.
+            item_subtotal = (
+                costo_factura * cantidad
+                * (Decimal('1') - (descuento_aplicado / Decimal('100')))
+            ).quantize(Decimal('0.0001'))
+            item_discounted = (item_subtotal * factor_global).quantize(Decimal('0.0001'))
+            item_iva = (item_discounted * (iva_porcentaje / Decimal('100'))).quantize(Decimal('0.0001'))
+            subtotal_after_discount += item_discounted
+            iva_total_usd += item_iva
+
+            items_compra.append({
+                'sku': sku,
+                'cantidad': cantidad,
+                'costo_factura': costo_factura,
+                'descuento_aplicado': descuento_aplicado,
+                'iva_porcentaje': iva_porcentaje,
+                'seriales': item.get('seriales', []),
+            })
+
+        monto_total_usd = (subtotal_after_discount + iva_total_usd).quantize(Decimal('0.0001'))
+        # Total en Bs = (subtotal_with_discount + iva_total_usd) * tasa_bcv.
+        total_bs = ((subtotal_after_discount + iva_total_usd) * tasa_bcv_snap).quantize(Decimal('0.01'))
+
+        # Crear cabecera COMPLETA (totales definitivos al nacer).
+        # numero y numero_interno NO se pasan -> DocumentoCompra.save()
+        # los auto-genera con Max('numero') + correlativo_inicial_factura_compra.
+        documento = DocumentoCompra.objects.create(
+            empresa_id=empresa_id_int,
+            proveedor=proveedor,
+            tipo_documento=tipo_documento,
+            numero_factura=numero_factura,
+            fecha_compra=fecha_compra,
+            monto_total_usd=monto_total_usd,
+            descuento_global=descuento_global,
+            iva_total=iva_total_usd,
+            tasa_bcv_aplicada=tasa_bcv_snap,
+            tasa_mercado_aplicada=tasa_mercado_snap,
+            factor_cobertura_aplicado=factor_snap,
+            fuente_tasa='MANUAL',
+            monto_total_bs_snapshot=total_bs,
+            observaciones=observaciones,
+        )
+
+        # PASADA 2: persistir detalles + kárdex + seriales. El artículo se
+        # resuelve AQUÍ (select_for_update) en el mismo orden de siempre:
+        # el snapshot costo_unitario_snapshot=articulo.costo conserva la
+        # semántica original incluso con SKU repetidos en el documento.
+        for datos in items_compra:
+            sku = datos['sku']
+            cantidad = datos['cantidad']
+            costo_factura = datos['costo_factura']
+            descuento_aplicado = datos['descuento_aplicado']
+            iva_porcentaje = datos['iva_porcentaje']
+            seriales = datos['seriales']
 
             # Validación multi-tenant del artículo
             try:
@@ -2193,10 +2280,6 @@ def registrar_compra_proveedor(
                 descuento_aplicado=descuento_aplicado,
                 iva_porcentaje=iva_porcentaje,
             )
-
-            # Acumular totales del documento (usando propiedades del detalle)
-            subtotal_usd += detalle.subtotal_usd
-            iva_total_usd += detalle.iva_usd
 
             # Actualización de Costo Base + Recalculo Precio Venta.
             # Cadena de resolución: margen individual > margen global;
@@ -2236,7 +2319,6 @@ def registrar_compra_proveedor(
             )
 
             # Seriales (si usa_serial y vienen en item)
-            seriales = item.get('seriales', [])
             if articulo.usa_serial:
                 if not seriales:
                     raise ValueError(f"El artículo '{articulo.nombre}' requiere seriales, pero no se enviaron.")
@@ -2261,34 +2343,8 @@ def registrar_compra_proveedor(
 
             logger.info("[COMPRA] %s unid. de %s. Costo actualizado a %s", cantidad, sku, costo_factura)
 
-        # Totales finales del documento
-        # Aplicar descuento global proporcionalmente a cada ítem, luego calcular IVA
-        factor_global = calcular_factor_descuento(descuento_global)
-        subtotal_after_discount = Decimal('0')
-        iva_total_usd = Decimal('0')
-        
-        for d in documento.detalles.all():
-            item_subtotal = d.subtotal_usd
-            item_discounted = (item_subtotal * factor_global).quantize(Decimal('0.0001'))
-            item_iva = (item_discounted * (d.iva_porcentaje / Decimal('100'))).quantize(Decimal('0.0001'))
-            subtotal_after_discount += item_discounted
-            iva_total_usd += item_iva
-
-        monto_total_usd = (subtotal_after_discount + iva_total_usd).quantize(Decimal('0.0001'))
-
-        # Total en Bs = (subtotal_with_discount + iva_total_usd) * tasa_bcv.
-        # El IVA en Bs se calcula dinámicamente en la property iva_bs de cada
-        # DetalleDocumentoCompra (iva_usd * tasa_bcv_aplicada) y se muestra
-        # en vistas/PDF. Aquí calculamos el snapshot monto_total_bs_snapshot
-        # del documento completo aplicando el descuento_global a la base
-        # monetaria en USD antes de convertir a Bs.
-        total_bs = ((subtotal_after_discount + iva_total_usd) * tasa_bcv_snap).quantize(Decimal('0.01'))
-
-        # Actualizar documento con totales finales
-        documento.monto_total_usd = monto_total_usd
-        documento.iva_total = iva_total_usd
-        documento.monto_total_bs_snapshot = total_bs
-        documento.save(update_fields=['monto_total_usd', 'iva_total', 'monto_total_bs_snapshot'])
+        # (EST-02) Los totales nacieron con la cabecera (pasada 1) — el
+        # documento no vuelve a salvarse tras su emisión (matriz EST-02).
 
         return {
             'ok': True,
@@ -2586,20 +2642,11 @@ def procesar_devolucion_venta(
     if nota.estado == 'ANULADO':
         raise ValueError("La Nota de Entrega está anulada; no se puede emitir una NC sobre ella.")
 
-    # 2. Crear cabecera (NotaCredito.save() calcula numero y numero_control).
-    # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
-    usuario_fk, usuario_nombre = resolver_usuario(usuario)
-    nc = NotaCredito.objects.create(
-        empresa_id=empresa_id,
-        nota_entrega=nota,
-        doc_origen_tipo='VENTA',
-        motivo=motivo,
-        usuario=usuario_fk,
-        usuario_nombre=usuario_nombre,
-        estado='PROCESADO',
-    )
-
-    detalles_ids = []
+    # 2. PASADA 1 (EST-02 §5, REQ-EST02-06): resolver, validar y calcular
+    #    TODAS las líneas ANTES del create — la NC nace COMPLETA, con
+    #    monto_total_reembolso definitivo (sin el salvado post-create que
+    #    mutaba una NC ya emitida: campo fuera de la matriz EST-02).
+    items_resueltos = []
     monto_total_usd = _D('0.0000')
     # Advertencias: la NC se completa, pero alertamos si después de la ENTRADA
     # el stock_resultante sigue NEGATIVO (escenario: venta forward, no hay
@@ -2608,128 +2655,160 @@ def procesar_devolucion_venta(
     # con el cliente que el producto sí está físicamente).
     alertas_saldo_negativo = []
 
-    try:
-        for item in items_devueltos:
-            cantidad_devolver = _D(str(item.get('cantidad_devolver') or 0))
-            if cantidad_devolver <= 0:
-                raise ValueError("cantidad_devolver debe ser > 0 (omite el item si 0).")
+    for item in items_devueltos:
+        cantidad_devolver = _D(str(item.get('cantidad_devolver') or 0))
+        if cantidad_devolver <= 0:
+            raise ValueError("cantidad_devolver debe ser > 0 (omite el item si 0).")
 
-            try:
-                detalle = DetalleNotaEntrega.objects.select_for_update().get(
-                    pk=item['detalle_id'],
-                    nota_entrega=nota,
-                )
-            except DetalleNotaEntrega.DoesNotExist:
-                raise ValueError(
-                    f"El detalle {item['detalle_id']} no pertenece a la nota {nota_id}."
-                )
-
-            # 3. Validar cantidad pendiente.
-            cantidad_pendiente = detalle.cantidad_pendiente_devolver
-            if cantidad_devolver > cantidad_pendiente:
-                raise ValueError(
-                    f"No se pueden devolver {cantidad_devolver} de '{detalle.articulo.nombre}'. "
-                    f"Cantidad pendiente_devolver = {cantidad_pendiente}."
-                )
-
-            # 4. Snapshots (override opcional del precio / iva).
-            precio_unitario = _D(str(
-                item.get('precio_unitario', detalle.precio_base)
-            ))
-            iva_pct = _D(str(
-                item.get('iva_porcentaje', detalle.iva_porcentaje or 0)
-            ))
-            if precio_unitario < 0:
-                raise ValueError("precio_unitario no puede ser negativo.")
-            if not (_D('0') <= iva_pct <= _D('100')):
-                raise ValueError(
-                    f"iva_porcentaje para {detalle.articulo.sku} debe estar entre 0 y 100."
-                )
-
-            # 5. Crear DetalleNotaCredito (save() calcula totales snapshot).
-            det_nc = DetalleNotaCredito.objects.create(
-                nota_credito=nc,
-                detalle_origen_venta=detalle,
-                articulo=detalle.articulo,
-                almacen=detalle.almacen,
-                cantidad_devuelta=cantidad_devolver,
-                precio_unitario_snapshot=precio_unitario,
-                iva_porcentaje_snapshot=iva_pct,
-            )
-            detalles_ids.append(det_nc.pk)
-            monto_total_usd += det_nc.linea_total_usd
-
-            # 6. Movimiento de Kárdex: ENTRADA por la cantidad devuelta
-            #    (reingresa stock al almacén del doc. origen).
-            movimiento = registrar_movimiento(
-                articulo=detalle.articulo,
-                almacen=detalle.almacen,
-                tipo='ENTRADA',
-                cantidad=cantidad_devolver,
-                concepto='DEVOLUCION_VENTA',
-                detalle_adicional=(
-                    f"NC {nc.numero_control} sobre NotEntrega NE-{nota.numero:08d}: {motivo}"
-                ),
+        try:
+            detalle = DetalleNotaEntrega.objects.select_for_update().get(
+                pk=item['detalle_id'],
                 nota_entrega=nota,
-                usuario=usuario,
+            )
+        except DetalleNotaEntrega.DoesNotExist:
+            raise ValueError(
+                f"El detalle {item['detalle_id']} no pertenece a la nota {nota_id}."
             )
 
-            # 6.1 Verificación de saldo posterior a la devolución. Si sigue
-            # NEGATIVO, registramos una advertencia para que la UI la muestre.
-            try:
-                saldo_post = _D(str(movimiento.saldo_resultante))
-            except Exception:
-                saldo_post = _D('0')
-            if saldo_post < 0:
-                alertas_saldo_negativo.append({
-                    'sku': detalle.articulo.sku,
-                    'almacen': detalle.almacen.nombre,
-                    'saldo_post_devolucion': float(saldo_post),
-                    'cantidad_devuelta': float(cantidad_devolver),
-                })
-                logger.warning(
-                    "[NC VENTA] %s sobre %s: stock SIGUE NEGATIVO después de la "
-                    "devolución: %s @ %s = %s (devuelto: %s). "
-                    "El producto físico no alcanza para cubrir el faltante original.",
+        # 3. Validar cantidad pendiente.
+        cantidad_pendiente = detalle.cantidad_pendiente_devolver
+        if cantidad_devolver > cantidad_pendiente:
+            raise ValueError(
+                f"No se pueden devolver {cantidad_devolver} de '{detalle.articulo.nombre}'. "
+                f"Cantidad pendiente_devolver = {cantidad_pendiente}."
+            )
+
+        # 4. Snapshots (override opcional del precio / iva).
+        precio_unitario = _D(str(
+            item.get('precio_unitario', detalle.precio_base)
+        ))
+        iva_pct = _D(str(
+            item.get('iva_porcentaje', detalle.iva_porcentaje or 0)
+        ))
+        if precio_unitario < 0:
+            raise ValueError("precio_unitario no puede ser negativo.")
+        if not (_D('0') <= iva_pct <= _D('100')):
+            raise ValueError(
+                f"iva_porcentaje para {detalle.articulo.sku} debe estar entre 0 y 100."
+            )
+
+        # Misma fórmula que DetalleNotaCredito.save() (fuente única DATA-01):
+        # el monto del create es idéntico al que producirán los detalles.
+        _, _, total_linea = calcular_linea_devolucion(
+            cantidad_devolver, precio_unitario, iva_pct,
+        )
+        monto_total_usd += total_linea
+        items_resueltos.append({
+            'detalle': detalle,
+            'cantidad_devolver': cantidad_devolver,
+            'precio_unitario': precio_unitario,
+            'iva_porcentaje': iva_pct,
+        })
+
+    # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
+    usuario_fk, usuario_nombre = resolver_usuario(usuario)
+
+    # 5. Crear cabecera COMPLETA (NotaCredito.save() calcula numero y
+    #    numero_control). Tras emisión solo muta el par de la matriz EST-02.
+    nc = NotaCredito.objects.create(
+        empresa_id=empresa_id,
+        nota_entrega=nota,
+        doc_origen_tipo='VENTA',
+        motivo=motivo,
+        usuario=usuario_fk,
+        usuario_nombre=usuario_nombre,
+        estado='PROCESADO',
+        monto_total_reembolso=monto_total_usd.quantize(_D('0.0001')),
+    )
+
+    detalles_ids = []
+
+    # 6. PASADA 2: persistir detalles + kárdex + seriales con los valores ya
+    #    resueltos en pasada 1 (la aritmética no se recalcula: drift imposible).
+    for linea in items_resueltos:
+        detalle = linea['detalle']
+        cantidad_devolver = linea['cantidad_devolver']
+
+        # DetalleNotaCredito (save() recalcula los derivados deterministas
+        # con la MISMA fórmula → idénticos a los de pasada 1).
+        det_nc = DetalleNotaCredito.objects.create(
+            nota_credito=nc,
+            detalle_origen_venta=detalle,
+            articulo=detalle.articulo,
+            almacen=detalle.almacen,
+            cantidad_devuelta=cantidad_devolver,
+            precio_unitario_snapshot=linea['precio_unitario'],
+            iva_porcentaje_snapshot=linea['iva_porcentaje'],
+        )
+        detalles_ids.append(det_nc.pk)
+
+        # 6.1 Movimiento de Kárdex: ENTRADA por la cantidad devuelta
+        #     (reingresa stock al almacén del doc. origen).
+        movimiento = registrar_movimiento(
+            articulo=detalle.articulo,
+            almacen=detalle.almacen,
+            tipo='ENTRADA',
+            cantidad=cantidad_devolver,
+            concepto='DEVOLUCION_VENTA',
+            detalle_adicional=(
+                f"NC {nc.numero_control} sobre NotEntrega NE-{nota.numero:08d}: {motivo}"
+            ),
+            nota_entrega=nota,
+            usuario=usuario,
+        )
+
+        # 6.1 Verificación de saldo posterior a la devolución. Si sigue
+        # NEGATIVO, registramos una advertencia para que la UI la muestre.
+        try:
+            saldo_post = _D(str(movimiento.saldo_resultante))
+        except Exception:
+            saldo_post = _D('0')
+        if saldo_post < 0:
+            alertas_saldo_negativo.append({
+                'sku': detalle.articulo.sku,
+                'almacen': detalle.almacen.nombre,
+                'saldo_post_devolucion': float(saldo_post),
+                'cantidad_devuelta': float(cantidad_devolver),
+            })
+            logger.warning(
+                "[NC VENTA] %s sobre %s: stock SIGUE NEGATIVO después de la "
+                "devolución: %s @ %s = %s (devuelto: %s). "
+                "El producto físico no alcanza para cubrir el faltante original.",
+                nc.numero_control,
+                detalle.articulo.sku,
+                detalle.almacen.nombre,
+                saldo_post,
+                cantidad_devolver,
+                detalle.cantidad,
+            )
+
+        # 7. Liberar seriales FIFO (estado VENDIDO → DISPONIBLE).
+        if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
+            seriales_disponibles = list(
+                SerialArticulo.objects.filter(
+                    detalle_nota=detalle,
+                    estado='VENDIDO',
+                    empresa_id=empresa_id,
+                ).order_by('id')[:int(cantidad_devolver)]
+            )
+            if len(seriales_disponibles) < int(cantidad_devolver):
+                # Log warning pero no abortamos: el operador puede seguir
+                # si el producto tiene stock previo sin seriales.
+                import logging
+                logging.warning(
+                    "NC %s: seriales insuficientes para '%s' "
+                    "(esperados=%s, encontrados=%s). Continuando sin liberar todos.",
                     nc.numero_control,
                     detalle.articulo.sku,
-                    detalle.almacen.nombre,
-                    saldo_post,
-                    cantidad_devolver,
-                    detalle.cantidad,
+                    int(cantidad_devolver),
+                    len(seriales_disponibles),
                 )
+            SerialArticulo.objects.filter(
+                pk__in=[s.pk for s in seriales_disponibles]
+            ).update(estado='DISPONIBLE', detalle_nota=None)
 
-            # 7. Liberar seriales FIFO (estado VENDIDO → DISPONIBLE).
-            if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
-                seriales_disponibles = list(
-                    SerialArticulo.objects.filter(
-                        detalle_nota=detalle,
-                        estado='VENDIDO',
-                        empresa_id=empresa_id,
-                    ).order_by('id')[:int(cantidad_devolver)]
-                )
-                if len(seriales_disponibles) < int(cantidad_devolver):
-                    # Log warning pero no abortamos: el operador puede seguir
-                    # si el producto tiene stock previo sin seriales.
-                    import logging
-                    logging.warning(
-                        "NC %s: seriales insuficientes para '%s' "
-                        "(esperados=%s, encontrados=%s). Continuando sin liberar todos.",
-                        nc.numero_control,
-                        detalle.articulo.sku,
-                        int(cantidad_devolver),
-                        len(seriales_disponibles),
-                    )
-                SerialArticulo.objects.filter(
-                    pk__in=[s.pk for s in seriales_disponibles]
-                ).update(estado='DISPONIBLE', detalle_nota=None)
-    except Exception:
-        # Si algo falla, el @transaction.atomic envuelve todo y hace rollback.
-        nc.delete() if nc.pk else None
-        raise
-
-    nc.monto_total_reembolso = monto_total_usd.quantize(_D('0.0001'))
-    nc.save(update_fields=['monto_total_reembolso'])
+    # (EST-02 §5) La NC nació con monto_total_reembolso definitivo — no hay
+    # tail: el documento no vuelve a salvarse tras su emisión (matriz EST-02).
 
     # Si alguna línea quedó con saldo_stock aún negativo después de la
     # devolución, advertimos al frontend para mostrar un toast explicativo.
@@ -2794,8 +2873,64 @@ def procesar_devolucion_compra(
     if compra.estado == 'ANULADO':
         raise ValueError("La Compra está anulada; no se puede emitir una NC sobre ella.")
 
+    # PASADA 1 (EST-02 §5, REQ-EST02-06): resolver, validar y calcular TODAS
+    # las líneas ANTES del create — la NC nace COMPLETA, con
+    # monto_total_reembolso definitivo (sin salvado post-emisión).
+    items_resueltos = []
+    monto_total_usd = _D('0.0000')
+
+    for item in items_devueltos:
+        cantidad_devolver = _D(str(item.get('cantidad_devolver') or 0))
+        if cantidad_devolver <= 0:
+            raise ValueError("cantidad_devolver debe ser > 0 (omite el item si 0).")
+
+        try:
+            detalle = DetalleDocumentoCompra.objects.select_for_update().get(
+                pk=item['detalle_id'],
+                documento_compra=compra,
+            )
+        except DetalleDocumentoCompra.DoesNotExist:
+            raise ValueError(
+                f"El detalle de compra {item['detalle_id']} no pertenece al doc. {compra_id}."
+            )
+
+        cantidad_pendiente = detalle.cantidad_pendiente_devolver
+        if cantidad_devolver > cantidad_pendiente:
+            raise ValueError(
+                f"No se pueden devolver {cantidad_devolver} de '{detalle.articulo.nombre}'. "
+                f"Cantidad pendiente_devolver = {cantidad_pendiente}."
+            )
+
+        precio_unitario = _D(str(
+            item.get('precio_unitario', detalle.costo_base)
+        ))
+        iva_pct = _D(str(
+            item.get('iva_porcentaje', detalle.iva_porcentaje or 0)
+        ))
+        if precio_unitario < 0:
+            raise ValueError("precio_unitario no puede ser negativo.")
+        if not (_D('0') <= iva_pct <= _D('100')):
+            raise ValueError(
+                f"iva_porcentaje para {detalle.articulo.sku} debe estar entre 0 y 100."
+            )
+
+        # Misma fórmula que DetalleNotaCredito.save() (fuente única DATA-01).
+        _, _, total_linea = calcular_linea_devolucion(
+            cantidad_devolver, precio_unitario, iva_pct,
+        )
+        monto_total_usd += total_linea
+        items_resueltos.append({
+            'detalle': detalle,
+            'cantidad_devolver': cantidad_devolver,
+            'precio_unitario': precio_unitario,
+            'iva_porcentaje': iva_pct,
+        })
+
     # EST-04: resolución forense única (REQ-EST04-05) — instancia o string.
     usuario_fk, usuario_nombre = resolver_usuario(usuario)
+
+    # Crear cabecera COMPLETA. Tras emisión solo muta el par de la matriz
+    # EST-02 (estado→ANULADO + motivo_anulacion).
     nc = NotaCredito.objects.create(
         empresa_id=empresa_id,
         factura_compra=compra,
@@ -2804,95 +2939,63 @@ def procesar_devolucion_compra(
         usuario=usuario_fk,
         usuario_nombre=usuario_nombre,
         estado='PROCESADO',
+        monto_total_reembolso=monto_total_usd.quantize(_D('0.0001')),
     )
 
     detalles_ids = []
-    monto_total_usd = _D('0.0000')
 
-    try:
-        for item in items_devueltos:
-            cantidad_devolver = _D(str(item.get('cantidad_devolver') or 0))
-            if cantidad_devolver <= 0:
-                raise ValueError("cantidad_devolver debe ser > 0 (omite el item si 0).")
+    # PASADA 2: persistir detalles + kárdex + seriales con los valores ya
+    # resueltos en pasada 1 (la aritmética no se recalcula: drift imposible).
+    # Sin try/except ni borrado compensatorio muerto (REQ-EST02-05): el
+    # @transaction.atomic garantiza rollback total ante cualquier fallo.
+    for linea in items_resueltos:
+        detalle = linea['detalle']
+        cantidad_devolver = linea['cantidad_devolver']
 
-            try:
-                detalle = DetalleDocumentoCompra.objects.select_for_update().get(
-                    pk=item['detalle_id'],
-                    documento_compra=compra,
-                )
-            except DetalleDocumentoCompra.DoesNotExist:
-                raise ValueError(
-                    f"El detalle de compra {item['detalle_id']} no pertenece al doc. {compra_id}."
-                )
+        det_nc = DetalleNotaCredito.objects.create(
+            nota_credito=nc,
+            detalle_origen_compra=detalle,
+            articulo=detalle.articulo,
+            almacen=detalle.almacen,
+            cantidad_devuelta=cantidad_devolver,
+            precio_unitario_snapshot=linea['precio_unitario'],
+            iva_porcentaje_snapshot=linea['iva_porcentaje'],
+        )
+        detalles_ids.append(det_nc.pk)
 
-            cantidad_pendiente = detalle.cantidad_pendiente_devolver
-            if cantidad_devolver > cantidad_pendiente:
-                raise ValueError(
-                    f"No se pueden devolver {cantidad_devolver} de '{detalle.articulo.nombre}'. "
-                    f"Cantidad pendiente_devolver = {cantidad_pendiente}."
-                )
+        # Kardex: SALIDA porque estamos sacando del almacén por devolución.
+        registrar_movimiento(
+            articulo=detalle.articulo,
+            almacen=detalle.almacen,
+            tipo='SALIDA',
+            cantidad=cantidad_devolver,
+            concepto='DEVOLUCION_COMPRA',
+            detalle_adicional=(
+                f"NC {nc.numero_control} sobre DocumentoCompra "
+                f"{compra.tipo_documento} {compra.numero_factura or compra.numero_interno}: {motivo}"
+            ),
+            usuario=usuario,
+            documento_compra=compra,
+        )
 
-            precio_unitario = _D(str(
-                item.get('precio_unitario', detalle.costo_base)
-            ))
-            iva_pct = _D(str(
-                item.get('iva_porcentaje', detalle.iva_porcentaje or 0)
-            ))
-            if precio_unitario < 0:
-                raise ValueError("precio_unitario no puede ser negativo.")
-            if not (_D('0') <= iva_pct <= _D('100')):
-                raise ValueError(
-                    f"iva_porcentaje para {detalle.articulo.sku} debe estar entre 0 y 100."
-                )
-
-            det_nc = DetalleNotaCredito.objects.create(
-                nota_credito=nc,
-                detalle_origen_compra=detalle,
-                articulo=detalle.articulo,
-                almacen=detalle.almacen,
-                cantidad_devuelta=cantidad_devolver,
-                precio_unitario_snapshot=precio_unitario,
-                iva_porcentaje_snapshot=iva_pct,
+        # Seriales: ANULADO_COMPRA (no DISPONIBLE; ya no son stock).
+        if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
+            from .models import SerialArticulo
+            seriales = list(
+                SerialArticulo.objects.filter(
+                    compra_origen=compra,
+                    articulo=detalle.articulo,
+                    estado='DISPONIBLE',
+                    empresa_id=empresa_id,
+                ).order_by('id')[:int(cantidad_devolver)]
             )
-            detalles_ids.append(det_nc.pk)
-            monto_total_usd += det_nc.linea_total_usd
+            if seriales:
+                SerialArticulo.objects.filter(
+                    pk__in=[s.pk for s in seriales]
+                ).update(estado='ANULADO_COMPRA')
 
-            # Kardex: SALIDA porque estamos sacando del almacén por devolución.
-            registrar_movimiento(
-                articulo=detalle.articulo,
-                almacen=detalle.almacen,
-                tipo='SALIDA',
-                cantidad=cantidad_devolver,
-                concepto='DEVOLUCION_COMPRA',
-                detalle_adicional=(
-                    f"NC {nc.numero_control} sobre DocumentoCompra "
-                    f"{compra.tipo_documento} {compra.numero_factura or compra.numero_interno}: {motivo}"
-                ),
-                usuario=usuario,
-                documento_compra=compra,
-            )
-
-            # Seriales: ANULADO_COMPRA (no DISPONIBLE; ya no son stock).
-            if hasattr(detalle.articulo, 'usa_serial') and detalle.articulo.usa_serial:
-                from .models import SerialArticulo
-                seriales = list(
-                    SerialArticulo.objects.filter(
-                        compra_origen=compra,
-                        articulo=detalle.articulo,
-                        estado='DISPONIBLE',
-                        empresa_id=empresa_id,
-                    ).order_by('id')[:int(cantidad_devolver)]
-                )
-                if seriales:
-                    SerialArticulo.objects.filter(
-                        pk__in=[s.pk for s in seriales]
-                    ).update(estado='ANULADO_COMPRA')
-    except Exception:
-        nc.delete() if nc.pk else None
-        raise
-
-    nc.monto_total_reembolso = monto_total_usd.quantize(_D('0.0001'))
-    nc.save(update_fields=['monto_total_reembolso'])
+    # (EST-02 §5) La NC nació con monto_total_reembolso definitivo — no hay
+    # tail: el documento no vuelve a salvarse tras su emisión (matriz EST-02).
 
     return {
         'ok': True,

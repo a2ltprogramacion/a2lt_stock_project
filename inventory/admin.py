@@ -364,14 +364,53 @@ class AuditoriaTasaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
 # NOTAS DE ENTREGA
 # ─────────────────────────────────────────────────────────────────────────────
 
+class ReadOnlyDocumentoAdminMixin:
+    """
+    EST-02 (REQ-EST02-08): documento emitido = registro histórico; el admin
+    solo mira. Cierra el vector "anular sin reversar stock" que permitía
+    editar ``estado`` a mano desde /admin/ (el guard de señales queda como
+    backstop del ORM, no como UX).
+
+    * add/change/delete prohibidos (el documento nace y anula vía services).
+    * view SIN ampliación de exposición: solo quien ya tenía permisos lo
+      conserva; ``DocumentoInmutableError`` es PermissionDenied → si algún
+      POST forzado llegara al ORM, responde 403 amable, no 500.
+    * get_readonly_fields dinámico sobre objeto existente: todos los campos
+      concretos + los readonly estáticos del ModelAdmin. Con
+      has_change=False la vista de detalle renderiza el form completo
+      readonly y los inlines en modo view — el readonly del padre fuerza
+      el de los inlines (cinturón y tirantes si alguien re-concede change
+      por User/Group).
+    """
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return super().has_view_permission(request, obj)
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is not None:
+            return [
+                f.name for f in self.model._meta.concrete_fields
+            ] + list(super().get_readonly_fields(request, obj))
+        return super().get_readonly_fields(request, obj)
+
+
 class DetalleNotaEntregaInline(admin.TabularInline):
     model = DetalleNotaEntrega
     extra = 0
+    can_delete = False
     readonly_fields = ('subtotal_usd', 'subtotal_bs')
 
 
 @admin.register(NotaEntrega)
-class NotaEntregaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
+class NotaEntregaAdmin(ReadOnlyDocumentoAdminMixin, TenantGlobalAdminMixin, admin.ModelAdmin):
     list_display = ('numero_nota', 'numero_factura', 'tipo_documento', 'fecha', 'cliente', 'almacen', 'estado', 'moneda_pago')
     list_filter = ('estado', 'moneda_pago', 'tipo_documento', 'almacen')
     search_fields = ('numero', 'numero_nota', 'numero_factura',
@@ -384,7 +423,7 @@ class NotaEntregaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(DetalleNotaEntrega)
-class DetalleNotaEntregaAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
+class DetalleNotaEntregaAdmin(ReadOnlyDocumentoAdminMixin, TenantGlobalAdminMixin, admin.ModelAdmin):
     list_display = (
         'nota_entrega', 'articulo', 'almacen', 'cantidad',
         'precio_base', 'descuento_aplicado', 'iva_porcentaje',
@@ -409,7 +448,7 @@ class MovimientoKardexCompraInline(admin.TabularInline):
         return False
 
 @admin.register(DocumentoCompra)
-class DocumentoCompraAdmin(TenantGlobalAdminMixin, admin.ModelAdmin):
+class DocumentoCompraAdmin(ReadOnlyDocumentoAdminMixin, TenantGlobalAdminMixin, admin.ModelAdmin):
     list_display = ('numero_factura', 'proveedor', 'fecha_compra', 'monto_total_usd')
     list_filter = ('fecha_compra', 'proveedor')
     search_fields = ('numero_factura', 'proveedor__nombre', 'proveedor__rif')
