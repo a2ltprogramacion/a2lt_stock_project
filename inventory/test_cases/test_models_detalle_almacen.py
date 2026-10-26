@@ -192,8 +192,20 @@ class TestData03DetalleAlmacen(TestCase):
 
         # Idempotente y con SQL válido sobre los apps reales. (No hay huérfanos
         # posibles en la BD de tests: la columna ya es NOT NULL.)
-        migracion._rellenar_almacen_detalle(global_apps, None)
-        migracion._rellenar_almacen_detalle(global_apps, None)
+        #
+        # EST-02 fase 2 (ADR-35): el backfill usa .update() masivo — canal
+        # bloqueado por DocumentoQuerySet en el modelo REAL. En producción la
+        # migración corre sobre el registry histórico (queryset plano, inmune
+        # por diseño, receivers con sender=clase real); el bypass es necesario
+        # SOLO aquí porque este test usa global_apps deliberadamente para
+        # validar el SQL real. Uso legítimo documentado del escape hatch
+        # compartido (REQ-EST02-07; mismo precedente que el fixture de kárdex
+        # viejo de EST-01 en tests.py).
+        from inventory.kardex_guard import kardex_bypass
+
+        with kardex_bypass('fixture DATA-03: backfill de la migración 0022'):
+            migracion._rellenar_almacen_detalle(global_apps, None)
+            migracion._rellenar_almacen_detalle(global_apps, None)
         self.assertFalse(
             DetalleNotaEntrega.objects.filter(almacen__isnull=True).exists(),
             msg='Después del backfill no debe quedar ninguna línea huérfana.',

@@ -877,6 +877,20 @@ sin tocar estado ni stock; NC nace con monto definitivo + gates de
 fuente (`monto_total_reembolso=` en el create, helper compartido,
 sin `nc.save(`, sin `nc.delete()`).
 
+**Actualización (2026-10-25) — Fase 2 IMPLEMENTADA:** `DocumentoQuerySet` en `models.py`
+(patrón simétrico a `KardexQuerySet` de EST-01) bloquea `.update()` y
+`.bulk_update()` en los QuerySets de los 6 modelos de documento
+(`DocumentoInmutableError` salvo `kardex_bypass` activo — mecanismo
+compartido). `create()`/`bulk_create()` siguen legales (la señal exonera
+CREATE). Wiring: `EmpresaManager.from_queryset(DocumentoQuerySet)` en
+NE/DC/NC (filtro de tenant preservado); `DetalleDocumentoCompraQuerySet
+(DetalleCompraQuerySet, DocumentoQuerySet)` conserva `para_empresa`
+(BUG-04); managers planos via `as_manager()` — los related managers
+heredan el bloqueo (`nota.detalles.update(...)` también cerrado). 0 usos
+de producción afectados; el único fixture tocado: el test de estructura
+de la migración 0022 (invoca su backfill contra modelos reales) envuelto
+en bypass. Tests: `TestFase2UpdateBloqueado` (5).
+
 ---
 
 ## ADRs no implementadas / candidatas
