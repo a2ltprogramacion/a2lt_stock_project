@@ -73,6 +73,33 @@ class KardexQuerySet(models.QuerySet):
         return super().bulk_create(objs, **kwargs)
 
 
+class DocumentoQuerySet(models.QuerySet):
+    """EST-02 fase 2 (ADR-35): .update()/.bulk_update() no emiten pre_save
+    (doc Django) → el canal masivo queda cerrado para los 6 modelos de
+    documento con la excepción del guard (DocumentoInmutableError) y el
+    MISMO bypass compartido de kardex_guard (REQ-EST02-07).
+
+    Diferencia deliberada con KardexQuerySet: create()/bulk_create() NO se
+    bloquean — crear documentos/líneas nuevos es legal (la señal pre_save
+    exonera CREATE); lo prohibido es MUTAR filas emitidas fuera de
+    services.reversar_*. El bloqueo es del CANAL, no del campo: también
+    cubre .update(estado=…) de cabeceras (campo mutable de la matriz cuya
+    única vía legítima es services.reversar_*).
+    """
+
+    def update(self, **kwargs):
+        from .kardex_guard import bypass_activo, bloquear_documento  # perezoso: rompería el ciclo models↔kardex_guard
+        if not bypass_activo():
+            bloquear_documento('.update()', self.model(), cambios=kwargs.keys())
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        from .kardex_guard import bypass_activo, bloquear_documento
+        if not bypass_activo():
+            bloquear_documento('bulk_update()', self.model(), cambios=fields)
+        return super().bulk_update(objs, fields, **kwargs)
+
+
 # Manager personalizado para DetalleDocumentoCompra que filtra por documento_compra__empresa
 class DetalleCompraQuerySet(EmpresaQuerySet):
     def para_empresa(self):
@@ -88,6 +115,20 @@ class DetalleCompraManager(models.Manager):
 
     def para_empresa(self):
         return self.get_queryset().para_empresa()
+
+
+class DetalleDocumentoCompraQuerySet(DetalleCompraQuerySet, DocumentoQuerySet):
+    """EST-02 fase 2: composición que NO pierde la API de BUG-04 — hereda
+    para_empresa() (tenant transitivo de DetalleCompraQuerySet) y el bloqueo
+    .update()/.bulk_update() de DocumentoQuerySet, ambos intactos (MRO)."""
+
+
+class DetalleDocumentoCompraManager(DetalleCompraManager):
+    """DetalleCompraManager (para_empresa, BUG-04) sobre el queryset compuesto:
+    hereda para_empresa() del manager y retorna el queryset con bloqueo."""
+
+    def get_queryset(self):
+        return DetalleDocumentoCompraQuerySet(self.model, using=self._db)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -323,6 +364,27 @@ class ConfiguracionEmpresa(models.Model):
                 condition=models.Q(margen_global__gte=0)
                 & models.Q(margen_global__lt=100),
                 name='margen_rango_valido',
+            ),
+            # DATA-08 (extensión): backlog de campos monetarios pendientes.
+            # ``descuento_global`` es un porcentaje: fuera de [0, 100]
+            # produce totales negativos o invertidos en las notas.
+            models.CheckConstraint(
+                condition=models.Q(descuento_global__gte=0)
+                & models.Q(descuento_global__lte=100),
+                name='descuento_global_rango',
+            ),
+            # ``factor_redondeo``: el help_text lo promete desde 0018
+            # ("Debe ser mayor a 0") — un múltiplo 0 rompe el módulo del
+            # redondeo de precios.
+            models.CheckConstraint(
+                condition=models.Q(factor_redondeo__gt=0),
+                name='factor_redondeo_positivo',
+            ),
+            # ``tasa_mercado``: DATA-05 la deriva en save(), pero
+            # bulk_create()/SQL crudo saltan esa capa.
+            models.CheckConstraint(
+                condition=models.Q(tasa_mercado__gte=0),
+                name='tasa_mercado_no_negativa',
             ),
         ]
 
@@ -1150,8 +1212,12 @@ class DocumentoCompra(models.Model):
     motivo_anulacion = models.TextField(null=True, blank=True, verbose_name='Motivo de Anulación')
     observaciones = models.TextField(blank=True, default='', verbose_name='Observaciones')
 
-    objects = EmpresaManager()
-    global_objects = models.Manager()
+    # EST-02 fase 2 (ADR-35): mismo cierre de canal que MovimientoKardex (EST-01)
+    # — .update()/.bulk_update() no emiten señales → DocumentoInmutableError
+    # salvo kardex_bypass. from_queryset preserva el filtro de tenant de
+    # EmpresaManager; global_objects, sin tenant, bloquea igual.
+    objects = EmpresaManager.from_queryset(DocumentoQuerySet)()
+    global_objects = DocumentoQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Documento de Compra'
@@ -1273,13 +1339,47 @@ class DetalleDocumentoCompra(models.Model):
         verbose_name='IVA (%)'
     )
 
-    objects = DetalleCompraManager()
-    global_objects = models.Manager()
+    # EST-02 fase 2 (ADR-35): manager compuesto — conserva para_empresa (BUG-04)
+    # y bloquea .update()/.bulk_update(); global_objects, sin tenant, igual bloqueado.
+    objects = DetalleDocumentoCompraManager()
+    global_objects = DocumentoQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Detalle de Compra'
         verbose_name_plural = '13. Detalles de Compras'
         ordering = ['id']
+        # DATA-08 (extensión): rangos monetarios a nivel de BD. Los
+        # services ya validan (registrar_compra_proveedor), pero
+        # bulk_create()/SQL crudo saltan esa capa: el esquema es la
+        # última línea de defensa (mismo criterio que las 0024).
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cantidad__gt=0),
+                name='cantidad_compra_positiva',
+            ),
+            # Los 5 snapshots de costo en UNA constraint combinada: una
+            # fila con cualquier costo negativo no es una compra.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(costo_base__gte=0)
+                    & models.Q(costo_ajustado__gte=0)
+                    & models.Q(costo_directo_bcv__gte=0)
+                    & models.Q(costo_ajustado_bcv__gte=0)
+                    & models.Q(costo_unitario_snapshot__gte=0)
+                ),
+                name='costos_compra_no_negativos',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(descuento_aplicado__gte=0)
+                & models.Q(descuento_aplicado__lte=100),
+                name='descuento_compra_rango',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(iva_porcentaje__gte=0)
+                & models.Q(iva_porcentaje__lte=100),
+                name='iva_compra_rango',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.documento_compra.numero_interno} - {self.articulo.sku}"
@@ -1694,8 +1794,12 @@ class NotaEntrega(models.Model):
         verbose_name='Observaciones',
     )
 
-    objects = EmpresaManager()
-    global_objects = models.Manager()
+    # EST-02 fase 2 (ADR-35): mismo cierre de canal que MovimientoKardex (EST-01)
+    # — .update()/.bulk_update() no emiten señales → DocumentoInmutableError
+    # salvo kardex_bypass. from_queryset preserva el filtro de tenant de
+    # EmpresaManager; global_objects, sin tenant, bloquea igual.
+    objects = EmpresaManager.from_queryset(DocumentoQuerySet)()
+    global_objects = DocumentoQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Nota de Entrega'
@@ -1869,6 +1973,11 @@ class DetalleNotaEntrega(models.Model):
         verbose_name='IVA del Artículo (%) (Snapshot)',
         help_text='Snapshot del IVA tomado de la ficha del artículo al facturar.',
     )
+
+    # EST-02 fase 2 (ADR-35): modelo transitivo que NO declaraba manager — el
+    # default pasa a ser DocumentoQuerySet: .update()/.bulk_update() bloqueados
+    # salvo kardex_bypass (REQ-EST02-07). create()/bulk_create() siguen libres.
+    objects = DocumentoQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Detalle de Nota de Entrega'
@@ -2122,8 +2231,12 @@ class NotaCredito(models.Model):
     )
     fecha = models.DateTimeField(auto_now_add=True)
 
-    objects = EmpresaManager()
-    global_objects = models.Manager()
+    # EST-02 fase 2 (ADR-35): mismo cierre de canal que MovimientoKardex (EST-01)
+    # — .update()/.bulk_update() no emiten señales → DocumentoInmutableError
+    # salvo kardex_bypass. from_queryset preserva el filtro de tenant de
+    # EmpresaManager; global_objects, sin tenant, bloquea igual.
+    objects = EmpresaManager.from_queryset(DocumentoQuerySet)()
+    global_objects = DocumentoQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Nota de Crédito'
@@ -2281,10 +2394,11 @@ class DetalleNotaCredito(models.Model):
     fecha = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     # Modelo 'transitivo' (multi-tenant via FK a NotaCredito). El manager objects
-    # es Manager() estándar; la seguridad multi-tenant se enforces en services
-    # (`procesar_devolucion_*` valida empresa_id manualmente).
-    objects = models.Manager()
-    global_objects = models.Manager()
+    # es plano (sin filtro de tenant; la seguridad se enforces en services,
+    # `procesar_devolucion_*` valida empresa_id manualmente) PERO desde EST-02
+    # fase 2 (ADR-35) es DocumentoQuerySet: bloquea .update()/.bulk_update().
+    objects = DocumentoQuerySet.as_manager()
+    global_objects = DocumentoQuerySet.as_manager()
 
     class Meta:
         verbose_name = 'Detalle de Nota de Crédito'
@@ -2296,6 +2410,29 @@ class DetalleNotaCredito(models.Model):
                     | models.Q(detalle_origen_venta__isnull=True, detalle_origen_compra__isnull=False)
                 ),
                 name='detalle_nc_un_origen_exacto',
+            ),
+            # DATA-08 (extensión): rangos monetarios a nivel de BD. Los
+            # services ya validan (procesar_devolucion_*), pero
+            # bulk_create()/SQL crudo saltan esa capa.
+            models.CheckConstraint(
+                condition=models.Q(cantidad_devuelta__gt=0),
+                name='cantidad_devuelta_positiva',
+            ),
+            # Los 4 montos en UNA constraint combinada: un reembolso
+            # negativo no es una devolución, es un cargo mal persistido.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(precio_unitario_snapshot__gte=0)
+                    & models.Q(subtotal_devuelto_usd__gte=0)
+                    & models.Q(iva_usd__gte=0)
+                    & models.Q(linea_total_usd__gte=0)
+                ),
+                name='montos_nc_no_negativos',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(iva_porcentaje_snapshot__gte=0)
+                & models.Q(iva_porcentaje_snapshot__lte=100),
+                name='iva_nc_rango',
             ),
         ]
 

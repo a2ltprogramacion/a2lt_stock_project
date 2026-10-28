@@ -55,10 +55,12 @@ from django.test import TestCase
 
 from inventory import services as svc
 from inventory.admin import DetalleNotaEntregaInline
+from inventory.kardex_guard import kardex_bypass
 from inventory.models import (
     Articulo,
     ConfiguracionEmpresa,
     Contacto,
+    DetalleDocumentoCompra,
     DetalleNotaCredito,
     DetalleNotaEntrega,
     DocumentoCompra,
@@ -572,3 +574,196 @@ class TestNotaCreditoPreCreate(CabecerasInmutablesBase):
         nc_fresca.save()
         nc_fresca.refresh_from_db()
         self.assertEqual(nc_fresca.monto_total_reembolso, esperado_venta)
+
+
+class TestFase2UpdateBloqueado(CabecerasInmutablesBase):
+    """EST-02 fase 2 (ADR-35) — cierre del canal masivo .update()/.bulk_update().
+
+    La señal pre_save de EST-02 NO corre en ``.update()`` ni ``.bulk_update()``
+    (doc Django: las vías masivas no emiten señales) → hasta aquí un
+    ``DetalleNotaEntrega.objects.filter(pk=…).update(precio_base=999)`` mutaba
+    la fila emitida SIN pasar por la matriz (riesgo residual documentado en
+    ADR-35, verificado). Se replica el patrón ``KardexQuerySet`` de EST-01:
+    el bloqueo es del CANAL, no del campo — por eso el ``.update(estado=…)``
+    de una cabecera (campo SÍ mutable de la matriz vía services.reversar_*)
+    también se bloquea. El escape hatch es el MISMO ``kardex_bypass``
+    compartido (REQ-EST02-07), y el canal CREATE (create/bulk_create de filas
+    NUEVAS) queda abierto: la señal exonera CREATE (pk is None).
+    """
+
+    def setUp(self):
+        super().setUp()
+        # NC + DetalleNotaCredito vía el camino legítimo (patrón TestDetallesInmutables).
+        det = self.nota.detalles.first()
+        resp = svc.procesar_devolucion_venta(
+            self.empresa.pk,
+            self.nota.pk,
+            [{'detalle_id': det.pk, 'cantidad_devolver': Decimal('1')}],
+            motivo='fixture EST-02 fase 2',
+        )
+        self.nc = NotaCredito.objects.get(pk=resp['nc_id'])
+        self.det_nc = DetalleNotaCredito.objects.get(
+            pk=resp['detalles_ids'][0],
+        )
+        self.detalle = DetalleNotaEntrega.objects.get(pk=det.pk)
+        self.det_compra = DetalleDocumentoCompra.objects.get(
+            pk=self.compra.detalles.first().pk,
+        )
+
+    def _seis_documentos(self):
+        """(Modelo, instancia, campo, valor) de los 6 documentos emitidos.
+
+        Cabeceras: campo DE LA MATRIZ (``estado``) — demuestra que el
+        bloqueo es del canal ``.update()``, no del campo. Líneas: el
+        snapshot histórico del ADR-35 (la matriz de líneas es vacía).
+        """
+        return [
+            (NotaEntrega, self.nota, 'estado', 'ANULADO'),
+            (DocumentoCompra, self.compra, 'estado', 'ANULADO'),
+            (NotaCredito, self.nc, 'estado', 'ANULADO'),
+            (DetalleNotaEntrega, self.detalle, 'precio_base', Decimal('999')),
+            (DetalleDocumentoCompra, self.det_compra, 'costo_base', Decimal('999')),
+            (DetalleNotaCredito, self.det_nc, 'precio_unitario_snapshot', Decimal('999')),
+        ]
+
+    def test_update_bloqueado_en_los_6_modelos(self):
+        """``.update()`` vía objects queda bloqueado en los 6 modelos:
+        DocumentoInmutableError y la fila intacta — incluso mutando
+        ``estado``, campo que la matriz SÍ permite vía services.reversar_*."""
+        for modelo, instancia, campo, valor in self._seis_documentos():
+            original = getattr(instancia, campo)
+            with self.subTest(modelo=modelo.__name__):
+                with self.assertRaises(DocumentoInmutableError):
+                    modelo.objects.filter(pk=instancia.pk).update(**{campo: valor})
+                instancia.refresh_from_db()
+                self.assertEqual(
+                    getattr(instancia, campo), original,
+                    'la fila emitida queda intacta: el raise es previo al SQL',
+                )
+
+    def test_update_bloqueado_en_global_objects(self):
+        """Cierre del bypass por manager global (mismo que EST-01 hizo con
+        kardex): sin filtro de tenant el canal también está cerrado.
+        DetalleNotaEntrega no define global_objects (transitivo) → 5 de 6."""
+        for modelo, instancia, campo, valor in self._seis_documentos():
+            if not hasattr(modelo, 'global_objects'):
+                continue
+            original = getattr(instancia, campo)
+            with self.subTest(modelo=modelo.__name__):
+                with self.assertRaises(DocumentoInmutableError):
+                    modelo.global_objects.filter(pk=instancia.pk).update(
+                        **{campo: valor},
+                    )
+                instancia.refresh_from_db()
+                self.assertEqual(
+                    getattr(instancia, campo), original,
+                    'la fila emitida queda intacta',
+                )
+
+    def test_bypass_permite_update(self):
+        """REQ-EST02-07: el escape hatch COMPARTIDO kardex_bypass es la única
+        vía de mutación masiva (contrato legítimo, WARNING audible al entrar)."""
+        with kardex_bypass('fixture EST-02 fase 2: update masivo autorizado'):
+            filas = NotaEntrega.objects.filter(pk=self.nota.pk).update(
+                estado='ANULADO',
+            )
+            self.assertEqual(filas, 1, 'el update con bypass toca la fila real')
+            self.nota.refresh_from_db()
+            self.assertEqual(self.nota.estado, 'ANULADO')
+
+            filas = DetalleNotaEntrega.objects.filter(pk=self.detalle.pk).update(
+                precio_base=Decimal('999'),
+            )
+            self.assertEqual(filas, 1)
+            self.detalle.refresh_from_db()
+            self.assertEqual(self.detalle.precio_base, Decimal('999'))
+
+    def test_bulk_update_bloqueado(self):
+        """La otra vía masiva sin señales: bulk_update() bloqueado en los 6;
+        con bypass pasa y muta (canal de escape verificado de punta a punta)."""
+        for modelo, instancia, campo, valor in self._seis_documentos():
+            original = getattr(instancia, campo)
+            setattr(instancia, campo, valor)
+            with self.subTest(modelo=modelo.__name__):
+                with self.assertRaises(DocumentoInmutableError):
+                    modelo.objects.bulk_update([instancia], [campo])
+                instancia.refresh_from_db()
+                self.assertEqual(
+                    getattr(instancia, campo), original,
+                    'la fila emitida queda intacta',
+                )
+
+        with kardex_bypass('fixture EST-02 fase 2: bulk_update autorizado'):
+            self.nota.estado = 'ANULADO'
+            NotaEntrega.objects.bulk_update([self.nota], ['estado'])
+            self.nota.refresh_from_db()
+            self.assertEqual(self.nota.estado, 'ANULADO')
+
+    def test_crear_sigue_siendo_legal(self):
+        """Regresión: solo se bloquea la MUTACIÓN masiva de filas emitidas.
+        El canal CREATE (create()/bulk_create() de filas NUEVAS) queda
+        abierto — la señal pre_save exonera CREATE y el QuerySet no lo toca."""
+        ne = NotaEntrega.objects.create(
+            empresa=self.empresa, numero=999, almacen=self.almacen,
+        )
+        dc = DocumentoCompra.objects.create(
+            empresa=self.empresa, proveedor=self.proveedor,
+            monto_total_usd=Decimal('1'),
+        )
+        nc = NotaCredito.objects.create(
+            empresa=self.empresa, nota_entrega=ne, motivo='NC fase 2 legal',
+            monto_total_reembolso=Decimal('1'),
+        )
+        dne = DetalleNotaEntrega.objects.create(
+            nota_entrega=ne, articulo=self.articulo,
+            almacen=self.almacen, cantidad=Decimal('1'),
+        )
+        ddc = DetalleDocumentoCompra.objects.create(
+            documento_compra=dc, articulo=self.articulo, almacen=self.almacen,
+            cantidad=Decimal('1'), costo_base=Decimal('1'),
+            costo_ajustado=Decimal('1'), costo_directo_bcv=Decimal('1'),
+            costo_ajustado_bcv=Decimal('1'),
+        )
+        dnc = DetalleNotaCredito.objects.create(
+            nota_credito=nc, articulo=self.articulo, detalle_origen_venta=dne,
+            cantidad_devuelta=Decimal('1'),
+        )
+        for instancia, nombre in (
+            (ne, 'NotaEntrega'), (dc, 'DocumentoCompra'), (nc, 'NotaCredito'),
+            (dne, 'DetalleNotaEntrega'), (ddc, 'DetalleDocumentoCompra'),
+            (dnc, 'DetalleNotaCredito'),
+        ):
+            with self.subTest(create=nombre):
+                self.assertIsNotNone(instancia.pk, 'la fila nueva persiste')
+
+        # bulk_create(): sin señales y SIN bloqueo — canal legal de líneas
+        # nuevas, incluido el manager compuesto de DDC (para_empresa intacto).
+        creados_dne = DetalleNotaEntrega.objects.bulk_create([
+            DetalleNotaEntrega(
+                nota_entrega=ne, articulo=self.articulo,
+                almacen=self.almacen, cantidad=Decimal('2'),
+            ),
+            DetalleNotaEntrega(
+                nota_entrega=ne, articulo=self.articulo,
+                almacen=self.almacen, cantidad=Decimal('3'),
+            ),
+        ])
+        self.assertEqual(len([c for c in creados_dne if c.pk]), 2)
+
+        creados_ddc = DetalleDocumentoCompra.objects.bulk_create([
+            DetalleDocumentoCompra(
+                documento_compra=dc, articulo=self.articulo,
+                almacen=self.almacen, cantidad=Decimal('2'),
+                costo_base=Decimal('1'), costo_ajustado=Decimal('1'),
+                costo_directo_bcv=Decimal('1'), costo_ajustado_bcv=Decimal('1'),
+            ),
+        ])
+        self.assertEqual(len([c for c in creados_ddc if c.pk]), 1)
+
+        creados_dnc = DetalleNotaCredito.objects.bulk_create([
+            DetalleNotaCredito(
+                nota_credito=nc, articulo=self.articulo,
+                detalle_origen_venta=dne, cantidad_devuelta=Decimal('1'),
+            ),
+        ])
+        self.assertEqual(len([c for c in creados_dnc if c.pk]), 1)
