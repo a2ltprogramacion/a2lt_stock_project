@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Impresión de Nota NE-{{ nota.numero|stringformat:"05d" }}</title>
-    <!-- SEC-05: SRI pineado; actualizar hash al cambiar de version -->
-    <script src="https://cdn.tailwindcss.com/3.4.17" integrity="sha384-igm5BeiBt36UU4gqwWS7imYmelpTsZlQ45FZf+XBn9MuJbn4nQr7yx1yFydocC/K" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- SEC-05: sin SRI — cdn.tailwindcss.com NO envía ACAO (verificado 2026-10-27): -->
+    <!-- crossorigin/SRI es imposible ahí y ROMPE la carga en navegadores reales. -->
+    <!-- Riesgo residual: versión pineada 3.4.17 + CSP (script-src acota el origen); -->
+    <!-- cierre definitivo: build local de Tailwind (backlog). -->
+    <script src="https://cdn.tailwindcss.com/3.4.17" referrerpolicy="no-referrer"></script>
     <style>
         /* Forzamos el salto de página y las dimensiones si es necesario */
         @media print {

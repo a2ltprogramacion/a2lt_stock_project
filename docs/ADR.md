@@ -560,6 +560,15 @@ reworkados y 6 nuevos — gate estático, nonce header==scripts, nonces
 distintos, default report-only, flip enforce, eliminaciones
 estructurales). `test_templates_sri.py` intacto.
 
+**Actualización (2026-10-27):** el SRI del script de Tailwind fue
+removido — `cdn.tailwindcss.com` no envía
+`Access-Control-Allow-Origin` (verificado con Invoke-WebRequest/curl
+con y sin `Origin`), lo que hace imposible `crossorigin`/SRI y
+bloqueaba la carga en navegadores reales. La versión sigue pineada
+(`3.4.17`) y `script-src` de la CSP acota el origen; el cierre
+definitivo del riesgo es el build local de Tailwind (backlog). El SRI
+de jsDelivr se conserva (envía `ACAO: *`).
+
 ---
 
 ## ADR-33: Usuario forense: FK global a User + snapshot usuario_nombre
